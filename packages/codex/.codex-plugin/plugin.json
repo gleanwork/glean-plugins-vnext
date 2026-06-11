@@ -1,5 +1,5 @@
 {
-  "name": "glean-codex",
+  "name": "glean-experimental-codex",
   "version": "0.2.11",
   "description": "Glean Codex plugin for discovering skills and running tools.",
   "author": {

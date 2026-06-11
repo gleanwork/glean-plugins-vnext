@@ -6,7 +6,7 @@ marketplace.
 
 Today it ships one plugin:
 
-- **`glean`** — adds two static tools, `find_skills` and `run_tool`, that
+- **`glean-experimental`** — adds two static tools, `find_skills` and `run_tool`, that
   let the agent discover Glean-hosted skills for enterprise apps (Jira, Slack,
   Google Workspace, Salesforce, etc.) and invoke their downstream tools via
   Glean's MCP gateway. Once the user has authenticated, the plugin also
@@ -19,16 +19,16 @@ Today it ships one plugin:
 ### Claude Code (terminal)
 
 ```
-/plugin marketplace add askscio/glean-plugins-internal
-/plugin install glean@glean-plugins-internal
+/plugin marketplace add gleanwork/glean-experimental-plugins
+/plugin install glean-experimental@glean-experimental-plugins
 ```
 
 ### Claude Cowork (desktop)
 
 1. Open the plugin picker.
 2. Click **Add marketplace**, choose **GitHub**, and enter
-   `askscio/glean-plugins-internal`.
-3. Once the marketplace syncs, install the **glean** plugin from it.
+   `gleanwork/glean-experimental-plugins`.
+3. Once the marketplace syncs, install the **glean-experimental** plugin from it.
 
 ## First run
 
@@ -42,7 +42,7 @@ expires.
 
 ```
 # Claude Code
-/plugin marketplace update glean-plugins-internal
+/plugin marketplace update glean-experimental-plugins
 
 # Cowork: the plugin picker has a "Sync" / "Check for updates"
 # button on the marketplace entry.
@@ -54,12 +54,12 @@ You can point the marketplace at a specific git branch, tag, or commit:
 
 ```bash
 # Install from a specific branch (e.g. a PR branch)
-/plugin marketplace add askscio/glean-plugins-internal@branch-name
-/plugin install glean@glean-plugins-internal
+/plugin marketplace add gleanwork/glean-experimental-plugins@branch-name
+/plugin install glean-experimental@glean-experimental-plugins
 
 # Or update an existing marketplace to a different branch
-/plugin marketplace remove glean-plugins-internal
-/plugin marketplace add askscio/glean-plugins-internal@branch-name
+/plugin marketplace remove glean-experimental-plugins
+/plugin marketplace add gleanwork/glean-experimental-plugins@branch-name
 ```
 
 You can also pin to a branch in `settings.json`:
@@ -68,8 +68,8 @@ You can also pin to a branch in `settings.json`:
 {
   "marketplaces": [
     {
-      "name": "glean-plugins-internal",
-      "source": "https://github.com/askscio/glean-plugins-internal",
+      "name": "glean-experimental-plugins",
+      "source": "https://github.com/gleanwork/glean-experimental-plugins",
       "sourceType": "git",
       "branch": "mohit-baseline-marketplace-layout"
     }
@@ -80,7 +80,7 @@ You can also pin to a branch in `settings.json`:
 For local development, point the marketplace at your local checkout instead:
 
 ```bash
-/plugin marketplace add /path/to/glean-plugins-internal
+/plugin marketplace add /path/to/glean-experimental-plugins
 ```
 
 Then just `git checkout` whichever branch you want to test.

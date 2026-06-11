@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "glean-codex",
+      "name": "glean-experimental-codex",
       "source": {
         "source": "local",
         "path": "./packages/codex"
