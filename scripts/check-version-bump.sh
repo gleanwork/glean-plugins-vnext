@@ -14,15 +14,27 @@ if ! git diff --name-only "$BASE_REF"...HEAD | grep -qE "$PLUGIN_PATHS"; then
   exit 0
 fi
 
-PLUGIN_VERSION=$(node -p "require('./plugins/glean/.claude-plugin/plugin.json').version")
-BASE_VERSION=$(git show "$BASE_REF":plugins/glean/.claude-plugin/plugin.json | node -p "JSON.parse(require('fs').readFileSync('/dev/stdin','utf-8')).version")
-
-# Validate both versions are valid semver triplets (x.y.z).
+PLUGIN_MANIFEST="plugins/glean/.claude-plugin/plugin.json"
 SEMVER_RE='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
+# Current version from the working tree.
+PLUGIN_VERSION=$(node -p "require('./$PLUGIN_MANIFEST').version")
 if ! [[ "$PLUGIN_VERSION" =~ $SEMVER_RE ]]; then
   echo "ERROR: Current version '$PLUGIN_VERSION' is not a valid semver triplet (x.y.z)."
   exit 1
 fi
+
+# Base version from the base ref. The manifest may not exist there yet — e.g. the
+# plugin is being introduced for the first time, or the base branch predates it.
+# There is then no prior version to bump from, so the check passes. Capturing the
+# blob separately (instead of piping git into node) keeps `set -o pipefail` from
+# turning a missing path into an opaque JSON parse error.
+if ! BASE_PLUGIN_JSON=$(git show "$BASE_REF:$PLUGIN_MANIFEST" 2>/dev/null); then
+  echo "Plugin manifest not present on $BASE_REF — new plugin, skipping version-bump check (current version: $PLUGIN_VERSION)."
+  exit 0
+fi
+
+BASE_VERSION=$(node -p "JSON.parse(require('fs').readFileSync(0,'utf-8')).version" <<<"$BASE_PLUGIN_JSON")
 if ! [[ "$BASE_VERSION" =~ $SEMVER_RE ]]; then
   echo "ERROR: Base version '$BASE_VERSION' is not a valid semver triplet (x.y.z)."
   exit 1
