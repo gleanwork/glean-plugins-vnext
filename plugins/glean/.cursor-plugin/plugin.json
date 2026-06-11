@@ -1,5 +1,5 @@
 {
-  "name": "glean-cursor-plugin",
+  "name": "glean-experimental-cursor",
   "displayName": "Glean Cursor",
   "version": "0.2.15",
   "description": "Search and act across your company's apps — Jira, Slack, Salesforce, Google Workspace, and more — without leaving Cursor.",

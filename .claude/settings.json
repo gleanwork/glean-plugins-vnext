@@ -1,5 +1,5 @@
 {
   "enabledPlugins": {
-    "glean@glean-plugins-internal": true
+    "glean-experimental@glean-experimental-plugins": true
   }
 }

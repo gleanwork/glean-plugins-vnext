@@ -1,11 +1,11 @@
 {
-  "name": "glean-plugins-internal",
+  "name": "glean-experimental-plugins",
   "owner": {
     "name": "Glean"
   },
   "plugins": [
     {
-      "name": "glean",
+      "name": "glean-experimental",
       "source": "./plugins/glean",
       "description": "Glean plugin for discovering skills and running tools."
     }
