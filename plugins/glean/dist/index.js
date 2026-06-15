@@ -31018,8 +31018,8 @@ async function handleFindSkills(remoteClient, skillsBaseDir, args) {
 // src/tools/run-tool.ts
 import fs4 from "node:fs/promises";
 import path4 from "node:path";
-var HITL_ENABLED = process.env.ENABLE_HITL === "true";
 var DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
+var defaultHitlTimeoutMs = 3e5;
 var FileArgsError = class extends Error {
   constructor(message) {
     super(message);
@@ -31031,6 +31031,12 @@ function fileArgsMaxBytes() {
   if (!raw) return DEFAULT_FILE_ARG_MAX_BYTES;
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_FILE_ARG_MAX_BYTES;
+}
+function hitlTimeoutMs() {
+  const raw = process.env.HITL_TIMEOUT_MS;
+  if (!raw) return defaultHitlTimeoutMs;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultHitlTimeoutMs;
 }
 async function resolveFileArgs(fileArgs, baseArgs) {
   if (fileArgs === void 0 || fileArgs === null) return baseArgs;
@@ -31099,6 +31105,25 @@ async function findToolJson(skillsBaseDir, toolName) {
   }
   return null;
 }
+function isCursorClient(mcpServer) {
+  return (mcpServer.getClientVersion()?.name ?? "").toLowerCase().startsWith("cursor");
+}
+function formatArguments(args) {
+  if (args == null || typeof args === "object" && Object.keys(args).length === 0) {
+    return "(none)";
+  }
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch {
+    return String(args);
+  }
+}
+function buildApprovalMessage(mcpServer, toolName, args) {
+  if (isCursorClient(mcpServer)) {
+    return `Review the tool and arguments shown above, then accept to run "${toolName}" or decline to cancel.`;
+  }
+  return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
+}
 async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
   const serverId = args.server_id;
   const toolName = args.tool_name;
@@ -31110,21 +31135,20 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
       isError: true
     };
   }
-  if (HITL_ENABLED && mcpServer.getClientCapabilities()?.elicitation) {
+  const hitlEnabled = process.env.ENABLE_HITL === "true";
+  if (hitlEnabled && mcpServer.getClientCapabilities()?.elicitation) {
     const toolMeta = await findToolJson(skillsBaseDir, toolName);
     if (toolMeta?.requires_approval) {
-      const message = [
-        `**Action: ${toolName}**`,
-        toolMeta.description ? `${toolMeta.description}` : "",
-        `Server: ${serverId}`,
-        "",
-        "Accept to execute, or decline to cancel."
-      ].filter(Boolean).join("\n");
+      const message = buildApprovalMessage(mcpServer, toolName, args.arguments);
+      const timeout = hitlTimeoutMs();
       try {
-        const result = await mcpServer.elicitInput({
-          message,
-          requestedSchema: { type: "object", properties: {} }
-        });
+        const result = await mcpServer.elicitInput(
+          {
+            message,
+            requestedSchema: { type: "object", properties: {} }
+          },
+          { timeout }
+        );
         if (result.action !== "accept") {
           return {
             content: [
@@ -31135,7 +31159,17 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
             ]
           };
         }
-      } catch {
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Action ${toolName} was not approved \u2014 the approval request failed (${detail}). The action was NOT executed. Ask the user to confirm, then retry.`
+            }
+          ],
+          isError: true
+        };
       }
     }
   }

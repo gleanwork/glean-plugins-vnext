@@ -5,8 +5,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
 
-const HITL_ENABLED = process.env.ENABLE_HITL === "true";
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
+
+// How long a user has to respond to an approval prompt. The MCP SDK's own
+// request timeout is 60s and, on expiry, elicitInput REJECTS — so unless we
+// pass an explicit (longer) value the prompt errors out from under the user.
+const defaultHitlTimeoutMs = 300_000;
 
 export class FileArgsError extends Error {
   constructor(message: string) {
@@ -22,6 +26,13 @@ function fileArgsMaxBytes(): number {
   return Number.isFinite(parsed) && parsed > 0
     ? parsed
     : DEFAULT_FILE_ARG_MAX_BYTES;
+}
+
+function hitlTimeoutMs(): number {
+  const raw = process.env.HITL_TIMEOUT_MS;
+  if (!raw) return defaultHitlTimeoutMs;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultHitlTimeoutMs;
 }
 
 /**
@@ -121,6 +132,44 @@ async function findToolJson(
   return null;
 }
 
+// A stdio server's only client signal is clientInfo.name. Cursor reports
+// "cursor-vscode" and already renders the tool name + arguments in its own
+// expandable UI, so its approval prompt only needs a one-line review ask.
+function isCursorClient(mcpServer: Server): boolean {
+  return (mcpServer.getClientVersion()?.name ?? "")
+    .toLowerCase()
+    .startsWith("cursor");
+}
+
+function formatArguments(args: unknown): string {
+  if (
+    args == null ||
+    (typeof args === "object" && Object.keys(args as object).length === 0)
+  ) {
+    return "(none)";
+  }
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch {
+    return String(args);
+  }
+}
+
+// Plain text, NOT Markdown: Claude Code does not reliably render Markdown in
+// elicitation prompts, so bold/headings would leak as literal characters.
+function buildApprovalMessage(
+  mcpServer: Server,
+  toolName: string,
+  args: unknown,
+): string {
+  if (isCursorClient(mcpServer)) {
+    return `Review the tool and arguments shown above, then accept to run "${toolName}" or decline to cancel.`;
+  }
+
+  // Claude Code: action name and arguments only.
+  return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
+}
+
 export async function handleRunTool(
   remoteClient: Client,
   mcpServer: Server,
@@ -139,25 +188,22 @@ export async function handleRunTool(
     };
   }
 
-  if (HITL_ENABLED && mcpServer.getClientCapabilities()?.elicitation) {
+  const hitlEnabled = process.env.ENABLE_HITL === "true";
+  if (hitlEnabled && mcpServer.getClientCapabilities()?.elicitation) {
     const toolMeta = await findToolJson(skillsBaseDir, toolName);
 
     if (toolMeta?.requires_approval) {
-      const message = [
-        `**Action: ${toolName}**`,
-        toolMeta.description ? `${toolMeta.description}` : "",
-        `Server: ${serverId}`,
-        "",
-        "Accept to execute, or decline to cancel.",
-      ]
-        .filter(Boolean)
-        .join("\n");
+      const message = buildApprovalMessage(mcpServer, toolName, args.arguments);
+      const timeout = hitlTimeoutMs();
 
       try {
-        const result = await mcpServer.elicitInput({
-          message,
-          requestedSchema: { type: "object", properties: {} } as any,
-        });
+        const result = await mcpServer.elicitInput(
+          {
+            message,
+            requestedSchema: { type: "object", properties: {} } as any,
+          },
+          { timeout },
+        );
 
         if (result.action !== "accept") {
           return {
@@ -169,8 +215,20 @@ export async function handleRunTool(
             ],
           };
         }
-      } catch {
-        // Fall through to execute without approval on elicitation failure
+      } catch (err) {
+        // Fail CLOSED. An approval gate that executes the action when the
+        // prompt times out or errors defeats its own purpose — and the SDK
+        // rejects elicitInput precisely on request timeout.
+        const detail = err instanceof Error ? err.message : String(err);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Action ${toolName} was not approved — the approval request failed (${detail}). The action was NOT executed. Ask the user to confirm, then retry.`,
+            },
+          ],
+          isError: true,
+        };
       }
     }
   }

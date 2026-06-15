@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -6,6 +6,7 @@ import {
   resolveFileArgs,
   buildRemoteArgs,
   FileArgsError,
+  handleRunTool,
 } from "../src/tools/run-tool.js";
 
 describe("resolveFileArgs", () => {
@@ -157,5 +158,185 @@ describe("buildRemoteArgs", () => {
       tool_name: "tool",
       arguments: { response_format: "detailed" },
     });
+  });
+});
+
+function makeRemote() {
+  return {
+    callTool: vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+    }),
+    close: vi.fn(),
+  } as any;
+}
+
+function makeServer(opts: {
+  elicitation?: boolean;
+  clientName?: string;
+  elicit?: ReturnType<typeof vi.fn>;
+}) {
+  return {
+    getClientCapabilities: vi
+      .fn()
+      .mockReturnValue(opts.elicitation ? { elicitation: {} } : {}),
+    getClientVersion: vi
+      .fn()
+      .mockReturnValue({ name: opts.clientName ?? "claude-code", version: "1" }),
+    elicitInput: opts.elicit ?? vi.fn().mockResolvedValue({ action: "accept" }),
+  } as any;
+}
+
+async function writeToolJson(
+  baseDir: string,
+  toolName: string,
+  meta: Record<string, unknown>,
+) {
+  const toolsDir = path.join(baseDir, "some-skill", "tools");
+  await fs.mkdir(toolsDir, { recursive: true });
+  await fs.writeFile(
+    path.join(toolsDir, `${toolName}.json`),
+    JSON.stringify(meta),
+    "utf-8",
+  );
+}
+
+describe("handleRunTool (HITL)", () => {
+  let tmpDir: string;
+  const baseArgs = {
+    server_id: "composio/jira-pack",
+    tool_name: "jirasearch",
+    arguments: { project: "ABC", summary: "fix login" },
+  };
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "run-tool-hitl-test-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("does not elicit when the client lacks elicitation capability", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const server = makeServer({ elicitation: false });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(server.elicitInput).not.toHaveBeenCalled();
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not elicit when the tool does not require approval", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const server = makeServer({ elicitation: true });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: false });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(server.elicitInput).not.toHaveBeenCalled();
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("prompts with action name + arguments and forwards on accept", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", {
+      requires_approval: true,
+      description: "Search Jira issues",
+    });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    const [params, options] = elicit.mock.calls[0];
+    expect(params.message).toContain("Action: jirasearch");
+    expect(params.message).toContain('"project": "ABC"');
+    expect(params.message).not.toContain("Server:");
+    expect(params.message).not.toContain("Search Jira issues");
+    expect(params.message).not.toContain("**");
+    expect(options.timeout).toBe(300_000);
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors the HITL_TIMEOUT_MS override", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("HITL_TIMEOUT_MS", "5000");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit.mock.calls[0][1].timeout).toBe(5000);
+  });
+
+  it("falls back to the default timeout for invalid HITL_TIMEOUT_MS", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    for (const bad of ["0", "-1", "abc", ""]) {
+      vi.stubEnv("HITL_TIMEOUT_MS", bad);
+      const remote = makeRemote();
+      const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+      const server = makeServer({ elicitation: true, elicit });
+
+      await handleRunTool(remote, server, tmpDir, baseArgs);
+
+      expect(elicit.mock.calls[0][1].timeout).toBe(300_000);
+    }
+  });
+
+  it("does not execute when the user declines", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "decline" });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(remote.callTool).not.toHaveBeenCalled();
+    expect((result.content[0] as { text: string }).text).toContain("declined");
+  });
+
+  it("fails closed and does NOT execute when elicitation times out", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockRejectedValue(new Error("Request timed out"));
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(remote.callTool).not.toHaveBeenCalled();
+    expect(result.isError).toBe(true);
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("not approved");
+    expect(text).toContain("NOT executed");
+  });
+
+  it("gives Cursor a one-line prompt without an arguments block", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    const message = elicit.mock.calls[0][0].message as string;
+    expect(message).toContain('accept to run "jirasearch"');
+    expect(message).not.toContain("Arguments:");
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
 });
