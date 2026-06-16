@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "glean-experimental",
+      "name": "glean-vnext",
       "source": "./plugins/glean",
       "description": "Glean plugin for discovering skills and running tools."
     }

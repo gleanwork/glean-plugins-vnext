@@ -6,7 +6,7 @@ marketplace.
 
 Today it ships one plugin:
 
-- **`glean-experimental`** — adds two static tools, `find_skills` and `run_tool`, that
+- **`glean-vnext`** — adds two static tools, `find_skills` and `run_tool`, that
   let the agent discover Glean-hosted skills for enterprise apps (Jira, Slack,
   Google Workspace, Salesforce, etc.) and invoke their downstream tools via
   Glean's MCP gateway. Once the user has authenticated, the plugin also
@@ -20,7 +20,7 @@ Today it ships one plugin:
 
 ```
 /plugin marketplace add gleanwork/glean-experimental-plugins
-/plugin install glean-experimental@glean-experimental-plugins
+/plugin install glean-vnext@glean-experimental-plugins
 ```
 
 ### Claude Cowork (desktop)
@@ -28,7 +28,7 @@ Today it ships one plugin:
 1. Open the plugin picker.
 2. Click **Add marketplace**, choose **GitHub**, and enter
    `gleanwork/glean-experimental-plugins`.
-3. Once the marketplace syncs, install the **glean-experimental** plugin from it.
+3. Once the marketplace syncs, install the **glean-vnext** plugin from it.
 
 ## First run
 
@@ -55,7 +55,7 @@ You can point the marketplace at a specific git branch, tag, or commit:
 ```bash
 # Install from a specific branch (e.g. a PR branch)
 /plugin marketplace add gleanwork/glean-experimental-plugins@branch-name
-/plugin install glean-experimental@glean-experimental-plugins
+/plugin install glean-vnext@glean-experimental-plugins
 
 # Or update an existing marketplace to a different branch
 /plugin marketplace remove glean-experimental-plugins

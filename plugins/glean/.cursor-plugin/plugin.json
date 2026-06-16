@@ -1,6 +1,6 @@
 {
-  "name": "glean-experimental-cursor",
-  "displayName": "Glean Cursor",
+  "name": "glean-vnext",
+  "displayName": "Glean vNext",
   "version": "0.2.19",
   "description": "Search and act across your company's apps — Jira, Slack, Salesforce, Google Workspace, and more — without leaving Cursor.",
   "author": {
