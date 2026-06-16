@@ -1,5 +1,5 @@
 {
   "enabledPlugins": {
-    "glean-vnext@glean-experimental-plugins": true
+    "glean-vnext@glean-plugins-vnext": true
   }
 }
