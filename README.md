@@ -6,7 +6,7 @@ marketplace.
 
 Today it ships one plugin:
 
-- **`glean-experimental`** — adds two static tools, `find_skills` and `run_tool`, that
+- **`glean-vnext`** — adds two static tools, `find_skills` and `run_tool`, that
   let the agent discover Glean-hosted skills for enterprise apps (Jira, Slack,
   Google Workspace, Salesforce, etc.) and invoke their downstream tools via
   Glean's MCP gateway. Once the user has authenticated, the plugin also
@@ -19,16 +19,16 @@ Today it ships one plugin:
 ### Claude Code (terminal)
 
 ```
-/plugin marketplace add gleanwork/glean-experimental-plugins
-/plugin install glean-experimental@glean-experimental-plugins
+/plugin marketplace add gleanwork/glean-plugins-vnext
+/plugin install glean-vnext@glean-plugins-vnext
 ```
 
 ### Claude Cowork (desktop)
 
 1. Open the plugin picker.
 2. Click **Add marketplace**, choose **GitHub**, and enter
-   `gleanwork/glean-experimental-plugins`.
-3. Once the marketplace syncs, install the **glean-experimental** plugin from it.
+   `gleanwork/glean-plugins-vnext`.
+3. Once the marketplace syncs, install the **glean-vnext** plugin from it.
 
 ## First run
 
@@ -42,7 +42,7 @@ expires.
 
 ```
 # Claude Code
-/plugin marketplace update glean-experimental-plugins
+/plugin marketplace update glean-plugins-vnext
 
 # Cowork: the plugin picker has a "Sync" / "Check for updates"
 # button on the marketplace entry.
@@ -54,12 +54,12 @@ You can point the marketplace at a specific git branch, tag, or commit:
 
 ```bash
 # Install from a specific branch (e.g. a PR branch)
-/plugin marketplace add gleanwork/glean-experimental-plugins@branch-name
-/plugin install glean-experimental@glean-experimental-plugins
+/plugin marketplace add gleanwork/glean-plugins-vnext@branch-name
+/plugin install glean-vnext@glean-plugins-vnext
 
 # Or update an existing marketplace to a different branch
-/plugin marketplace remove glean-experimental-plugins
-/plugin marketplace add gleanwork/glean-experimental-plugins@branch-name
+/plugin marketplace remove glean-plugins-vnext
+/plugin marketplace add gleanwork/glean-plugins-vnext@branch-name
 ```
 
 You can also pin to a branch in `settings.json`:
@@ -68,8 +68,8 @@ You can also pin to a branch in `settings.json`:
 {
   "marketplaces": [
     {
-      "name": "glean-experimental-plugins",
-      "source": "https://github.com/gleanwork/glean-experimental-plugins",
+      "name": "glean-plugins-vnext",
+      "source": "https://github.com/gleanwork/glean-plugins-vnext",
       "sourceType": "git",
       "branch": "mohit-baseline-marketplace-layout"
     }
@@ -80,7 +80,7 @@ You can also pin to a branch in `settings.json`:
 For local development, point the marketplace at your local checkout instead:
 
 ```bash
-/plugin marketplace add /path/to/glean-experimental-plugins
+/plugin marketplace add /path/to/glean-plugins-vnext
 ```
 
 Then just `git checkout` whichever branch you want to test.

@@ -1,6 +1,6 @@
 {
-  "name": "glean-experimental",
-  "version": "0.2.21",
+  "name": "glean-vnext",
+  "version": "0.2.22",
   "description": "Glean plugin for discovering skills and running tools.",
   "author": {
     "name": "Glean"

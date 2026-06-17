@@ -1,6 +1,6 @@
 {
-  "name": "glean-experimental-codex",
-  "version": "0.2.21",
+  "name": "glean-vnext",
+  "version": "0.2.22",
   "description": "Glean Codex plugin for discovering skills and running tools.",
   "author": {
     "name": "Glean"
@@ -8,7 +8,7 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Glean Codex",
+    "displayName": "Glean vNext",
     "websiteURL": "https://www.glean.com/home",
     "category": "Productivity",
     "defaultPrompt": [

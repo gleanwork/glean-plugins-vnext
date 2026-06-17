@@ -18,7 +18,7 @@ This repo ships `.agents/plugins/marketplace.json` pointing at `./packages/codex
 
 1. Open Codex with this repo as the workspace root.
 2. Open the plugin directory — Codex desktop: **Plugins**, Codex CLI: `/plugins`.
-3. Find **Glean for Codex (Local Repo)** and install `glean-experimental-codex`.
+3. Find **Glean for Codex (Local Repo)** and install `glean-vnext`.
 4. Restart Codex if the marketplace doesn't appear immediately.
 
 Before the first install from a fresh checkout, run `npm run build` once so

@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "glean-experimental-codex",
+      "name": "glean-vnext",
       "source": {
         "source": "local",
         "path": "./packages/codex"
