@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "glean": {
+    "glean-local-mcp": {
       "command": "bash",
       "args": ["${CLAUDE_PLUGIN_ROOT}/start.sh"],
       "env": {

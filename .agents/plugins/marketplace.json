@@ -1,14 +1,14 @@
 {
-  "name": "glean-codex-local",
+  "name": "glean-plugins-vnext",
   "interface": {
-    "displayName": "Glean for Codex (Local Repo)"
+    "displayName": "Glean Plugins vNext"
   },
   "plugins": [
     {
       "name": "glean-vnext",
       "source": {
         "source": "local",
-        "path": "./packages/codex"
+        "path": "./plugins/glean"
       },
       "policy": {
         "installation": "AVAILABLE",
