@@ -1,1 +1,2 @@
-plugins/glean/dist/** linguist-generated=true
+packages/codex/dist/** linguist-generated=true -diff
+plugins/glean/dist/** linguist-generated=true -diff
