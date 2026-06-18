@@ -163,7 +163,7 @@ function buildApprovalMessage(
   args: unknown,
 ): string {
   if (isCursorClient(mcpServer)) {
-    return `Review the tool and arguments shown above, then accept to run "${toolName}" or decline to cancel.`;
+    return `Review the tool and arguments shown above, click on Submit to allow and Cancel to deny.`;
   }
 
   // Claude Code: action name and arguments only.

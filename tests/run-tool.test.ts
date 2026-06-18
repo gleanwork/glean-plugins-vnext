@@ -336,7 +336,7 @@ describe("handleRunTool (HITL)", () => {
     await handleRunTool(remote, server, tmpDir, baseArgs);
 
     const message = elicit.mock.calls[0][0].message as string;
-    expect(message).toContain('accept to run "jirasearch"');
+    expect(message).toContain("Submit to allow and Cancel to deny");
     expect(message).not.toContain("Arguments:");
     expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
