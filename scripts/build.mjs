@@ -17,7 +17,6 @@
 //     should stay readable for debugging
 
 import { build } from "esbuild";
-import { copyFile, mkdir } from "node:fs/promises";
 import { builtinModules } from "node:module";
 
 const nodeBuiltins = [
@@ -54,9 +53,3 @@ await build({
   conditions: ["import", "node", "default"],
   mainFields: ["module", "main"],
 });
-
-// Mirror the bundle into the codex package dist/ directory. Codex copies
-// plugins into a cache dir that doesn't preserve symlinks, so it needs a
-// real file on disk. One canonical build keeps all copies in sync.
-await mkdir("packages/codex/dist", { recursive: true });
-await copyFile("plugins/glean/dist/index.js", "packages/codex/dist/index.js");
