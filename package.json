@@ -21,5 +21,9 @@
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"
+  },
+  "//overrides": "Pin hono>=4.12.25 to bypass CVE-2026-54290 (transitive dep from @modelcontextprotocol/sdk)",
+  "overrides": {
+    "hono": "^4.12.25"
   }
 }
