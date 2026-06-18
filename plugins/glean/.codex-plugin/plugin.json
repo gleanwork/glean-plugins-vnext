@@ -6,7 +6,7 @@
     "name": "Glean"
   },
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
+  "mcpServers": "./.mcp.codex.json",
   "interface": {
     "displayName": "Glean vNext",
     "websiteURL": "https://www.glean.com/home",
