@@ -1,12 +1,12 @@
 {
   "name": "glean-vnext",
-  "version": "0.2.21",
+  "version": "0.2.23",
   "description": "Glean Codex plugin for discovering skills and running tools.",
   "author": {
     "name": "Glean"
   },
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json",
+  "mcpServers": "./.mcp.codex.json",
   "interface": {
     "displayName": "Glean vNext",
     "websiteURL": "https://www.glean.com/home",

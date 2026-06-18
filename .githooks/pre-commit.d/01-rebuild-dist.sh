@@ -15,4 +15,4 @@ if [ ! -d node_modules ] || [ -L node_modules ]; then
 fi
 
 npm run build --silent
-git add plugins/glean/dist/index.js packages/codex/dist/index.js
+git add plugins/glean/dist/index.js
