@@ -38,10 +38,15 @@ function makeCtx(overrides: Partial<DispatchContext> = {}): DispatchContext {
 }
 
 describe("REMOTE_TOOLS_ALLOWLIST", () => {
-  it("contains exactly search and read_document (chat is excluded while broken)", () => {
+  it("contains the promoted Glean remote tools", () => {
     expect([...REMOTE_TOOLS_ALLOWLIST].sort()).toEqual([
+      "chat",
+      "employee_search",
+      "memory",
+      "memory_schema",
       "read_document",
       "search",
+      "user_activity",
     ]);
   });
 });
@@ -103,7 +108,7 @@ describe("fetchAllowedRemoteTools", () => {
     const client = clientWithPages([
       {
         tools: [
-          { name: "chat", description: "Chat (excluded)", inputSchema: { type: "object", properties: {}, required: [] } },
+          { name: "not_allowed", description: "Excluded", inputSchema: { type: "object", properties: {}, required: [] } },
           { name: "weird_unknown", description: "x", inputSchema: { type: "object" } },
           { name: "search", description: "Search", inputSchema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] } },
         ],

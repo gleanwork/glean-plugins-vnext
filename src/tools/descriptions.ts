@@ -1,7 +1,8 @@
 /**
  * Shared input-schema descriptions for parameters that recur across our
  * static tools and the dynamically-promoted remote tools (chat, search,
- * read_document). Keeping a single source of truth keeps the agent-facing
+ * read_document, memory, memory_schema, user_activity, employee_search).
+ * Keeping a single source of truth keeps the agent-facing
  * wording consistent and prevents drift when the paste-back semantics evolve.
  */
 

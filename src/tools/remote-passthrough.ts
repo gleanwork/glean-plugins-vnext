@@ -7,13 +7,17 @@ import {
   type RemoteClientOptions,
 } from "../remote-client.js";
 
-// `chat` is intentionally excluded for now: the upstream Glean MCP backend
-// keeps returning "Error running chat tool: response contains message of
-// type ERROR" with no structured detail, so surfacing it would expose a
-// broken first-class tool. Re-add once the backend is healthy.
+// Remote tools promoted to first-class local tools once setup completes.
+// Anything the remote MCP server exposes that is not in this set is dropped
+// by fetchAllowedRemoteTools and rejected by dispatchRemoteTool.
 export const REMOTE_TOOLS_ALLOWLIST: ReadonlySet<string> = new Set([
   "search",
   "read_document",
+  "chat",
+  "memory",
+  "memory_schema",
+  "user_activity",
+  "employee_search",
 ]);
 
 type ToolInputSchema = Tool["inputSchema"];

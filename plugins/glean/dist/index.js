@@ -26014,7 +26014,12 @@ function clearRemoteTools(serverUrl) {
 // src/tools/remote-passthrough.ts
 var REMOTE_TOOLS_ALLOWLIST = /* @__PURE__ */ new Set([
   "search",
-  "read_document"
+  "read_document",
+  "chat",
+  "memory",
+  "memory_schema",
+  "user_activity",
+  "employee_search"
 ]);
 function augmentSchemaForLocal(schema) {
   const base = schema && typeof schema === "object" && !Array.isArray(schema) ? structuredClone(schema) : {};
