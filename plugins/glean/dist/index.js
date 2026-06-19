@@ -25710,7 +25710,6 @@ async function handleFindSkills(remoteClient, skillsBaseDir, args) {
 import fs4 from "node:fs/promises";
 import path4 from "node:path";
 import os from "node:os";
-import { randomUUID } from "node:crypto";
 var DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 var defaultHitlTimeoutMs = 3e5;
 var FileArgsError = class extends Error {
@@ -25801,8 +25800,8 @@ async function findToolJson(skillsBaseDir, toolName) {
 function isCursorClient(mcpServer) {
   return (mcpServer.getClientVersion()?.name ?? "").toLowerCase().startsWith("cursor");
 }
-var maxApprovalArgLines = 4;
-var maxApprovalArgChars = 80;
+var maxArgSectionLines = 8;
+var maxApprovalArgChars = 120;
 function safeJson(value) {
   try {
     return JSON.stringify(value);
@@ -25833,7 +25832,7 @@ function compactArgLine(key, value) {
   } else {
     rendered = String(value);
   }
-  return { line: `${key}: ${rendered}`, truncated };
+  return { line: `${key.toUpperCase()}: ${rendered}`, truncated };
 }
 function buildCompactArgs(args) {
   if (isEmptyArgs(args)) {
@@ -25844,13 +25843,11 @@ function buildCompactArgs(args) {
     return { lines: [line], needsFile: truncated };
   }
   const entries = Object.entries(args);
-  const shown = entries.slice(0, maxApprovalArgLines);
-  let needsFile = entries.length > shown.length;
-  const lines = shown.map(([key, value]) => {
-    const { line, truncated } = compactArgLine(key, value);
-    if (truncated) needsFile = true;
-    return line;
-  });
+  const rendered = entries.map(([key, value]) => compactArgLine(key, value));
+  const anyTruncated = rendered.some((r) => r.truncated);
+  const needsFile = entries.length > maxArgSectionLines || anyTruncated;
+  const inlineCount = needsFile ? maxArgSectionLines - 1 : maxArgSectionLines;
+  const lines = rendered.slice(0, inlineCount).map((r) => r.line);
   return { lines, needsFile };
 }
 function formatArgumentsForFile(toolName, args) {
@@ -25874,10 +25871,9 @@ function formatArgumentsForFile(toolName, args) {
   return out.join("\n");
 }
 async function writeApprovalArgsFile(toolName, args) {
-  const dir = path4.join(os.tmpdir(), "glean-approvals");
+  const dir = process.env.PLUGIN_DATA_DIR || process.env.CLAUDE_PLUGIN_DATA || os.tmpdir();
   await fs4.mkdir(dir, { recursive: true });
-  const safeName = toolName.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
-  const file = path4.join(dir, `${safeName}-${randomUUID().slice(0, 8)}.md`);
+  const file = path4.join(dir, "glean-approval-args.md");
   await fs4.writeFile(file, formatArgumentsForFile(toolName, args), "utf-8");
   return file;
 }
@@ -25886,10 +25882,14 @@ async function buildApprovalMessage(mcpServer, toolName, args) {
     return `Review the tool and arguments shown above, click on Submit to allow and Cancel to deny.`;
   }
   const { lines, needsFile } = buildCompactArgs(args);
-  const message = [`Action: ${toolName}`, "Arguments:", ...lines];
+  const message = [
+    `Action: ${toolName}`,
+    "Arguments:",
+    ...lines.map((line) => `  ${line}`)
+  ];
   if (needsFile) {
     const filePath = await writeApprovalArgsFile(toolName, args);
-    message.push(`Full arguments: ${filePath}`);
+    message.push(`  Full arguments: ${filePath}`);
   }
   return message.join("\n");
 }
@@ -26183,7 +26183,7 @@ async function dispatchRemoteTool(toolName, args, ctx) {
 var CALLBACK_URL_DESCRIPTION = "Optional OAuth callback URL pasted by the user after sign-in. Only set this when a previous call returned [AUTHENTICATION_REQUIRED] AND the user has since pasted a URL they copied from the Glean sign-in success page (the URL will contain a `code` query parameter). The server will extract the code, finish OAuth, and then run the original request.";
 
 // src/session-id.ts
-import { randomUUID as randomUUID2 } from "node:crypto";
+import { randomUUID } from "node:crypto";
 var fallbackSessionId;
 function resolveSessionId() {
   const fromHost = process.env.GLEAN_SESSION_ID?.trim();
@@ -26191,7 +26191,7 @@ function resolveSessionId() {
     return fromHost;
   }
   if (!fallbackSessionId) {
-    fallbackSessionId = randomUUID2();
+    fallbackSessionId = randomUUID();
   }
   return fallbackSessionId;
 }

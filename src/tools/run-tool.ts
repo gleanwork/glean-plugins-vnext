@@ -4,7 +4,6 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { randomUUID } from "node:crypto";
 import { callRemoteTool } from "../remote-client.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
@@ -148,8 +147,12 @@ function isCursorClient(mcpServer: Server): boolean {
 // handful of one-line-per-argument entries; anything that can't be shown
 // faithfully inline (multi-line, long, or extra arguments) is written in full
 // to a file and the path is shown instead — never expanded inline.
-const maxApprovalArgLines = 4;
-const maxApprovalArgChars = 80;
+// The argument section of the approval prompt is capped to this many lines so
+// the Accept/Decline buttons stay in view. When a spill file is needed, one of
+// these lines is the file path (so up to maxArgSectionLines-1 arguments show).
+const maxArgSectionLines = 8;
+// Per-argument inline width before truncating with an ellipsis.
+const maxApprovalArgChars = 120;
 
 function safeJson(value: unknown): string {
   try {
@@ -200,7 +203,7 @@ function compactArgLine(
     rendered = String(value);
   }
 
-  return { line: `${key}: ${rendered}`, truncated };
+  return { line: `${key.toUpperCase()}: ${rendered}`, truncated };
 }
 
 // Build the compact, viewport-friendly argument lines for the approval prompt.
@@ -219,13 +222,12 @@ export function buildCompactArgs(args: unknown): {
   }
 
   const entries = Object.entries(args as Record<string, unknown>);
-  const shown = entries.slice(0, maxApprovalArgLines);
-  let needsFile = entries.length > shown.length;
-  const lines = shown.map(([key, value]) => {
-    const { line, truncated } = compactArgLine(key, value);
-    if (truncated) needsFile = true;
-    return line;
-  });
+  const rendered = entries.map(([key, value]) => compactArgLine(key, value));
+  const anyTruncated = rendered.some((r) => r.truncated);
+  const needsFile = entries.length > maxArgSectionLines || anyTruncated;
+  // Reserve one line for the file path when spilling.
+  const inlineCount = needsFile ? maxArgSectionLines - 1 : maxArgSectionLines;
+  const lines = rendered.slice(0, inlineCount).map((r) => r.line);
   return { lines, needsFile };
 }
 
@@ -257,14 +259,20 @@ export function formatArgumentsForFile(
   return out.join("\n");
 }
 
+// The full arguments are written to a single fixed file under the plugin's
+// data dir (CLAUDE_PLUGIN_DATA, exported by start.sh as PLUGIN_DATA_DIR). It is
+// intentionally overwritten on each approval — only the most recent prompt's
+// arguments need to be inspectable.
 async function writeApprovalArgsFile(
   toolName: string,
   args: unknown,
 ): Promise<string> {
-  const dir = path.join(os.tmpdir(), "glean-approvals");
+  const dir =
+    process.env.PLUGIN_DATA_DIR ||
+    process.env.CLAUDE_PLUGIN_DATA ||
+    os.tmpdir();
   await fs.mkdir(dir, { recursive: true });
-  const safeName = toolName.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
-  const file = path.join(dir, `${safeName}-${randomUUID().slice(0, 8)}.md`);
+  const file = path.join(dir, "glean-approval-args.md");
   await fs.writeFile(file, formatArgumentsForFile(toolName, args), "utf-8");
   return file;
 }
@@ -282,10 +290,18 @@ async function buildApprovalMessage(
   }
 
   const { lines, needsFile } = buildCompactArgs(args);
-  const message = [`Action: ${toolName}`, "Arguments:", ...lines];
+  // Indent the argument lines under the "Arguments:" label so the structural
+  // labels (Action / Arguments) stay distinct from the values; keys are
+  // uppercased (in compactArgLine) so a key reads distinctly from its value.
+  // Both are plain-text cues that spend no vertical space.
+  const message = [
+    `Action: ${toolName}`,
+    "Arguments:",
+    ...lines.map((line) => `  ${line}`),
+  ];
   if (needsFile) {
     const filePath = await writeApprovalArgsFile(toolName, args);
-    message.push(`Full arguments: ${filePath}`);
+    message.push(`  Full arguments: ${filePath}`);
   }
   return message.join("\n");
 }

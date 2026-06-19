@@ -258,7 +258,7 @@ describe("handleRunTool (HITL)", () => {
 
     const [params, options] = elicit.mock.calls[0];
     expect(params.message).toContain("Action: jirasearch");
-    expect(params.message).toContain("project: ABC");
+    expect(params.message).toContain("PROJECT: ABC");
     expect(params.message).not.toContain("Server:");
     expect(params.message).not.toContain("Search Jira issues");
     expect(params.message).not.toContain("**");
@@ -359,14 +359,15 @@ describe("handleRunTool (HITL)", () => {
 
     const message = elicit.mock.calls[0][0].message as string;
     expect(message).toContain("Action: create_doc");
-    expect(message).toContain("title: Report");
-    expect(message.split("\n").length).toBeLessThanOrEqual(7);
+    expect(message).toContain("TITLE: Report");
+    expect(message.split("\n").length).toBeLessThanOrEqual(10);
 
     const fileLine = message
       .split("\n")
-      .find((l) => l.startsWith("Full arguments: "));
+      .find((l) => l.includes("Full arguments: "));
     expect(fileLine).toBeDefined();
-    const filePath = fileLine!.slice("Full arguments: ".length).trim();
+    const marker = "Full arguments: ";
+    const filePath = fileLine!.slice(fileLine!.indexOf(marker) + marker.length).trim();
     const fileContent = await fs.readFile(filePath, "utf-8");
     expect(fileContent).toContain(bigBody);
     expect(fileContent).toContain("## body");
@@ -380,9 +381,9 @@ describe("buildCompactArgs", () => {
     expect(buildCompactArgs({})).toEqual({ lines: ["(none)"], needsFile: false });
   });
 
-  it("renders short scalars inline, one line each, no file", () => {
+  it("renders short scalars inline, uppercased keys, one line each, no file", () => {
     expect(buildCompactArgs({ project: "ABC", limit: 10, dryRun: true })).toEqual({
-      lines: ["project: ABC", "limit: 10", "dryRun: true"],
+      lines: ["PROJECT: ABC", "LIMIT: 10", "DRYRUN: true"],
       needsFile: false,
     });
   });
@@ -393,18 +394,18 @@ describe("buildCompactArgs", () => {
     });
     expect(lines).toHaveLength(1);
     expect(lines[0]).not.toContain("\n");
-    expect(lines[0].startsWith("body: ")).toBe(true);
+    expect(lines[0].startsWith("BODY: ")).toBe(true);
     expect(needsFile).toBe(true);
   });
 
   it("truncates a long single-line string and flags a file", () => {
-    const { lines, needsFile } = buildCompactArgs({ note: "x".repeat(200) });
+    const { lines, needsFile } = buildCompactArgs({ note: "x".repeat(300) });
     expect(lines[0].endsWith("…")).toBe(true);
-    expect(lines[0].length).toBeLessThan(100);
+    expect(lines[0].length).toBeLessThan(140);
     expect(needsFile).toBe(true);
   });
 
-  it("caps inline arg lines and flags a file when args are omitted", () => {
+  it("caps inline arg lines at the budget and flags a file when omitted", () => {
     const { lines, needsFile } = buildCompactArgs({
       a: 1,
       b: 2,
@@ -412,14 +413,17 @@ describe("buildCompactArgs", () => {
       d: 4,
       e: 5,
       f: 6,
+      g: 7,
+      h: 8,
+      i: 9,
     });
-    expect(lines).toHaveLength(4);
+    expect(lines).toHaveLength(7);
     expect(needsFile).toBe(true);
   });
 
   it("renders a small nested object as compact JSON inline", () => {
     expect(buildCompactArgs({ filters: { status: ["open", "wip"] } })).toEqual({
-      lines: ['filters: {"status":["open","wip"]}'],
+      lines: ['FILTERS: {"status":["open","wip"]}'],
       needsFile: false,
     });
   });
