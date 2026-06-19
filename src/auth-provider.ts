@@ -6,11 +6,27 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { execFile, spawn } from "node:child_process";
 import { platform } from "node:os";
-import { getCallbackUrl, waitForAuthCode } from "./auth-callback-server.js";
+import { getCallbackUrl, setExpectedState } from "./auth-callback-server.js";
 import { clearCredentials, loadCredentials, saveCredentials } from "./token-store.js";
-import { deletePending, loadPending, savePending } from "./pending-auth-store.js";
 
 export type InvalidationScope = "all" | "client" | "tokens" | "verifier";
+
+/**
+ * Open `url` in the user's default browser. Used for the self-open sign-in
+ * path when the client does not support URL-mode elicitation (where the client
+ * itself opens the URL after consent).
+ */
+export function openBrowser(url: string): void {
+  if (platform() === "win32") {
+    spawn("cmd", ["/c", "start", "", url], {
+      detached: true,
+      stdio: "ignore",
+    }).unref();
+  } else {
+    const cmd = platform() === "darwin" ? "open" : "xdg-open";
+    execFile(cmd, [url]);
+  }
+}
 
 export class GleanOAuthClientProvider implements OAuthClientProvider {
   private _clientInfo: OAuthClientInformationMixed | undefined;
@@ -32,34 +48,21 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
    */
   onTokensChanged?: (tokens: OAuthTokens | undefined) => void;
 
-  // hostedCallbackUrl: the redirect_uri registered with the OAuth server.
-  // Points to the hosted Glean page, which shows a "Copy URL" button so
-  // the user can paste the callback URL back into chat to complete auth.
-  // Defaults to the loopback callback URL so callers that don't need the
-  // hosted page (e.g. tests) can instantiate without arguments.
-  private readonly hostedCallbackUrl: string;
-  constructor(hostedCallbackUrl: string = getCallbackUrl()) {
-    this.hostedCallbackUrl = hostedCallbackUrl;
+  constructor() {
     const stored = loadCredentials();
     if (stored) {
       this._tokens = stored.tokens as OAuthTokens | undefined;
       this._clientInfo = stored.clientInfo as OAuthClientInformationMixed | undefined;
     }
-    const pending = loadPending();
-    if (pending) {
-      this._codeVerifier = pending.codeVerifier;
-      this.authorizationUrl = pending.authorizationUrl;
-      this._authUrlPending = true;
-    }
   }
 
   get redirectUrl(): string {
-    return this.hostedCallbackUrl;
+    return getCallbackUrl();
   }
 
   get clientMetadata(): OAuthClientMetadata {
     return {
-      redirect_uris: [this.hostedCallbackUrl],
+      redirect_uris: [getCallbackUrl()],
       client_name: "Glean Claude Code Plugin",
     };
   }
@@ -81,7 +84,6 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     this._tokens = tokens;
     this._authUrlPending = false;
     saveCredentials(this._tokens, this._clientInfo);
-    deletePending();
     this.onTokensChanged?.(tokens);
   }
 
@@ -95,7 +97,6 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
         this._codeVerifier = "";
         this._authUrlPending = false;
         clearCredentials();
-        deletePending();
         break;
       case "client":
         this._clientInfo = undefined;
@@ -140,27 +141,16 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     this.authorizationUrl = undefined;
   }
 
+  // Called by the SDK when a 401 kicks off the OAuth flow. We do NOT open a
+  // browser or redirect here — the setup orchestrator owns presenting the
+  // sign-in URL (URL-mode elicitation, or self-open as a fallback) and awaiting
+  // the loopback callback. All this does is record the authorize URL (which
+  // propagates out as AuthRequiredError) and hand the loopback server the
+  // `state` value to validate the redirect against.
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
     this.authorizationUrl = authorizationUrl.toString();
     this._authUrlPending = true;
-    savePending({
-      codeVerifier: this._codeVerifier,
-      authorizationUrl: this.authorizationUrl,
-    });
-    const expectedState = authorizationUrl.searchParams.get("state") ?? undefined;
-    waitForAuthCode(expectedState).then(
-      (code) => { this._pendingAuthCode = code; },
-      () => { /* callback server error — will surface on next tool call */ },
-    );
-    if (platform() === "win32") {
-      spawn("cmd", ["/c", "start", "", this.authorizationUrl], {
-        detached: true,
-        stdio: "ignore",
-      }).unref();
-    } else {
-      const cmd = platform() === "darwin" ? "open" : "xdg-open";
-      execFile(cmd, [this.authorizationUrl]);
-    }
+    setExpectedState(authorizationUrl.searchParams.get("state") ?? undefined);
   }
 
   saveCodeVerifier(codeVerifier: string): void {

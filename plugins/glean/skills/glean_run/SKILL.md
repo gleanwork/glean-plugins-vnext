@@ -16,43 +16,27 @@ listing available skills.
 ## Authentication
 
 Authentication is handled exclusively by the `setup` tool. If any other tool
-returns a response containing `[SETUP_REQUIRED]` or `[AUTHENTICATION_REQUIRED]`,
-the user needs to (re-)authenticate via `setup`.
+returns a response containing `[SETUP_REQUIRED]`, the user needs to
+(re-)authenticate via `setup`.
 
 When this happens:
-1. Call `setup` (no arguments). It will return either a confirmation that
-   setup is already complete, or instructions including a sign-in URL.
-2. If a sign-in URL is returned, share it with the user. **Stop and wait.**
-   Do not retry the original tool call, do not try alternative approaches,
-   and do not proceed with other steps.
-3. After signing in, the browser lands on a Glean callback page with a
-   "Copy URL" button. Ask the user to click that button and paste the
-   URL into chat.
-4. Call `setup` again with `callback_url` set to the pasted URL. The
-   pasted URL will look like
-   `http://127.0.0.1:29107/callback?code=...&state=...`. Example:
+1. Call `setup` (no arguments).
+   - If no Server URL is configured, `setup` returns `[SETUP_REQUIRED]` with
+     instructions. Relay them, ask the user for their Glean Server instance
+     (QE) URL, then call `setup` again with `server_url` set to that URL.
+   - Once a Server URL is configured, `setup` opens the Glean sign-in page in
+     the browser and waits for sign-in.
+2. Once `setup` returns "Glean setup is complete", retry the original tool
+   call.
 
-   ```
-   setup({
-     callback_url: "http://127.0.0.1:29107/callback?code=...&state=..."
-   })
-   ```
-
-5. Once `setup` confirms auth is complete, retry the original tool call.
-
-Do not pass `callback_url` to any tool other than `setup` — only `setup`
-accepts it. Do not treat `[SETUP_REQUIRED]` or `[AUTHENTICATION_REQUIRED]`
-as an error or attempt to work around it any other way.
+Do not treat `[SETUP_REQUIRED]` as an error or try to work around it any
+other way.
 
 ## Step 0: Verify Setup
 
-Call `setup` (with no arguments) to confirm the Glean connection is
-configured.
-
-- If it returns `[SETUP_REQUIRED]`, relay the instructions to the user and
-  wait for them to paste their Server URL. Then call `setup` again with
-  `server_url` set to what they pasted.
-- Once `setup` confirms configuration is complete, proceed to Step 1.
+Call `setup` (with no arguments). If the connection isn't ready, `setup`
+returns instructions — follow them and call `setup` again; it guides the whole
+flow. Once it returns "Glean setup is complete", proceed to Step 1.
 
 ## Step 1: Plan tool usage
 
