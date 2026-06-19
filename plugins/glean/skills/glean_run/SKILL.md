@@ -35,14 +35,9 @@ other way.
 
 ## Step 0: Verify Setup
 
-Call `setup` (with no arguments) to confirm the Glean connection is
-configured and signed in.
-
-- If it returns `[SETUP_REQUIRED]`, relay it and call `setup` again with
-  `server_url` set to the URL the user provides.
-- Otherwise `setup` opens the browser for sign-in when needed and captures
-  the result automatically. Once it returns "Glean setup is complete",
-  proceed to Step 1.
+Call `setup` (with no arguments). If the connection isn't ready, `setup`
+returns instructions — follow them and call `setup` again; it guides the whole
+flow. Once it returns "Glean setup is complete", proceed to Step 1.
 
 ## Step 1: Plan tool usage
 

@@ -353,7 +353,9 @@ function backendErrorResult(label: string, err: unknown): CallToolResult {
 // reports, so DCR + the authorize request use it directly.
 async function connectWithSignIn(
   serverUrl: string,
-): Promise<{ client?: RemoteClient; result?: CallToolResult }> {
+): Promise<
+  { ok: true; client: RemoteClient } | { ok: false; result: CallToolResult }
+> {
   const provider = getOAuthProvider();
 
   // Happy path: already authenticated — connect directly, no callback server.
@@ -364,10 +366,10 @@ async function connectWithSignIn(
         getRemoteClientOpts(),
         `setup-${process.pid}`,
       );
-      return { client };
+      return { ok: true, client };
     } catch (err) {
       if (!(err instanceof AuthRequiredError)) {
-        return { result: backendErrorResult("setup", err) };
+        return { ok: false, result: backendErrorResult("setup", err) };
       }
       // Tokens expired — fall through to the sign-in path below.
     }
@@ -380,6 +382,7 @@ async function connectWithSignIn(
     const msg = err instanceof Error ? err.message : String(err);
     logLine("setup.callback-server-failed", { msg });
     return {
+      ok: false,
       result: {
         content: [
           {
@@ -401,10 +404,10 @@ async function connectWithSignIn(
         `setup-${process.pid}`,
       );
       // Unexpectedly connected without needing auth — done.
-      return { client };
+      return { ok: true, client };
     } catch (err) {
       if (!(err instanceof AuthRequiredError)) {
-        return { result: backendErrorResult("setup", err) };
+        return { ok: false, result: backendErrorResult("setup", err) };
       }
       authUrl = err.authUrl;
     }
@@ -420,6 +423,7 @@ async function connectWithSignIn(
       const msg = err instanceof Error ? err.message : String(err);
       logLine("setup.sign-in-wait-failed", { msg });
       return {
+        ok: false,
         result: {
           content: [
             {
@@ -441,12 +445,12 @@ async function connectWithSignIn(
         getRemoteClientOpts(),
         `setup-${process.pid}`,
       );
-      return { client };
+      return { ok: true, client };
     } catch (err) {
       logLine("setup.finish-auth-failed", {
         msg: err instanceof Error ? err.message : String(err),
       });
-      return { result: backendErrorResult("setup", err) };
+      return { ok: false, result: backendErrorResult("setup", err) };
     }
   } finally {
     closeCallbackServer();
@@ -465,8 +469,8 @@ async function advanceSetup(): Promise<CallToolResult> {
   }
 
   const conn = await connectWithSignIn(serverUrl);
-  if (conn.result) return conn.result;
-  const remoteClient = conn.client!;
+  if (!conn.ok) return conn.result;
+  const remoteClient = conn.client;
 
   try {
     const remoteTools = await fetchAllowedRemoteTools(remoteClient);

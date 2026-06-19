@@ -92,7 +92,7 @@ export function startCallbackServer(): Promise<CallbackHandle> {
 
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(
-      "<html><body><h1>Authentication successful</h1><p>You can close this tab.</p></body></html>",
+      "<html><body style='font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:3rem 1rem'><h1>Signed in to Glean</h1><p>Authentication complete. You can close this tab and return to your chat; setup will finish automatically.</p></body></html>",
     );
     resolveCode(codeParam);
   });

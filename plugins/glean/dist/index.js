@@ -25314,7 +25314,7 @@ function startCallbackServer() {
     }
     res.writeHead(200, { "Content-Type": "text/html" });
     res.end(
-      "<html><body><h1>Authentication successful</h1><p>You can close this tab.</p></body></html>"
+      "<html><body style='font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:3rem 1rem'><h1>Signed in to Glean</h1><p>Authentication complete. You can close this tab and return to your chat; setup will finish automatically.</p></body></html>"
     );
     resolveCode(codeParam);
   });
@@ -26290,10 +26290,10 @@ async function connectWithSignIn(serverUrl) {
         getRemoteClientOpts(),
         `setup-${process.pid}`
       );
-      return { client };
+      return { ok: true, client };
     } catch (err) {
       if (!(err instanceof AuthRequiredError)) {
-        return { result: backendErrorResult("setup", err) };
+        return { ok: false, result: backendErrorResult("setup", err) };
       }
     }
   }
@@ -26304,6 +26304,7 @@ async function connectWithSignIn(serverUrl) {
     const msg = err instanceof Error ? err.message : String(err);
     logLine("setup.callback-server-failed", { msg });
     return {
+      ok: false,
       result: {
         content: [
           {
@@ -26323,10 +26324,10 @@ async function connectWithSignIn(serverUrl) {
         getRemoteClientOpts(),
         `setup-${process.pid}`
       );
-      return { client };
+      return { ok: true, client };
     } catch (err) {
       if (!(err instanceof AuthRequiredError)) {
-        return { result: backendErrorResult("setup", err) };
+        return { ok: false, result: backendErrorResult("setup", err) };
       }
       authUrl = err.authUrl;
     }
@@ -26338,6 +26339,7 @@ async function connectWithSignIn(serverUrl) {
       const msg = err instanceof Error ? err.message : String(err);
       logLine("setup.sign-in-wait-failed", { msg });
       return {
+        ok: false,
         result: {
           content: [
             {
@@ -26356,12 +26358,12 @@ async function connectWithSignIn(serverUrl) {
         getRemoteClientOpts(),
         `setup-${process.pid}`
       );
-      return { client };
+      return { ok: true, client };
     } catch (err) {
       logLine("setup.finish-auth-failed", {
         msg: err instanceof Error ? err.message : String(err)
       });
-      return { result: backendErrorResult("setup", err) };
+      return { ok: false, result: backendErrorResult("setup", err) };
     }
   } finally {
     closeCallbackServer();
@@ -26373,7 +26375,7 @@ async function advanceSetup() {
     return { content: [{ type: "text", text: SETUP_REQUIRED_TEXT }] };
   }
   const conn = await connectWithSignIn(serverUrl);
-  if (conn.result) return conn.result;
+  if (!conn.ok) return conn.result;
   const remoteClient = conn.client;
   try {
     const remoteTools = await fetchAllowedRemoteTools(remoteClient);
