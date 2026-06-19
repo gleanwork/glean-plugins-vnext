@@ -1,18 +1,19 @@
-# Glean Claude plugin
+# Glean plugin
 
-Glean's plugin for [Claude Code](https://code.claude.com/docs/en/overview)
-and [Claude Cowork](https://claude.com/cowork). This repo is a single-plugin
-marketplace.
+Glean's plugin for [Claude Code](https://code.claude.com/docs/en/overview),
+[Claude Cowork](https://claude.com/cowork), Codex, and Cursor. This repo is a
+single-plugin marketplace, shipping one manifest per host.
 
 Today it ships one plugin:
 
-- **`glean-vnext`** — adds two static tools, `find_skills` and `run_tool`, that
-  let the agent discover Glean-hosted skills for enterprise apps (Jira, Slack,
-  Google Workspace, Salesforce, etc.) and invoke their downstream tools via
-  Glean's MCP gateway. Once the user has authenticated, the plugin also
-  surfaces a small allow-list of Glean's first-class tools — currently
-  `search` and `read_document` — directly, with schemas pulled from the
-  remote MCP server.
+- **`glean-vnext`** — adds three static tools, `find_skills`, `run_tool`, and
+  `setup`, that let the agent discover Glean-hosted skills for enterprise apps
+  (Jira, Slack, Google Workspace, Salesforce, etc.) and invoke their downstream
+  tools via Glean's MCP gateway. Once the user has authenticated, the plugin
+  also surfaces an allow-list of Glean's first-class tools — currently
+  `search`, `read_document`, `chat`, `memory`, `memory_schema`,
+  `user_activity`, and `employee_search` — directly, with schemas pulled from
+  the remote MCP server.
 
 ## Install
 
@@ -29,6 +30,23 @@ Today it ships one plugin:
 2. Click **Add marketplace**, choose **GitHub**, and enter
    `gleanwork/glean-plugins-vnext`.
 3. Once the marketplace syncs, install the **glean-vnext** plugin from it.
+
+### Codex and Cursor
+
+The same plugin ships host-specific manifests so it can be installed from
+Codex and Cursor as well:
+
+- **Codex** reads `.agents/plugins/marketplace.json` (marketplace
+  `glean-plugins-vnext`) and the per-host manifest at
+  `plugins/glean/.codex-plugin/plugin.json`, which points the MCP server at
+  `.mcp.codex.json`.
+- **Cursor** reads `.cursor-plugin/marketplace.json` (marketplace
+  `glean-plugins`) and `plugins/glean/.cursor-plugin/plugin.json`, which reuses
+  the shared `.mcp.json`.
+
+Point the host at this repo (`gleanwork/glean-plugins-vnext`) and install
+**glean-vnext** through that host's plugin flow. The launcher, skills, and
+server bundle are shared across all hosts.
 
 ## First run
 
@@ -114,6 +132,11 @@ directly by the server bundle.
 Empty values and un-interpolated `${VAR}` placeholders are ignored, so a host
 that passes an unset variable through verbatim falls back to the default.
 
+The defaults above are the bundle's built-in fallbacks. The shipped MCP
+manifests (`plugins/glean/.mcp.json` and `.mcp.codex.json`) set
+`ENABLE_HITL=true` and `HITL_TIMEOUT_MS=300000` in their `env` block, so
+human-in-the-loop confirmation is **on by default** in the packaged plugin.
+
 ### Launcher-managed variables
 
 `start.sh` runs host-side and normalizes the following host inputs into the
@@ -130,8 +153,10 @@ plugin variables above, keeping the server bundle host-agnostic:
 
 - **Sign-in loop** — the cached OAuth provider state may be stale. Delete
   `~/.glean/mcp-credentials.json` and retry.
-- **`GLEAN_MCP_SERVER_URL is required`** — the plugin's `.mcp.json` wasn't
-  picked up by the host. Reinstall; if that fails, open an issue.
+- **Tools return `[SETUP_REQUIRED]`** — the plugin isn't configured or
+  authenticated yet. Call the `setup` tool (no arguments) to advance through
+  the next missing stage: saving the Server URL, signing in, then fetching the
+  remote tool catalog.
 
 ## Development
 
@@ -149,7 +174,11 @@ runtime lives under `plugins/glean/`. See the Layout section below.
 
 ## Release process
 
-1. Bump `version` in `plugins/glean/.claude-plugin/plugin.json`.
+1. Bump `version` in all three host plugin manifests — they must match, and
+   `scripts/check-version-bump.sh` enforces it:
+   - `plugins/glean/.claude-plugin/plugin.json`
+   - `plugins/glean/.codex-plugin/plugin.json`
+   - `plugins/glean/.cursor-plugin/plugin.json`
 2. `npm test && npm run typecheck` — verify clean.
 3. Commit, tag, and push:
    ```bash
@@ -162,25 +191,36 @@ runtime lives under `plugins/glean/`. See the Layout section below.
 
 ```
 .claude-plugin/
-  marketplace.json        Top-level marketplace manifest for Claude Code
-                          / Cowork. Points at ./plugins/glean as the
-                          plugin source.
+  marketplace.json        Marketplace manifest for Claude Code / Cowork.
+                          Points at ./plugins/glean as the plugin source.
+.cursor-plugin/
+  marketplace.json        Marketplace manifest for Cursor.
+.agents/plugins/
+  marketplace.json        Marketplace manifest for Codex.
 plugins/glean/
   .claude-plugin/
-    plugin.json           Plugin manifest — name, version, description
-  .mcp.json               MCP server invocation read by Claude Code /
-                          Cowork. Source of truth.
+    plugin.json           Claude plugin manifest — name, version, description
+  .codex-plugin/
+    plugin.json           Codex plugin manifest (skills, mcpServers, interface)
+  .cursor-plugin/
+    plugin.json           Cursor plugin manifest
+  .mcp.json               MCP server invocation for Claude / Cursor. Source
+                          of truth; sets ENABLE_HITL / HITL_TIMEOUT_MS.
+  .mcp.codex.json         MCP server invocation for Codex
+  assets/                 Shared brand assets (logo) referenced by manifests
   dist/index.js           Built server bundle (every dep inlined; produced
                           by `npm run build`; checked in)
   skills/glean_run/       Skill that tells the agent how to use the
                           tools. Uses the open SKILL.md standard.
-  start.sh                Bash launcher that anchors PROJECT_DIR to the
-                          host's spawn cwd, then execs node on the bundle
+  start.sh                Bash launcher: sanitizes env (SKILLS_BASE_DIR,
+                          PLUGIN_DATA_DIR, GLEAN_SESSION_ID), then execs
+                          node on the bundle
   package.json            Minimal "type": "module" manifest so Node
                           treats dist/index.js as ESM at runtime
 src/                      TypeScript sources for the MCP server
 tests/                    Vitest suite
-scripts/                  build.mjs — esbuild bundler
+scripts/                  build.mjs (esbuild bundler), check-version-bump.sh,
+                          pack-plugin.sh
 package.json              Top-level dev config — deps, npm scripts
 tsconfig.json             TypeScript config for the dev tree
 ```
