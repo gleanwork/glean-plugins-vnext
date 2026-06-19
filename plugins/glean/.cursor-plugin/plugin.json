@@ -1,16 +1,27 @@
 {
   "name": "glean-vnext",
   "displayName": "Glean vNext",
-  "version": "0.2.24",
-  "description": "Search and act across your company's apps — Jira, Slack, Salesforce, Google Workspace, and more — without leaving Cursor.",
+  "version": "0.2.25",
+  "description": "Search and act across your company's apps \u2014 Jira, Slack, Salesforce, Google Workspace, and more \u2014 without leaving Cursor.",
   "author": {
     "name": "Glean"
   },
   "homepage": "https://www.glean.com",
   "logo": "assets/GLN_logo-icon-Primary.png",
-  "keywords": ["glean", "enterprise-search", "jira", "slack", "salesforce"],
+  "keywords": [
+    "glean",
+    "enterprise-search",
+    "jira",
+    "slack",
+    "salesforce"
+  ],
   "category": "productivity",
-  "tags": ["search", "enterprise", "mcp", "tools"],
+  "tags": [
+    "search",
+    "enterprise",
+    "mcp",
+    "tools"
+  ],
   "skills": "./skills/",
   "mcpServers": ".mcp.json"
 }

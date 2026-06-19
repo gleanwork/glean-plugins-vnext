@@ -26106,11 +26106,13 @@ var fallbackSessionId;
 function resolveSessionId() {
   const fromHost = process.env.GLEAN_SESSION_ID?.trim();
   if (fromHost && !fromHost.startsWith("${")) {
+    console.error(`[glean][debug] resolveSessionId using host GLEAN_SESSION_ID=${fromHost}`);
     return fromHost;
   }
   if (!fallbackSessionId) {
     fallbackSessionId = randomUUID();
   }
+  console.error(`[glean][debug] resolveSessionId fallback UUID=${fallbackSessionId}`);
   return fallbackSessionId;
 }
 

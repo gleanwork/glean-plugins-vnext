@@ -37,11 +37,17 @@ fi
 
 # Resolve the chat session id host-side. Host-awareness lives here, not in the
 # plugin: the launcher reads whatever variable this host exposes and exports the
-# normalized GLEAN_SESSION_ID that the Node bundle reads. Hosts that expose no
-# session id (Cursor, and Cowork until follow-up) leave it unset, and the plugin
-# falls back to a generated per-process id.
+# normalized GLEAN_SESSION_ID that the Node bundle reads. Claude Code exposes
+# CLAUDE_CODE_SESSION_ID; Cursor exposes CURSOR_CONVERSATION_ID. Hosts that
+# expose no session id leave it unset, and the plugin falls back to a generated
+# per-process id.
 if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
   export GLEAN_SESSION_ID="$CLAUDE_CODE_SESSION_ID"
+elif [ -n "${CURSOR_CONVERSATION_ID:-}" ]; then
+  export GLEAN_SESSION_ID="$CURSOR_CONVERSATION_ID"
 fi
+
+# DEBUG (remove before merge): trace which host var fed the session id.
+echo "[glean][debug] CLAUDE_CODE_SESSION_ID=${CLAUDE_CODE_SESSION_ID:-<unset>} CURSOR_CONVERSATION_ID=${CURSOR_CONVERSATION_ID:-<unset>} -> GLEAN_SESSION_ID=${GLEAN_SESSION_ID:-<unset>}" >&2
 
 exec node "$PLUGIN_DIR/dist/index.js"
