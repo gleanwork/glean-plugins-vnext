@@ -3,6 +3,8 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import fs from "node:fs/promises";
 import path from "node:path";
+import os from "node:os";
+import { randomUUID } from "node:crypto";
 import { callRemoteTool } from "../remote-client.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
@@ -141,10 +143,13 @@ function isCursorClient(mcpServer: Server): boolean {
     .startsWith("cursor");
 }
 
-// A string longer than this, or any multi-line string, is rendered as its own
-// de-escaped block; shorter scalars stay inline.
-const argBlockThreshold = 80;
-const maxArgValueChars = 2000;
+// Approval prompts must stay short enough that Claude Code keeps the
+// Accept/Decline buttons in view. The inline message is therefore capped to a
+// handful of one-line-per-argument entries; anything that can't be shown
+// faithfully inline (multi-line, long, or extra arguments) is written in full
+// to a file and the path is shown instead — never expanded inline.
+const maxApprovalArgLines = 4;
+const maxApprovalArgChars = 80;
 
 function safeJson(value: unknown): string {
   try {
@@ -154,60 +159,135 @@ function safeJson(value: unknown): string {
   }
 }
 
-function truncateArgValue(text: string): string {
-  if (text.length <= maxArgValueChars) return text;
-  const omitted = text.length - maxArgValueChars;
-  return `${text.slice(0, maxArgValueChars)}\n… (${omitted} more characters; pass large content via file_args to review it as a file)`;
-}
-
-// JSON.stringify(args, null, 2) escapes every newline inside a string value, so
-// a Markdown body or table collapses into one unreadable line of literal "\n".
-// Render each top-level arg by shape instead — scalars inline, long/multi-line
-// strings as a de-escaped block, nested values as compact JSON — joined by a
-// blank line so a multi-line value can't blur into the next key. Plain text
-// only: the elicitation surface does not render Markdown.
-export function formatArguments(args: unknown): string {
-  if (
+function isEmptyArgs(args: unknown): boolean {
+  return (
     args == null ||
     (typeof args === "object" &&
       !Array.isArray(args) &&
       Object.keys(args as object).length === 0)
-  ) {
-    return "(none)";
-  }
-  if (typeof args !== "object" || Array.isArray(args)) {
-    return truncateArgValue(safeJson(args));
-  }
-
-  return Object.entries(args as Record<string, unknown>)
-    .map(([key, value]) => {
-      if (
-        typeof value === "string" &&
-        (value.includes("\n") || value.length > argBlockThreshold)
-      ) {
-        return `${key}:\n${truncateArgValue(value)}`;
-      }
-      if (value !== null && typeof value === "object") {
-        return `${key}: ${truncateArgValue(safeJson(value))}`;
-      }
-      return `${key}: ${value}`;
-    })
-    .join("\n\n");
+  );
 }
 
-// Plain text, NOT Markdown: Claude Code does not reliably render Markdown in
-// elicitation prompts, so bold/headings would leak as literal characters.
-function buildApprovalMessage(
-  mcpServer: Server,
+// Render one argument as a single line. Multi-line strings are collapsed to
+// spaces; long strings/objects are truncated with an ellipsis. `truncated` is
+// true whenever the inline form is not the faithful full value, so the caller
+// knows to spill the full content to a file.
+function compactArgLine(
+  key: string,
+  value: unknown,
+): { line: string; truncated: boolean } {
+  let rendered: string;
+  let truncated = false;
+
+  if (typeof value === "string") {
+    const collapsed = value.replace(/\s+/g, " ").trim();
+    if (value.includes("\n") || collapsed.length > maxApprovalArgChars) {
+      truncated = true;
+    }
+    rendered =
+      collapsed.length > maxApprovalArgChars
+        ? `${collapsed.slice(0, maxApprovalArgChars)}…`
+        : collapsed;
+  } else if (value !== null && typeof value === "object") {
+    const json = safeJson(value);
+    if (json.length > maxApprovalArgChars) {
+      rendered = `${json.slice(0, maxApprovalArgChars)}…`;
+      truncated = true;
+    } else {
+      rendered = json;
+    }
+  } else {
+    rendered = String(value);
+  }
+
+  return { line: `${key}: ${rendered}`, truncated };
+}
+
+// Build the compact, viewport-friendly argument lines for the approval prompt.
+// Caps the number of lines and sets needsFile when anything was truncated or
+// any argument was omitted, so the caller can spill the full set to a file.
+export function buildCompactArgs(args: unknown): {
+  lines: string[];
+  needsFile: boolean;
+} {
+  if (isEmptyArgs(args)) {
+    return { lines: ["(none)"], needsFile: false };
+  }
+  if (typeof args !== "object" || Array.isArray(args)) {
+    const { line, truncated } = compactArgLine("value", args);
+    return { lines: [line], needsFile: truncated };
+  }
+
+  const entries = Object.entries(args as Record<string, unknown>);
+  const shown = entries.slice(0, maxApprovalArgLines);
+  let needsFile = entries.length > shown.length;
+  const lines = shown.map(([key, value]) => {
+    const { line, truncated } = compactArgLine(key, value);
+    if (truncated) needsFile = true;
+    return line;
+  });
+  return { lines, needsFile };
+}
+
+// Full, untruncated rendering for the spill file. Markdown so it reads well
+// when opened: string values are written verbatim (so any Markdown — tables,
+// headings — renders), and nested values are pretty-printed JSON in a code
+// block.
+export function formatArgumentsForFile(
   toolName: string,
   args: unknown,
 ): string {
+  const out: string[] = [`# Approval request: ${toolName}`, ""];
+  if (isEmptyArgs(args)) {
+    out.push("_(no arguments)_", "");
+    return out.join("\n");
+  }
+  if (typeof args !== "object" || Array.isArray(args)) {
+    out.push("```json", JSON.stringify(args, null, 2), "```", "");
+    return out.join("\n");
+  }
+  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+    out.push(`## ${key}`, "");
+    if (typeof value === "string") {
+      out.push(value, "");
+    } else {
+      out.push("```json", JSON.stringify(value, null, 2), "```", "");
+    }
+  }
+  return out.join("\n");
+}
+
+async function writeApprovalArgsFile(
+  toolName: string,
+  args: unknown,
+): Promise<string> {
+  const dir = path.join(os.tmpdir(), "glean-approvals");
+  await fs.mkdir(dir, { recursive: true });
+  const safeName = toolName.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
+  const file = path.join(dir, `${safeName}-${randomUUID().slice(0, 8)}.md`);
+  await fs.writeFile(file, formatArgumentsForFile(toolName, args), "utf-8");
+  return file;
+}
+
+// Plain text, NOT Markdown: Claude Code does not reliably render Markdown in
+// elicitation prompts. Kept short (a few lines) so the Accept/Decline buttons
+// stay in view; full argument detail spills to a file when it can't fit.
+async function buildApprovalMessage(
+  mcpServer: Server,
+  toolName: string,
+  args: unknown,
+): Promise<string> {
   if (isCursorClient(mcpServer)) {
     return `Review the tool and arguments shown above, click on Submit to allow and Cancel to deny.`;
   }
 
-  // Claude Code: action name and arguments only.
-  return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
+  const { lines, needsFile } = buildCompactArgs(args);
+  const message = [`Action: ${toolName}`, "Arguments:", ...lines];
+  if (needsFile) {
+    const filePath = await writeApprovalArgsFile(toolName, args);
+    message.push(`Full arguments: ${filePath}`);
+  }
+  return message.join("\n");
 }
 
 export async function handleRunTool(
@@ -233,7 +313,11 @@ export async function handleRunTool(
     const toolMeta = await findToolJson(skillsBaseDir, toolName);
 
     if (toolMeta?.requires_approval) {
-      const message = buildApprovalMessage(mcpServer, toolName, args.arguments);
+      const message = await buildApprovalMessage(
+        mcpServer,
+        toolName,
+        args.arguments,
+      );
       const timeout = hitlTimeoutMs();
 
       try {

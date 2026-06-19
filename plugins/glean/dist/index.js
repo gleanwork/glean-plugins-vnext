@@ -25709,6 +25709,8 @@ async function handleFindSkills(remoteClient, skillsBaseDir, args) {
 // src/tools/run-tool.ts
 import fs4 from "node:fs/promises";
 import path4 from "node:path";
+import os from "node:os";
+import { randomUUID } from "node:crypto";
 var DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 var defaultHitlTimeoutMs = 3e5;
 var FileArgsError = class extends Error {
@@ -25799,8 +25801,8 @@ async function findToolJson(skillsBaseDir, toolName) {
 function isCursorClient(mcpServer) {
   return (mcpServer.getClientVersion()?.name ?? "").toLowerCase().startsWith("cursor");
 }
-var argBlockThreshold = 80;
-var maxArgValueChars = 2e3;
+var maxApprovalArgLines = 4;
+var maxApprovalArgChars = 80;
 function safeJson(value) {
   try {
     return JSON.stringify(value);
@@ -25808,35 +25810,88 @@ function safeJson(value) {
     return String(value);
   }
 }
-function truncateArgValue(text) {
-  if (text.length <= maxArgValueChars) return text;
-  const omitted = text.length - maxArgValueChars;
-  return `${text.slice(0, maxArgValueChars)}
-\u2026 (${omitted} more characters; pass large content via file_args to review it as a file)`;
+function isEmptyArgs(args) {
+  return args == null || typeof args === "object" && !Array.isArray(args) && Object.keys(args).length === 0;
 }
-function formatArguments(args) {
-  if (args == null || typeof args === "object" && !Array.isArray(args) && Object.keys(args).length === 0) {
-    return "(none)";
+function compactArgLine(key, value) {
+  let rendered;
+  let truncated = false;
+  if (typeof value === "string") {
+    const collapsed = value.replace(/\s+/g, " ").trim();
+    if (value.includes("\n") || collapsed.length > maxApprovalArgChars) {
+      truncated = true;
+    }
+    rendered = collapsed.length > maxApprovalArgChars ? `${collapsed.slice(0, maxApprovalArgChars)}\u2026` : collapsed;
+  } else if (value !== null && typeof value === "object") {
+    const json = safeJson(value);
+    if (json.length > maxApprovalArgChars) {
+      rendered = `${json.slice(0, maxApprovalArgChars)}\u2026`;
+      truncated = true;
+    } else {
+      rendered = json;
+    }
+  } else {
+    rendered = String(value);
+  }
+  return { line: `${key}: ${rendered}`, truncated };
+}
+function buildCompactArgs(args) {
+  if (isEmptyArgs(args)) {
+    return { lines: ["(none)"], needsFile: false };
   }
   if (typeof args !== "object" || Array.isArray(args)) {
-    return truncateArgValue(safeJson(args));
+    const { line, truncated } = compactArgLine("value", args);
+    return { lines: [line], needsFile: truncated };
   }
-  return Object.entries(args).map(([key, value]) => {
-    if (typeof value === "string" && (value.includes("\n") || value.length > argBlockThreshold)) {
-      return `${key}:
-${truncateArgValue(value)}`;
-    }
-    if (value !== null && typeof value === "object") {
-      return `${key}: ${truncateArgValue(safeJson(value))}`;
-    }
-    return `${key}: ${value}`;
-  }).join("\n\n");
+  const entries = Object.entries(args);
+  const shown = entries.slice(0, maxApprovalArgLines);
+  let needsFile = entries.length > shown.length;
+  const lines = shown.map(([key, value]) => {
+    const { line, truncated } = compactArgLine(key, value);
+    if (truncated) needsFile = true;
+    return line;
+  });
+  return { lines, needsFile };
 }
-function buildApprovalMessage(mcpServer, toolName, args) {
+function formatArgumentsForFile(toolName, args) {
+  const out = [`# Approval request: ${toolName}`, ""];
+  if (isEmptyArgs(args)) {
+    out.push("_(no arguments)_", "");
+    return out.join("\n");
+  }
+  if (typeof args !== "object" || Array.isArray(args)) {
+    out.push("```json", JSON.stringify(args, null, 2), "```", "");
+    return out.join("\n");
+  }
+  for (const [key, value] of Object.entries(args)) {
+    out.push(`## ${key}`, "");
+    if (typeof value === "string") {
+      out.push(value, "");
+    } else {
+      out.push("```json", JSON.stringify(value, null, 2), "```", "");
+    }
+  }
+  return out.join("\n");
+}
+async function writeApprovalArgsFile(toolName, args) {
+  const dir = path4.join(os.tmpdir(), "glean-approvals");
+  await fs4.mkdir(dir, { recursive: true });
+  const safeName = toolName.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
+  const file = path4.join(dir, `${safeName}-${randomUUID().slice(0, 8)}.md`);
+  await fs4.writeFile(file, formatArgumentsForFile(toolName, args), "utf-8");
+  return file;
+}
+async function buildApprovalMessage(mcpServer, toolName, args) {
   if (isCursorClient(mcpServer)) {
     return `Review the tool and arguments shown above, click on Submit to allow and Cancel to deny.`;
   }
-  return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
+  const { lines, needsFile } = buildCompactArgs(args);
+  const message = [`Action: ${toolName}`, "Arguments:", ...lines];
+  if (needsFile) {
+    const filePath = await writeApprovalArgsFile(toolName, args);
+    message.push(`Full arguments: ${filePath}`);
+  }
+  return message.join("\n");
 }
 async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
   const serverId = args.server_id;
@@ -25853,7 +25908,11 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
   if (hitlEnabled && mcpServer.getClientCapabilities()?.elicitation) {
     const toolMeta = await findToolJson(skillsBaseDir, toolName);
     if (toolMeta?.requires_approval) {
-      const message = buildApprovalMessage(mcpServer, toolName, args.arguments);
+      const message = await buildApprovalMessage(
+        mcpServer,
+        toolName,
+        args.arguments
+      );
       const timeout = hitlTimeoutMs();
       try {
         const result = await mcpServer.elicitInput(
@@ -26124,7 +26183,7 @@ async function dispatchRemoteTool(toolName, args, ctx) {
 var CALLBACK_URL_DESCRIPTION = "Optional OAuth callback URL pasted by the user after sign-in. Only set this when a previous call returned [AUTHENTICATION_REQUIRED] AND the user has since pasted a URL they copied from the Glean sign-in success page (the URL will contain a `code` query parameter). The server will extract the code, finish OAuth, and then run the original request.";
 
 // src/session-id.ts
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 var fallbackSessionId;
 function resolveSessionId() {
   const fromHost = process.env.GLEAN_SESSION_ID?.trim();
@@ -26132,7 +26191,7 @@ function resolveSessionId() {
     return fromHost;
   }
   if (!fallbackSessionId) {
-    fallbackSessionId = randomUUID();
+    fallbackSessionId = randomUUID2();
   }
   return fallbackSessionId;
 }
