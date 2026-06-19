@@ -1,8 +1,8 @@
 # Glean plugin
 
 Glean's plugin for [Claude Code](https://code.claude.com/docs/en/overview),
-[Claude Cowork](https://claude.com/cowork), Codex, and Cursor. This repo is a
-single-plugin marketplace, shipping one manifest per host.
+Codex, and Cursor. This repo is a single-plugin marketplace, shipping one
+manifest per host.
 
 Today it ships one plugin:
 
@@ -23,13 +23,6 @@ Today it ships one plugin:
 /plugin marketplace add gleanwork/glean-plugins-vnext
 /plugin install glean-vnext@glean-plugins-vnext
 ```
-
-### Claude Cowork (desktop)
-
-1. Open the plugin picker.
-2. Click **Add marketplace**, choose **GitHub**, and enter
-   `gleanwork/glean-plugins-vnext`.
-3. Once the marketplace syncs, install the **glean-vnext** plugin from it.
 
 ### Codex and Cursor
 
@@ -67,11 +60,7 @@ or your email domain isn't recognized. Two options:
 ## Updates
 
 ```
-# Claude Code
 /plugin marketplace update glean-plugins-vnext
-
-# Cowork: the plugin picker has a "Sync" / "Check for updates"
-# button on the marketplace entry.
 ```
 
 ## Testing a specific branch or PR
@@ -191,7 +180,7 @@ runtime lives under `plugins/glean/`. See the Layout section below.
 
 ```
 .claude-plugin/
-  marketplace.json        Marketplace manifest for Claude Code / Cowork.
+  marketplace.json        Marketplace manifest for Claude Code.
                           Points at ./plugins/glean as the plugin source.
 .cursor-plugin/
   marketplace.json        Marketplace manifest for Cursor.
