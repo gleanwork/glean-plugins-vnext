@@ -102,11 +102,14 @@ Then just `git checkout` whichever branch you want to test.
 
 ## Configuration
 
-The plugin is configured entirely through environment variables. None are
-required for normal use — the launcher (`plugins/glean/start.sh`) derives the
-storage and session variables from what the host provides, and the server URL
-is captured by the `setup` tool on first run. The variables below are read
-directly by the server bundle.
+Primary configuration is interactive, not environment-based: the `setup` tool
+captures your Glean Server URL and drives OAuth sign-in on first run (see
+[First run](#first-run)), persisting both under `~/.glean/`. The environment
+variables below are optional and read directly by the server bundle —
+`GLEAN_MCP_SERVER_URL` overrides the URL saved by `setup`, the storage and
+session variables are normally derived by the launcher
+(`plugins/glean/start.sh`) from what the host provides, and the rest tune
+runtime behavior. None are required for normal use.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
