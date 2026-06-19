@@ -16,14 +16,12 @@ vi.mock("node:child_process", () => ({
 }));
 
 vi.mock("../src/auth-callback-server.js", () => ({
-  getCallbackUrl: () => "http://127.0.0.1:29107/callback",
-  waitForAuthCode: () => new Promise(() => {}),
+  getCallbackUrl: () => "http://127.0.0.1:29107/glean-cli-callback",
+  setExpectedState: vi.fn(),
 }));
 
 const { GleanOAuthClientProvider } = await import("../src/auth-provider.js");
-const { savePending, loadPending, deletePending } = await import(
-  "../src/pending-auth-store.js"
-);
+const { setExpectedState } = await import("../src/auth-callback-server.js");
 
 describe("GleanOAuthClientProvider", () => {
   const gleanDir = path.join(tmpDir, ".glean");
@@ -31,6 +29,7 @@ describe("GleanOAuthClientProvider", () => {
   beforeEach(() => {
     delete process.env.PLUGIN_DATA_DIR;
     fs.rmSync(gleanDir, { recursive: true, force: true });
+    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -100,24 +99,37 @@ describe("GleanOAuthClientProvider", () => {
 
   it("saveCodeVerifier and codeVerifier round-trip", () => {
     const provider = new GleanOAuthClientProvider();
-
     provider.saveCodeVerifier("verifier_abc");
-
     expect(provider.codeVerifier()).toBe("verifier_abc");
   });
 
-  it("redirectUrl returns loopback callback URL", () => {
+  it("redirectUrl returns the fixed loopback callback URL", () => {
     const provider = new GleanOAuthClientProvider();
-    expect(provider.redirectUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/callback$/);
+    expect(provider.redirectUrl).toBe(
+      "http://127.0.0.1:29107/glean-cli-callback",
+    );
+    expect(provider.clientMetadata.redirect_uris).toEqual([
+      "http://127.0.0.1:29107/glean-cli-callback",
+    ]);
   });
 
   it("clientMetadata includes redirect URI and client name", () => {
     const provider = new GleanOAuthClientProvider();
     const meta = provider.clientMetadata;
-
     expect(meta.client_name).toBe("Glean Claude Code Plugin");
     expect(meta.redirect_uris).toHaveLength(1);
     expect(meta.redirect_uris![0]).toMatch(/127\.0\.0\.1/);
+  });
+
+  it("redirectToAuthorization records the URL and hands state to the loopback", async () => {
+    const provider = new GleanOAuthClientProvider();
+    await provider.redirectToAuthorization(
+      new URL("https://example.com/oauth/authorize?state=s1"),
+    );
+    expect(provider.authorizationUrl).toBe(
+      "https://example.com/oauth/authorize?state=s1",
+    );
+    expect(setExpectedState).toHaveBeenCalledWith("s1");
   });
 
   it("invalidateCredentials('all') clears all in-memory state and deletes file", async () => {
@@ -141,9 +153,7 @@ describe("GleanOAuthClientProvider", () => {
     const provider = new GleanOAuthClientProvider();
     provider.saveTokens({ access_token: "tok" } as any);
     provider.saveClientInformation({ client_id: "cid" } as any);
-
     await provider.invalidateCredentials("client");
-
     expect(provider.tokens()).toEqual({ access_token: "tok" });
     expect(provider.clientInformation()).toBeUndefined();
   });
@@ -152,9 +162,7 @@ describe("GleanOAuthClientProvider", () => {
     const provider = new GleanOAuthClientProvider();
     provider.saveTokens({ access_token: "tok" } as any);
     provider.saveClientInformation({ client_id: "cid" } as any);
-
     await provider.invalidateCredentials("tokens");
-
     expect(provider.tokens()).toBeUndefined();
     expect(provider.clientInformation()).toEqual({ client_id: "cid" });
   });
@@ -163,9 +171,7 @@ describe("GleanOAuthClientProvider", () => {
     const provider = new GleanOAuthClientProvider();
     provider.saveTokens({ access_token: "tok" } as any);
     provider.saveCodeVerifier("verifier");
-
     await provider.invalidateCredentials("verifier");
-
     expect(provider.codeVerifier()).toBe("");
     expect(provider.tokens()).toEqual({ access_token: "tok" });
   });
@@ -178,9 +184,7 @@ describe("GleanOAuthClientProvider", () => {
   it("needsFreshClient becomes true after issuing an authorize URL without tokens", async () => {
     const provider = new GleanOAuthClientProvider();
     provider.saveClientInformation({ client_id: "cid" } as any);
-
     await provider.redirectToAuthorization(new URL("https://example.com/oauth/authorize?state=s1"));
-
     expect(provider.needsFreshClient()).toBe(true);
   });
 
@@ -188,9 +192,7 @@ describe("GleanOAuthClientProvider", () => {
     const provider = new GleanOAuthClientProvider();
     await provider.redirectToAuthorization(new URL("https://example.com/oauth/authorize?state=s1"));
     expect(provider.needsFreshClient()).toBe(true);
-
     provider.saveTokens({ access_token: "tok" } as any);
-
     expect(provider.needsFreshClient()).toBe(false);
   });
 
@@ -198,7 +200,6 @@ describe("GleanOAuthClientProvider", () => {
     const provider = new GleanOAuthClientProvider();
     await provider.redirectToAuthorization(new URL("https://example.com/oauth/authorize?state=s1"));
     provider.setPendingAuthCode("code_xyz");
-
     expect(provider.needsFreshClient()).toBe(false);
   });
 
@@ -206,13 +207,9 @@ describe("GleanOAuthClientProvider", () => {
     const provider = new GleanOAuthClientProvider();
     await provider.redirectToAuthorization(new URL("https://example.com/oauth/authorize?state=s1"));
     expect(provider.needsFreshClient()).toBe(true);
-
     await provider.invalidateCredentials("all");
-
     expect(provider.needsFreshClient()).toBe(false);
   });
-
-  // --- Pending auth store integration ---
 
   it("setPendingAuthCode stores code for retrieval", () => {
     const provider = new GleanOAuthClientProvider();
@@ -220,82 +217,20 @@ describe("GleanOAuthClientProvider", () => {
     expect(provider.pendingAuthCode).toBe("code_abc");
   });
 
-  it("redirectToAuthorization persists pending state to disk", async () => {
-    const provider = new GleanOAuthClientProvider();
-    provider.saveCodeVerifier("verifier_123");
-
-    await provider.redirectToAuthorization(
-      new URL("https://example.com/oauth/authorize?state=s1"),
-    );
-
-    const pending = loadPending();
-    expect(pending?.codeVerifier).toBe("verifier_123");
-    expect(pending?.authorizationUrl).toBe(
-      "https://example.com/oauth/authorize?state=s1",
-    );
-  });
-
-  it("saveTokens deletes pending auth file", async () => {
-    const provider = new GleanOAuthClientProvider();
-    provider.saveCodeVerifier("v");
-    await provider.redirectToAuthorization(
-      new URL("https://example.com/oauth/authorize?state=s1"),
-    );
-    expect(loadPending()).toBeDefined();
-
-    provider.saveTokens({ access_token: "tok", token_type: "Bearer" } as any);
-
-    expect(loadPending()).toBeUndefined();
-  });
-
-  it("constructor restores pending state from disk", () => {
-    savePending({
-      codeVerifier: "restored_verifier",
-      authorizationUrl: "https://example.com/auth?state=restored",
-    });
-
-    const provider = new GleanOAuthClientProvider();
-
-    expect(provider.codeVerifier()).toBe("restored_verifier");
-    expect(provider.authorizationUrl).toBe(
-      "https://example.com/auth?state=restored",
-    );
-  });
-
-  it("invalidateCredentials('all') deletes pending auth file", async () => {
-    const provider = new GleanOAuthClientProvider();
-    provider.saveCodeVerifier("v");
-    await provider.redirectToAuthorization(
-      new URL("https://example.com/oauth/authorize?state=s1"),
-    );
-    expect(loadPending()).toBeDefined();
-
-    await provider.invalidateCredentials("all");
-
-    expect(loadPending()).toBeUndefined();
-  });
-
   it("fires onTokensChanged on saveTokens with the new tokens", () => {
     const provider = new GleanOAuthClientProvider();
     const observed: Array<unknown> = [];
     provider.onTokensChanged = (t) => observed.push(t);
-
     provider.saveTokens({ access_token: "tok", token_type: "Bearer" });
-
-    expect(observed).toEqual([
-      { access_token: "tok", token_type: "Bearer" },
-    ]);
+    expect(observed).toEqual([{ access_token: "tok", token_type: "Bearer" }]);
   });
 
   it("fires onTokensChanged with undefined when invalidateCredentials clears tokens", async () => {
     const provider = new GleanOAuthClientProvider();
     provider.saveTokens({ access_token: "tok", token_type: "Bearer" });
-
     const observed: Array<unknown> = [];
     provider.onTokensChanged = (t) => observed.push(t);
-
     await provider.invalidateCredentials("all");
-
     expect(observed).toEqual([undefined]);
   });
 
@@ -303,21 +238,16 @@ describe("GleanOAuthClientProvider", () => {
     const provider = new GleanOAuthClientProvider();
     const observed: Array<unknown> = [];
     provider.onTokensChanged = (t) => observed.push(t);
-
     await provider.invalidateCredentials("all");
-
     expect(observed).toEqual([]);
   });
 
   it("does not fire onTokensChanged on invalidateCredentials('client')", async () => {
     const provider = new GleanOAuthClientProvider();
     provider.saveTokens({ access_token: "tok", token_type: "Bearer" });
-
     const observed: Array<unknown> = [];
     provider.onTokensChanged = (t) => observed.push(t);
-
     await provider.invalidateCredentials("client");
-
     expect(observed).toEqual([]);
   });
 });

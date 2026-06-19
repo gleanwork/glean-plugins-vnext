@@ -14,7 +14,11 @@ import {
   createRemoteClient,
   type RemoteClientOptions,
 } from "./remote-client.js";
-import { GleanOAuthClientProvider } from "./auth-provider.js";
+import { GleanOAuthClientProvider, openBrowser } from "./auth-provider.js";
+import {
+  startCallbackServer,
+  closeCallbackServer,
+} from "./auth-callback-server.js";
 import { handleFindSkills } from "./tools/find-skills.js";
 import { handleRunTool, runToolAnnotations } from "./tools/run-tool.js";
 import { evictStaleSkills } from "./skill-writer.js";
@@ -24,7 +28,6 @@ import {
   clearServerUrl,
 } from "./url-config-store.js";
 import { clearCredentials } from "./token-store.js";
-import { deletePending } from "./pending-auth-store.js";
 import {
   loadRemoteTools,
   saveRemoteTools,
@@ -36,7 +39,6 @@ import {
   fetchAllowedRemoteTools,
   type DispatchContext,
 } from "./tools/remote-passthrough.js";
-import { CALLBACK_URL_DESCRIPTION } from "./tools/descriptions.js";
 import { resolveSessionId } from "./session-id.js";
 
 function readEnv(...keys: string[]): string | undefined {
@@ -73,10 +75,10 @@ const SETUP_NEEDED_ERROR =
   "your Glean Server URL before using find_skills or run_tool.";
 
 // Returned by every non-setup tool when auth is missing or expired. The
-// agent should respond by calling `setup` (which drives the OAuth flow
-// and accepts the paste-back callback_url), then retry the original
-// tool call. Centralising auth in `setup` is what lets us drop
-// callback_url from every other tool's schema.
+// agent should respond by calling `setup` (which drives the OAuth sign-in
+// via elicitation + the loopback callback), then retry the original tool
+// call. Centralising auth in `setup` keeps the OAuth flow out of every
+// other tool.
 const AUTH_REDIRECT_TO_SETUP_TEXT =
   "[SETUP_REQUIRED]\n\nAuthentication is required. Call the `setup` tool " +
   "(no arguments) to sign in to Glean, then retry this tool.";
@@ -115,22 +117,6 @@ function resolveSkillsBaseDir(): string {
   return path.join("/tmp", "glean-skills-cache");
 }
 
-function extractAuthCode(pasted: string): string | null {
-  const trimmed = pasted.trim();
-  if (!trimmed) return null;
-  try {
-    const urlLike = trimmed.startsWith("?")
-      ? `http://localhost${trimmed}`
-      : trimmed;
-    const url = new URL(urlLike);
-    return url.searchParams.get("code");
-  } catch {
-    return null;
-  }
-}
-
-const hostedCallbackUrl = "https://dev.glean.com/mcp/auth/callback";
-
 const server = new Server(
   { name: "glean", version: "1.0.0" },
   { capabilities: { tools: { listChanged: true } } },
@@ -150,7 +136,7 @@ let cachedRemoteTools: Tool[] = loadRemoteTools(resolveServerUrl() ?? "");
 
 function getOAuthProvider(): GleanOAuthClientProvider {
   if (!oauthProvider) {
-    oauthProvider = new GleanOAuthClientProvider(hostedCallbackUrl);
+    oauthProvider = new GleanOAuthClientProvider();
     // Wire onTokensChanged on every fresh provider instance — after a
     // setup({reset}) we recreate the provider, and the new one needs the
     // same tools/list_changed signal so the host re-fetches the dynamic
@@ -246,11 +232,11 @@ const SETUP_TOOL: Tool = {
   annotations: { readOnlyHint: true },
   description:
     "Check or configure the Glean connection. Setup completes in three " +
-    "stages: (1) save the Server URL, (2) authenticate, (3) fetch the " +
-    "remote tool catalog. Call with no arguments to advance through the " +
-    "next missing stage. Call with server_url to (re)configure. Call with " +
-    "callback_url to finish authentication after a sign-in paste. Call " +
-    "with reset=true to clear all configuration.",
+    "stages: (1) save the Server URL, (2) sign in, (3) fetch the remote " +
+    "tool catalog. Call with no arguments to advance through the next " +
+    "missing stage; it opens the Glean sign-in page in the browser when " +
+    "needed. Call with server_url to (re)configure. Call with reset=true to " +
+    "clear all configuration.",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -258,10 +244,6 @@ const SETUP_TOOL: Tool = {
         type: "string",
         description:
           "Glean Server Instance (QE) URL (e.g. https://acme-be.glean.com).",
-      },
-      callback_url: {
-        type: "string",
-        description: CALLBACK_URL_DESCRIPTION,
       },
       reset: {
         type: "boolean",
@@ -328,70 +310,153 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return { tools };
 });
 
-function applyPastedCallbackUrl(
-  args: Record<string, unknown>,
-  label: string,
-): { kind: "proceed" } | { kind: "failed"; text: string; isError?: boolean } {
-  const raw = args.callback_url;
-  if (raw === undefined || raw === null || raw === "") {
-    return { kind: "proceed" };
-  }
-  if (typeof raw !== "string") {
-    return {
-      kind: "failed",
-      text: "callback_url must be a string.",
-      isError: true,
-    };
-  }
-  const authProvider = getOAuthProvider();
-  if (!authProvider.authorizationUrl || !authProvider.codeVerifier()) {
-    logLine("callback_url.no-pending-auth", { label });
-    return {
-      kind: "failed",
-      text:
-        "No pending authentication flow found. The callback_url parameter " +
-        "is only valid after a prior call returned [AUTHENTICATION_REQUIRED]. " +
-        "Please initiate the tool call without callback_url first.",
-      isError: true,
-    };
-  }
-  const code = extractAuthCode(raw);
-  if (!code) {
-    logLine("callback_url.bad-paste", { label, pastedLen: raw.length });
-    return {
-      kind: "failed",
-      text:
-        "Could not find a `code` parameter in the pasted callback_url. " +
-        "Make sure you used the \"Copy URL\" button on the Glean sign-in " +
-        "success page (the copied URL contains `?code=...`), then paste " +
-        "that full URL into chat and retry.",
-      isError: true,
-    };
-  }
-  authProvider.setPendingAuthCode(code);
-  logLine("callback_url.code-accepted", { label, codeLen: code.length });
-  return { kind: "proceed" };
+// How long to wait for the user to complete the browser sign-in (open the
+// authorize URL, sign in, redirect to the loopback) before giving up. The
+// loopback capture is the real wait; this bounds the blocking setup call.
+const SIGN_IN_WAIT_MS = 300_000;
+
+type RemoteClient = Awaited<ReturnType<typeof createRemoteClient>>;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`timed out after ${ms}ms`)),
+      ms,
+    );
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }
 
-function authRequiredText(authUrl: string): string {
-  return (
-    `[AUTHENTICATION_REQUIRED]\n\nThe user must sign in to Glean. ` +
-    `Render this link as markdown: [Connect to Glean](<${authUrl}>)\n\n` +
-    `After signing in, the browser lands on a Glean callback page with ` +
-    `a "Copy URL" button. The user should click Copy URL, paste the URL ` +
-    `into chat, and the original request should be retried with that ` +
-    `URL passed as the callback_url argument — the server will extract ` +
-    `the code and finish sign-in.\n\n` +
-    `Share the sign-in link with the user, then stop and wait for them ` +
-    `to paste the callback URL before retrying.`
-  );
+function backendErrorResult(label: string, err: unknown): CallToolResult {
+  const msg = err instanceof Error ? err.message : String(err);
+  logLine("connect.backend-error", { label, msg });
+  return {
+    content: [
+      { type: "text", text: `Failed to connect to Glean backend: ${msg}` },
+    ],
+    isError: true,
+  };
+}
+
+// Connect to the Glean backend, driving the OAuth sign-in if needed. The
+// loopback callback server captures the authorization code in-context (no
+// paste-back). The redirect URI is the fixed loopback URL the provider
+// reports, so DCR + the authorize request use it directly.
+async function connectWithSignIn(
+  serverUrl: string,
+): Promise<{ client?: RemoteClient; result?: CallToolResult }> {
+  const provider = getOAuthProvider();
+
+  // Happy path: already authenticated — connect directly, no callback server.
+  if (provider.tokens()) {
+    try {
+      const client = await createRemoteClient(
+        serverUrl,
+        getRemoteClientOpts(),
+        `setup-${process.pid}`,
+      );
+      return { client };
+    } catch (err) {
+      if (!(err instanceof AuthRequiredError)) {
+        return { result: backendErrorResult("setup", err) };
+      }
+      // Tokens expired — fall through to the sign-in path below.
+    }
+  }
+
+  let handle;
+  try {
+    handle = await startCallbackServer();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logLine("setup.callback-server-failed", { msg });
+    return {
+      result: {
+        content: [
+          {
+            type: "text",
+            text: `Could not start the local sign-in listener: ${msg}. Retry setup.`,
+          },
+        ],
+        isError: true,
+      },
+    };
+  }
+
+  try {
+    let authUrl: string;
+    try {
+      const client = await createRemoteClient(
+        serverUrl,
+        getRemoteClientOpts(),
+        `setup-${process.pid}`,
+      );
+      // Unexpectedly connected without needing auth — done.
+      return { client };
+    } catch (err) {
+      if (!(err instanceof AuthRequiredError)) {
+        return { result: backendErrorResult("setup", err) };
+      }
+      authUrl = err.authUrl;
+    }
+
+    // Open the Glean sign-in page; the loopback (already listening) captures
+    // the redirect automatically once the user signs in.
+    openBrowser(authUrl);
+
+    let code: string;
+    try {
+      code = await withTimeout(handle.code, SIGN_IN_WAIT_MS);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logLine("setup.sign-in-wait-failed", { msg });
+      return {
+        result: {
+          content: [
+            {
+              type: "text",
+              text:
+                "Timed out waiting for sign-in to complete. Run setup again " +
+                "to retry.",
+            },
+          ],
+          isError: true,
+        },
+      };
+    }
+
+    provider.setPendingAuthCode(code);
+    try {
+      const client = await createRemoteClient(
+        serverUrl,
+        getRemoteClientOpts(),
+        `setup-${process.pid}`,
+      );
+      return { client };
+    } catch (err) {
+      logLine("setup.finish-auth-failed", {
+        msg: err instanceof Error ? err.message : String(err),
+      });
+      return { result: backendErrorResult("setup", err) };
+    }
+  } finally {
+    closeCallbackServer();
+  }
 }
 
 /**
  * Drive the setup flow forward until either complete (URL ✓ + tokens ✓ +
- * dynamic tools fetched ✓) or blocked on a user action (paste server URL,
- * paste callback URL). Used both by `setup()` with no args and as the
- * tail of `setup({server_url})` / `setup({callback_url})`.
+ * dynamic tools fetched ✓) or blocked on a user action. Used both by
+ * `setup()` with no args and as the tail of `setup({server_url})`.
  */
 async function advanceSetup(): Promise<CallToolResult> {
   const serverUrl = resolveServerUrl();
@@ -399,32 +464,9 @@ async function advanceSetup(): Promise<CallToolResult> {
     return { content: [{ type: "text", text: SETUP_REQUIRED_TEXT }] };
   }
 
-  // Stage 2 (auth) and stage 3 (tool fetch) both require opening a remote
-  // client. The same call drives whichever is missing: connect triggers
-  // OAuth if tokens are absent (or finalizes a paste-back code), and
-  // fetchAllowedRemoteTools populates the cache on success.
-  let remoteClient;
-  try {
-    remoteClient = await createRemoteClient(
-      serverUrl,
-      getRemoteClientOpts(),
-      `setup-${process.pid}`,
-    );
-  } catch (err) {
-    if (err instanceof AuthRequiredError) {
-      return {
-        content: [{ type: "text", text: authRequiredText(err.authUrl) }],
-      };
-    }
-    const msg = err instanceof Error ? err.message : String(err);
-    logLine("connect.backend-error", { label: "setup", msg });
-    return {
-      content: [
-        { type: "text", text: `Failed to connect to Glean backend: ${msg}` },
-      ],
-      isError: true,
-    };
-  }
+  const conn = await connectWithSignIn(serverUrl);
+  if (conn.result) return conn.result;
+  const remoteClient = conn.client!;
 
   try {
     const remoteTools = await fetchAllowedRemoteTools(remoteClient);
@@ -626,10 +668,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     case "setup": {
+      logLine("client.capabilities", {
+        elicitation: server.getClientCapabilities()?.elicitation ?? null,
+        clientInfo: server.getClientVersion() ?? null,
+      });
       if (args.reset === true) {
         clearServerUrl();
         clearCredentials();
-        deletePending();
         clearRemoteTools();
         oauthProvider = undefined;
         cachedRemoteTools = [];
@@ -690,20 +735,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // instant); we just rehydrate from whatever cache exists for the
         // newly configured URL — empty for a first-time server.
         clearCredentials();
-        deletePending();
         oauthProvider = undefined;
         cachedRemoteTools = loadRemoteTools(normalized);
         logLine("setup.configured", { serverUrl: normalized });
         // Fall through to advanceSetup, which will now find URL ✓ and try
         // to drive auth + tool fetch in the same call.
-      }
-
-      const callbackApplied = applyPastedCallbackUrl(args, "setup");
-      if (callbackApplied.kind === "failed") {
-        return {
-          content: [{ type: "text", text: callbackApplied.text }],
-          ...(callbackApplied.isError ? { isError: true } : {}),
-        };
       }
 
       return await advanceSetup();
