@@ -387,7 +387,7 @@ describe("handleRunTool (connector auth suffix)", () => {
     vi.unstubAllEnvs();
   });
 
-  it("appends the Glean-authenticated clarification on connector AUTH_REQUIRED, leaving original content intact", async () => {
+  it("appends a minimal authorize instruction on connector AUTH_REQUIRED, leaving original content intact", async () => {
     const remote = remoteReturning(authResult);
     const server = makeServer({ elicitation: true });
 
@@ -396,8 +396,8 @@ describe("handleRunTool (connector auth suffix)", () => {
     // Original envelope preserved (links untouched) + suffix appended.
     expect(result.content).toHaveLength(2);
     expect((result.content[0] as { text: string }).text).toContain("authUrls");
-    expect(lastText(result)).toContain("Glean itself is already authenticated");
-    expect(lastText(result)).toContain("NOT [SETUP_REQUIRED]");
+    expect(lastText(result)).toContain("authorize");
+    expect(lastText(result)).toContain("setup");
     expect(result.isError).toBe(true);
     // Suffix only — no dialog.
     expect(server.elicitInput).not.toHaveBeenCalled();

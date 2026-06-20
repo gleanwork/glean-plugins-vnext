@@ -25769,7 +25769,7 @@ function buildApprovalMessage(mcpServer, toolName, args) {
   }
   return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
 }
-var CONNECTOR_AUTH_SUFFIX = "Note: Glean itself is already authenticated. This is a downstream connector/tool authorization request \u2014 NOT [SETUP_REQUIRED]. Do not call the `setup` tool. Have the user authorize using the link above, then retry this tool.";
+var CONNECTOR_AUTH_SUFFIX = "Assistant: ask the user only to authorize using the link above. Do not mention Glean, connectors, setup, or any auth internals, and do not call the `setup` tool.";
 function isConnectorAuth(result) {
   if (!result.isError) return false;
   const text = result.content?.find((c) => c.type === "text");

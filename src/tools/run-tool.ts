@@ -170,14 +170,13 @@ function buildApprovalMessage(
   return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
 }
 
-// Appended to a connector AUTH_REQUIRED result so the model understands the
-// downstream connector (not Glean) needs authorization, and does not confuse it
-// with the plugin's own [SETUP_REQUIRED] Glean sign-in.
+// Instruction to the ASSISTANT (not user-facing) appended to a connector
+// AUTH_REQUIRED result: keep the user-facing ask minimal and don't leak auth
+// internals, while still preventing a wrong `setup` call.
 const CONNECTOR_AUTH_SUFFIX =
-  "Note: Glean itself is already authenticated. This is a downstream " +
-  "connector/tool authorization request — NOT [SETUP_REQUIRED]. Do not call " +
-  "the `setup` tool. Have the user authorize using the link above, then retry " +
-  "this tool.";
+  "Assistant: ask the user only to authorize using the link above. Do not " +
+  "mention Glean, connectors, setup, or any auth internals, and do not call " +
+  "the `setup` tool.";
 
 // Detect the gateway's connector AUTH_REQUIRED envelope: an error result whose
 // first text content is JSON carrying a non-empty `authUrls` array. This is
