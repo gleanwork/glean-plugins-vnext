@@ -7,6 +7,7 @@ import {
   buildRemoteArgs,
   FileArgsError,
   handleRunTool,
+  handleRequestAuthConfirmation,
   runToolAnnotations,
 } from "../src/tools/run-tool.js";
 
@@ -339,6 +340,174 @@ describe("handleRunTool (HITL)", () => {
     expect(message).toContain("Submit to allow and Cancel to deny");
     expect(message).not.toContain("Arguments:");
     expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("handleRunTool (connector auth)", () => {
+  let tmpDir: string;
+  const baseArgs = {
+    server_id: "composio/jira-pack",
+    tool_name: "jirasearch",
+    arguments: { project: "ABC" },
+  };
+  // What the gateway returns when a downstream connector needs the user to
+  // authorize their account (Glean itself is already authenticated).
+  const authResult = {
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          error: "This tool requires authentication. Show the user each URL...",
+          authUrls: ["https://connect.example.com/jira"],
+        }),
+      },
+    ],
+  };
+
+  function remoteReturning(result: unknown) {
+    return {
+      callTool: vi.fn().mockResolvedValue(result),
+      close: vi.fn(),
+    } as any;
+  }
+
+  function onlyText(result: {
+    content: Array<{ type: string; text?: string }>;
+  }): string {
+    return result.content
+      .filter((c) => c.type === "text")
+      .map((c) => c.text ?? "")
+      .join("\n");
+  }
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "run-tool-connauth-test-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("rewrites a connector AUTH_REQUIRED result into a Markdown link + retry path (no dialog)", async () => {
+    const remote = remoteReturning(authResult);
+    const elicit = vi.fn();
+    const server = makeServer({ elicitation: true, elicit });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    // No dialog fires inside run_tool — that happens later via
+    // request_auth_confirmation, after the link is shown.
+    expect(elicit).not.toHaveBeenCalled();
+
+    // Content is replaced with one clean block: a clickable Markdown link, the
+    // request_auth_confirmation flow, and the [SETUP_REQUIRED] disambiguation.
+    expect(result.content).toHaveLength(1);
+    const text = onlyText(result);
+    expect(text).toContain(
+      "[Authorize access](https://connect.example.com/jira)",
+    );
+    expect(text).toContain("request_auth_confirmation");
+    expect(text).toContain("NOT [SETUP_REQUIRED]");
+    expect(text).not.toContain("authUrls"); // raw JSON envelope dropped
+    expect(result.isError).toBe(true);
+  });
+
+  it("rewrites regardless of elicitation capability", async () => {
+    const remote = remoteReturning(authResult);
+    const server = makeServer({ elicitation: false });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(server.elicitInput).not.toHaveBeenCalled();
+    expect(onlyText(result)).toContain(
+      "[Authorize access](https://connect.example.com/jira)",
+    );
+  });
+
+  it("passes a normal (non-error) result through unchanged", async () => {
+    const remote = remoteReturning({ content: [{ type: "text", text: "ok" }] });
+    const server = makeServer({ elicitation: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(result.content).toHaveLength(1);
+    expect((result.content[0] as { text: string }).text).toBe("ok");
+  });
+
+  it("passes an ordinary (non-JSON) error through unchanged", async () => {
+    const remote = remoteReturning({
+      isError: true,
+      content: [{ type: "text", text: "Backend exploded" }],
+    });
+    const server = makeServer({ elicitation: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(result.content).toHaveLength(1);
+    expect(onlyText(result)).toBe("Backend exploded");
+  });
+});
+
+describe("handleRequestAuthConfirmation", () => {
+  it("returns a retry instruction when the user accepts (Done)", async () => {
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+
+    const result = await handleRequestAuthConfirmation(server, {});
+
+    expect(elicit).toHaveBeenCalledTimes(1);
+    expect(elicit.mock.calls[0][0].message).toContain(
+      "authenticate using the link",
+    );
+    expect((result.content[0] as { text: string }).text).toContain(
+      "Retry the original tool",
+    );
+  });
+
+  it("uses a custom message when provided", async () => {
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+
+    await handleRequestAuthConfirmation(server, { message: "Custom prompt" });
+
+    expect(elicit.mock.calls[0][0].message).toBe("Custom prompt");
+  });
+
+  it("tells the model to wait when the user declines or cancels", async () => {
+    for (const action of ["decline", "cancel"]) {
+      const elicit = vi.fn().mockResolvedValue({ action });
+      const server = makeServer({ elicitation: true, elicit });
+
+      const result = await handleRequestAuthConfirmation(server, {});
+
+      expect((result.content[0] as { text: string }).text).toContain(
+        "not confirmed",
+      );
+    }
+  });
+
+  it("falls back to a chat prompt when the client cannot elicit", async () => {
+    const server = makeServer({ elicitation: false });
+
+    const result = await handleRequestAuthConfirmation(server, {});
+
+    expect(server.elicitInput).not.toHaveBeenCalled();
+    expect((result.content[0] as { text: string }).text).toContain(
+      "can't show a confirmation dialog",
+    );
+  });
+
+  it("falls back to chat guidance when the dialog errors", async () => {
+    const elicit = vi.fn().mockRejectedValue(new Error("timed out"));
+    const server = makeServer({ elicitation: true, elicit });
+
+    const result = await handleRequestAuthConfirmation(server, {});
+
+    expect((result.content[0] as { text: string }).text).toContain(
+      "could not be shown",
+    );
   });
 });
 

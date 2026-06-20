@@ -25769,6 +25769,66 @@ function buildApprovalMessage(mcpServer, toolName, args) {
   }
   return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
 }
+function parseConnectorAuth(result) {
+  if (!result.isError) return null;
+  const text = result.content?.find((c) => c.type === "text");
+  if (!text || text.type !== "text") return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(text.text);
+  } catch {
+    return null;
+  }
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.authUrls)) {
+    const authUrls = parsed.authUrls.filter(
+      (u) => typeof u === "string"
+    );
+    if (authUrls.length > 0) return { authUrls };
+  }
+  return null;
+}
+function buildConnectorAuthResult(result, authUrls) {
+  const links = authUrls.map((u) => `- [Authorize access](${u})`).join("\n");
+  const text = "This tool's connector needs authorization before it can run. Glean itself is already authenticated \u2014 this is NOT [SETUP_REQUIRED], so do NOT call `setup`.\n\nShow the user this as a clickable Markdown link:\n\n" + links + "\n\nThen call the `request_auth_confirmation` tool so the user can confirm once they've signed in, and retry this tool after they confirm.";
+  return { ...result, content: [{ type: "text", text }] };
+}
+async function handleRequestAuthConfirmation(mcpServer, args) {
+  if (!mcpServer.getClientCapabilities()?.elicitation) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: "This client can't show a confirmation dialog. Ask the user in chat whether they've finished authorizing using the link above, then retry the original tool once they confirm."
+        }
+      ]
+    };
+  }
+  const message = typeof args.message === "string" && args.message.trim() ? args.message : "Please authenticate using the link above to proceed.";
+  try {
+    const res = await mcpServer.elicitInput(
+      { message, requestedSchema: { type: "object", properties: {} } },
+      { timeout: hitlTimeoutMs() }
+    );
+    return {
+      content: [
+        {
+          type: "text",
+          text: res.action === "accept" ? "The user confirmed they have authorized the connector. Retry the original tool now." : "The user has not confirmed authorization yet. Wait until they have authorized using the link, then retry the original tool."
+        }
+      ]
+    };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return {
+      content: [
+        {
+          type: "text",
+          text: `The confirmation dialog could not be shown (${detail}). Ask the user in chat to confirm they've authorized, then retry the tool.`
+        }
+      ]
+    };
+  }
+}
 async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
   const serverId = args.server_id;
   const toolName = args.tool_name;
@@ -25787,19 +25847,19 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
       const message = buildApprovalMessage(mcpServer, toolName, args.arguments);
       const timeout = hitlTimeoutMs();
       try {
-        const result = await mcpServer.elicitInput(
+        const result2 = await mcpServer.elicitInput(
           {
             message,
             requestedSchema: { type: "object", properties: {} }
           },
           { timeout }
         );
-        if (result.action !== "accept") {
+        if (result2.action !== "accept") {
           return {
             content: [
               {
                 type: "text",
-                text: `Action ${toolName} was ${result.action === "decline" ? "declined" : "cancelled"} by the user.`
+                text: `Action ${toolName} was ${result2.action === "decline" ? "declined" : "cancelled"} by the user.`
               }
             ]
           };
@@ -25831,11 +25891,16 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
     }
     throw err;
   }
-  return callRemoteTool(
+  const result = await callRemoteTool(
     remoteClient,
     "run_tool",
     buildRemoteArgs(serverId, toolName, resolvedArgs)
   );
+  const connectorAuth = parseConnectorAuth(result);
+  if (connectorAuth) {
+    return buildConnectorAuthResult(result, connectorAuth.authUrls);
+  }
+  return result;
 }
 function buildRemoteArgs(serverId, toolName, resolvedArgs) {
   return {
@@ -26209,6 +26274,20 @@ var SETUP_TOOL = {
     required: []
   }
 };
+var REQUEST_AUTH_CONFIRMATION_TOOL = {
+  name: "request_auth_confirmation",
+  description: "After you have shown the user a downstream connector authorization link (from a run_tool result that asked for connector authorization), call this to display a confirmation dialog so the user can confirm once they have signed in. When it returns confirmation, retry the original run_tool call. This is ONLY for downstream connector auth \u2014 it is unrelated to `setup` / Glean sign-in.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      message: {
+        type: "string",
+        description: "Optional dialog text. Defaults to asking the user to authenticate using the link shown above."
+      }
+    },
+    required: []
+  }
+};
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   const runTool = {
     ...RUN_TOOL_TOOL,
@@ -26217,7 +26296,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       !!server.getClientCapabilities()?.elicitation
     )
   };
-  const tools = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
+  const tools = [
+    FIND_SKILLS_TOOL,
+    runTool,
+    SETUP_TOOL,
+    REQUEST_AUTH_CONFIRMATION_TOOL
+  ];
   const serverUrl = resolveServerUrl();
   if (!serverUrl) {
     return { tools: [...tools, ...cachedRemoteTools] };
@@ -26606,6 +26690,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       return await advanceSetup();
     }
+    case "request_auth_confirmation":
+      return await handleRequestAuthConfirmation(server, args);
     default:
       return {
         content: [{ type: "text", text: `Unknown tool: ${name}` }],

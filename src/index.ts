@@ -20,7 +20,11 @@ import {
   closeCallbackServer,
 } from "./auth-callback-server.js";
 import { handleFindSkills } from "./tools/find-skills.js";
-import { handleRunTool, runToolAnnotations } from "./tools/run-tool.js";
+import {
+  handleRunTool,
+  handleRequestAuthConfirmation,
+  runToolAnnotations,
+} from "./tools/run-tool.js";
 import { evictStaleSkills } from "./skill-writer.js";
 import {
   loadServerUrl,
@@ -254,6 +258,29 @@ const SETUP_TOOL: Tool = {
   },
 };
 
+const REQUEST_AUTH_CONFIRMATION_TOOL: Tool = {
+  name: "request_auth_confirmation",
+  description:
+    "After you have shown the user a downstream connector authorization link " +
+    "(from a run_tool result that asked for connector authorization), call " +
+    "this to display a confirmation dialog so the user can confirm once they " +
+    "have signed in. When it returns confirmation, retry the original run_tool " +
+    "call. This is ONLY for downstream connector auth — it is unrelated to " +
+    "`setup` / Glean sign-in.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      message: {
+        type: "string",
+        description:
+          "Optional dialog text. Defaults to asking the user to authenticate " +
+          "using the link shown above.",
+      },
+    },
+    required: [],
+  },
+};
+
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   const runTool: Tool = {
     ...RUN_TOOL_TOOL,
@@ -262,7 +289,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       !!server.getClientCapabilities()?.elicitation,
     ),
   };
-  const tools: Tool[] = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
+  const tools: Tool[] = [
+    FIND_SKILLS_TOOL,
+    runTool,
+    SETUP_TOOL,
+    REQUEST_AUTH_CONFIRMATION_TOOL,
+  ];
 
   // Pre-auth gate: tokens() is sync. When unauthenticated (or unconfigured)
   // skip the remote round-trip — but keep surfacing whatever we successfully
@@ -748,6 +780,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       return await advanceSetup();
     }
+
+    case "request_auth_confirmation":
+      return await handleRequestAuthConfirmation(server, args);
 
     default:
       return {

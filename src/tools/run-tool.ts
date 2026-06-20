@@ -170,6 +170,116 @@ function buildApprovalMessage(
   return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
 }
 
+// Detect the gateway's connector AUTH_REQUIRED envelope: an error result whose
+// first text content is JSON carrying a non-empty `authUrls` array. Returns the
+// parsed auth URLs when matched, else null. This is third-party connector auth
+// (the user authorizing e.g. Jira/Slack) — distinct from the plugin's own
+// [SETUP_REQUIRED] Glean sign-in.
+function parseConnectorAuth(
+  result: CallToolResult,
+): { authUrls: string[] } | null {
+  if (!result.isError) return null;
+  const text = result.content?.find((c) => c.type === "text");
+  if (!text || text.type !== "text") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.text);
+  } catch {
+    return null;
+  }
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    Array.isArray((parsed as { authUrls?: unknown }).authUrls)
+  ) {
+    const authUrls = (parsed as { authUrls: unknown[] }).authUrls.filter(
+      (u): u is string => typeof u === "string",
+    );
+    if (authUrls.length > 0) return { authUrls };
+  }
+  return null;
+}
+
+// Rebuild a connector AUTH_REQUIRED result into a render-friendly message: the
+// auth URL(s) as clickable Markdown links, plus the flow to follow (render the
+// link → call request_auth_confirmation → retry). Replaces the backend's raw
+// JSON `{error, authUrls}` envelope (whose generic wording rendered as a
+// non-clickable link) while keeping `isError` and `_meta`. Explicitly NOT the
+// plugin's own [SETUP_REQUIRED] Glean sign-in.
+function buildConnectorAuthResult(
+  result: CallToolResult,
+  authUrls: string[],
+): CallToolResult {
+  const links = authUrls.map((u) => `- [Authorize access](${u})`).join("\n");
+  const text =
+    "This tool's connector needs authorization before it can run. Glean itself " +
+    "is already authenticated — this is NOT [SETUP_REQUIRED], so do NOT call " +
+    "`setup`.\n\n" +
+    "Show the user this as a clickable Markdown link:\n\n" +
+    links +
+    "\n\nThen call the `request_auth_confirmation` tool so the user can confirm " +
+    "once they've signed in, and retry this tool after they confirm.";
+  return { ...result, content: [{ type: "text", text }] };
+}
+
+// Confirmation dialog the LLM invokes (via the `request_auth_confirmation`
+// tool) AFTER it has shown the connector authorization link. Shows a confirm
+// dialog; `accept` ("Done") means the user has authorized and the original
+// tool should be retried. No Glean call — purely a local prompt.
+export async function handleRequestAuthConfirmation(
+  mcpServer: Server,
+  args: Record<string, unknown>,
+): Promise<CallToolResult> {
+  if (!mcpServer.getClientCapabilities()?.elicitation) {
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            "This client can't show a confirmation dialog. Ask the user in chat " +
+            "whether they've finished authorizing using the link above, then " +
+            "retry the original tool once they confirm.",
+        },
+      ],
+    };
+  }
+
+  const message =
+    typeof args.message === "string" && args.message.trim()
+      ? args.message
+      : "Please authenticate using the link above to proceed.";
+
+  try {
+    const res = await mcpServer.elicitInput(
+      { message, requestedSchema: { type: "object", properties: {} } as any },
+      { timeout: hitlTimeoutMs() },
+    );
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            res.action === "accept"
+              ? "The user confirmed they have authorized the connector. Retry the original tool now."
+              : "The user has not confirmed authorization yet. Wait until they have authorized using the link, then retry the original tool.",
+        },
+      ],
+    };
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `The confirmation dialog could not be shown (${detail}). Ask the ` +
+            `user in chat to confirm they've authorized, then retry the tool.`,
+        },
+      ],
+    };
+  }
+}
+
 export async function handleRunTool(
   remoteClient: Client,
   mcpServer: Server,
@@ -250,11 +360,26 @@ export async function handleRunTool(
     throw err;
   }
 
-  return callRemoteTool(
+  const result = await callRemoteTool(
     remoteClient,
     "run_tool",
     buildRemoteArgs(serverId, toolName, resolvedArgs),
   );
+
+  // A downstream connector (Jira/Slack/...) can require the user to authorize
+  // their account even though Glean itself is authenticated. The gateway
+  // surfaces that as an error result whose text is a JSON envelope with
+  // `authUrls`. Rewrite it into a clickable Markdown link plus a clear retry
+  // path (render link → request_auth_confirmation → retry) so the model
+  // surfaces it and doesn't confuse it with the plugin's own [SETUP_REQUIRED].
+  // We deliberately do NOT elicit here — the confirm dialog comes later, after
+  // the link is shown, via the request_auth_confirmation tool.
+  const connectorAuth = parseConnectorAuth(result);
+  if (connectorAuth) {
+    return buildConnectorAuthResult(result, connectorAuth.authUrls);
+  }
+
+  return result;
 }
 
 /**
