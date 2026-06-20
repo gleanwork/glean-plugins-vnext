@@ -4,6 +4,7 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
+import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 
@@ -141,33 +142,39 @@ function isCursorClient(mcpServer: Server): boolean {
     .startsWith("cursor");
 }
 
-function formatArguments(args: unknown): string {
-  if (
-    args == null ||
-    (typeof args === "object" && Object.keys(args as object).length === 0)
-  ) {
-    return "(none)";
-  }
-  try {
-    return JSON.stringify(args, null, 2);
-  } catch {
-    return String(args);
-  }
-}
-
 // Plain text, NOT Markdown: Claude Code does not reliably render Markdown in
-// elicitation prompts, so bold/headings would leak as literal characters.
-function buildApprovalMessage(
+// elicitation prompts. Kept short (a few lines) so the Accept/Decline buttons
+// stay in view; full argument detail spills to a file when it can't fit.
+async function buildApprovalMessage(
   mcpServer: Server,
   toolName: string,
   args: unknown,
-): string {
+): Promise<string> {
   if (isCursorClient(mcpServer)) {
     return `Review the tool and arguments shown above, click on Submit to allow and Cancel to deny.`;
   }
 
-  // Claude Code: action name and arguments only.
-  return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
+  const { lines, needsFile } = buildCompactArgs(args);
+  // Indent argument lines under "Arguments:" so the structural labels stay
+  // distinct from values; keys are uppercased (in compactArgLine) so a key
+  // reads distinctly from its value — plain-text cues that cost no vertical
+  // space.
+  const message = [
+    `Action: ${toolName}`,
+    "Arguments:",
+    ...lines.map((line) => `  ${line}`),
+  ];
+  if (needsFile) {
+    // Best-effort: a failed spill (e.g. a sandbox blocking writes outside the
+    // project dir) must never break the approval gate, so fall back to a note.
+    try {
+      const filePath = await writeApprovalArgsFile(toolName, args);
+      message.push(`  Full arguments: ${filePath}`);
+    } catch {
+      message.push("  (some arguments truncated; full-args file unavailable)");
+    }
+  }
+  return message.join("\n");
 }
 
 export async function handleRunTool(
@@ -193,7 +200,11 @@ export async function handleRunTool(
     const toolMeta = await findToolJson(skillsBaseDir, toolName);
 
     if (toolMeta?.requires_approval) {
-      const message = buildApprovalMessage(mcpServer, toolName, args.arguments);
+      const message = await buildApprovalMessage(
+        mcpServer,
+        toolName,
+        args.arguments,
+      );
       const timeout = hitlTimeoutMs();
 
       try {

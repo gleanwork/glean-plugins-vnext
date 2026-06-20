@@ -9,6 +9,10 @@ import {
   handleRunTool,
   runToolAnnotations,
 } from "../src/tools/run-tool.js";
+import {
+  buildCompactArgs,
+  formatArgumentsForFile,
+} from "../src/tools/approval-args.js";
 
 describe("resolveFileArgs", () => {
   let tmpDir: string;
@@ -256,7 +260,7 @@ describe("handleRunTool (HITL)", () => {
 
     const [params, options] = elicit.mock.calls[0];
     expect(params.message).toContain("Action: jirasearch");
-    expect(params.message).toContain('"project": "ABC"');
+    expect(params.message).toContain("PROJECT: ABC");
     expect(params.message).not.toContain("Server:");
     expect(params.message).not.toContain("Search Jira issues");
     expect(params.message).not.toContain("**");
@@ -339,6 +343,112 @@ describe("handleRunTool (HITL)", () => {
     expect(message).toContain("Submit to allow and Cancel to deny");
     expect(message).not.toContain("Arguments:");
     expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("spills large arguments to a file and keeps the prompt short", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "create_doc", { requires_approval: true });
+
+    const bigBody = "| A | B |\n|---|---|\n" + "| x | y |\n".repeat(50);
+    await handleRunTool(remote, server, tmpDir, {
+      server_id: "s",
+      tool_name: "create_doc",
+      arguments: { title: "Report", body: bigBody },
+    });
+
+    const message = elicit.mock.calls[0][0].message as string;
+    expect(message).toContain("Action: create_doc");
+    expect(message).toContain("TITLE: Report");
+    expect(message.split("\n").length).toBeLessThanOrEqual(10);
+
+    const fileLine = message
+      .split("\n")
+      .find((l) => l.includes("Full arguments: "));
+    expect(fileLine).toBeDefined();
+    const marker = "Full arguments: ";
+    const filePath = fileLine!.slice(fileLine!.indexOf(marker) + marker.length).trim();
+    const fileContent = await fs.readFile(filePath, "utf-8");
+    expect(fileContent).toContain(bigBody);
+    expect(fileContent).toContain("## body");
+    await fs.rm(filePath, { force: true });
+  });
+});
+
+describe("buildCompactArgs", () => {
+  it("returns (none) for empty or null args, no file", () => {
+    expect(buildCompactArgs(null)).toEqual({ lines: ["(none)"], needsFile: false });
+    expect(buildCompactArgs({})).toEqual({ lines: ["(none)"], needsFile: false });
+  });
+
+  it("renders short scalars inline, uppercased keys, one line each, no file", () => {
+    expect(buildCompactArgs({ project: "ABC", limit: 10, dryRun: true })).toEqual({
+      lines: ["PROJECT: ABC", "LIMIT: 10", "DRYRUN: true"],
+      needsFile: false,
+    });
+  });
+
+  it("collapses a multi-line string to a single line and flags a file", () => {
+    const { lines, needsFile } = buildCompactArgs({
+      body: "# Title\n\n| A | B |\n|---|---|\n| 1 | 2 |",
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain("\n");
+    expect(lines[0].startsWith("BODY: ")).toBe(true);
+    expect(needsFile).toBe(true);
+  });
+
+  it("truncates a long single-line string with a (truncated) suffix and flags a file", () => {
+    const { lines, needsFile } = buildCompactArgs({ note: "x".repeat(300) });
+    expect(lines[0].endsWith("(truncated)")).toBe(true);
+    expect(lines[0].length).toBeLessThan(150);
+    expect(needsFile).toBe(true);
+  });
+
+  it("caps inline arg lines at the budget and flags a file when omitted", () => {
+    const { lines, needsFile } = buildCompactArgs({
+      a: 1,
+      b: 2,
+      c: 3,
+      d: 4,
+      e: 5,
+      f: 6,
+      g: 7,
+      h: 8,
+      i: 9,
+    });
+    expect(lines).toHaveLength(7);
+    expect(needsFile).toBe(true);
+  });
+
+  it("renders a small nested object as compact JSON inline", () => {
+    expect(buildCompactArgs({ filters: { status: ["open", "wip"] } })).toEqual({
+      lines: ['FILTERS: {"status":["open","wip"]}'],
+      needsFile: false,
+    });
+  });
+});
+
+describe("formatArgumentsForFile", () => {
+  it("writes string values verbatim and nested values as JSON blocks", () => {
+    const out = formatArgumentsForFile("create_doc", {
+      title: "Hi",
+      filters: { status: ["open"] },
+    });
+    expect(out).toContain("# Approval request: create_doc");
+    expect(out).toContain("## title");
+    expect(out).toContain("Hi");
+    expect(out).toContain("## filters");
+    expect(out).toContain('"status"');
+  });
+
+  it("preserves multi-line Markdown content verbatim (so it renders when opened)", () => {
+    const table = "| A | B |\n|---|---|\n| 1 | 2 |";
+    const out = formatArgumentsForFile("x", { body: table });
+    expect(out).toContain(table);
+    expect(out).not.toContain("\\n");
   });
 });
 
