@@ -342,6 +342,91 @@ describe("handleRunTool (HITL)", () => {
   });
 });
 
+describe("handleRunTool (connector auth suffix)", () => {
+  let tmpDir: string;
+  const baseArgs = {
+    server_id: "composio/jira-pack",
+    tool_name: "jirasearch",
+    arguments: { project: "ABC" },
+  };
+  // What the gateway returns when a downstream connector needs the user to
+  // authorize their account (Glean itself is already authenticated).
+  const authResult = {
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          error: "This tool requires authentication...",
+          authUrls: ["https://connect.example.com/jira"],
+        }),
+      },
+    ],
+  };
+
+  function remoteReturning(result: unknown) {
+    return {
+      callTool: vi.fn().mockResolvedValue(result),
+      close: vi.fn(),
+    } as any;
+  }
+
+  function lastText(result: {
+    content: Array<{ type: string; text?: string }>;
+  }): string {
+    const block = result.content[result.content.length - 1];
+    return block.type === "text" ? block.text ?? "" : "";
+  }
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "run-tool-connauth-test-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("appends a minimal authorize instruction on connector AUTH_REQUIRED, leaving original content intact", async () => {
+    const remote = remoteReturning(authResult);
+    const server = makeServer({ elicitation: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    // Original envelope preserved (links untouched) + suffix appended.
+    expect(result.content).toHaveLength(2);
+    expect((result.content[0] as { text: string }).text).toContain("authUrls");
+    expect(lastText(result)).toContain("authorize");
+    expect(lastText(result)).toContain("setup");
+    expect(result.isError).toBe(true);
+    // Suffix only — no dialog.
+    expect(server.elicitInput).not.toHaveBeenCalled();
+  });
+
+  it("passes a normal (non-error) result through unchanged", async () => {
+    const remote = remoteReturning({ content: [{ type: "text", text: "ok" }] });
+    const server = makeServer({ elicitation: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(result.content).toHaveLength(1);
+    expect((result.content[0] as { text: string }).text).toBe("ok");
+  });
+
+  it("passes an ordinary (non-JSON) error through unchanged", async () => {
+    const remote = remoteReturning({
+      isError: true,
+      content: [{ type: "text", text: "Backend exploded" }],
+    });
+    const server = makeServer({ elicitation: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(result.content).toHaveLength(1);
+    expect(lastText(result)).not.toContain("SETUP_REQUIRED");
+  });
+});
+
 describe("runToolAnnotations", () => {
   it("marks run_tool read-only when HITL gates an elicitation-capable client", () => {
     expect(runToolAnnotations(true, true)).toEqual({ readOnlyHint: true });

@@ -25769,6 +25769,24 @@ function buildApprovalMessage(mcpServer, toolName, args) {
   }
   return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
 }
+var CONNECTOR_AUTH_SUFFIX = "Assistant: ask the user only to authorize using the link above. Do not mention Glean, connectors, setup, or any auth internals, and do not call the `setup` tool.";
+function isConnectorAuth(result) {
+  if (!result.isError) return false;
+  const text = result.content?.find((c) => c.type === "text");
+  if (!text || text.type !== "text") return false;
+  try {
+    const parsed = JSON.parse(text.text);
+    return !!parsed && typeof parsed === "object" && Array.isArray(parsed.authUrls) && parsed.authUrls.length > 0;
+  } catch {
+    return false;
+  }
+}
+function withConnectorAuthSuffix(result) {
+  return {
+    ...result,
+    content: [...result.content, { type: "text", text: CONNECTOR_AUTH_SUFFIX }]
+  };
+}
 async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
   const serverId = args.server_id;
   const toolName = args.tool_name;
@@ -25787,19 +25805,19 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
       const message = buildApprovalMessage(mcpServer, toolName, args.arguments);
       const timeout = hitlTimeoutMs();
       try {
-        const result = await mcpServer.elicitInput(
+        const result2 = await mcpServer.elicitInput(
           {
             message,
             requestedSchema: { type: "object", properties: {} }
           },
           { timeout }
         );
-        if (result.action !== "accept") {
+        if (result2.action !== "accept") {
           return {
             content: [
               {
                 type: "text",
-                text: `Action ${toolName} was ${result.action === "decline" ? "declined" : "cancelled"} by the user.`
+                text: `Action ${toolName} was ${result2.action === "decline" ? "declined" : "cancelled"} by the user.`
               }
             ]
           };
@@ -25831,11 +25849,15 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
     }
     throw err;
   }
-  return callRemoteTool(
+  const result = await callRemoteTool(
     remoteClient,
     "run_tool",
     buildRemoteArgs(serverId, toolName, resolvedArgs)
   );
+  if (isConnectorAuth(result)) {
+    return withConnectorAuthSuffix(result);
+  }
+  return result;
 }
 function buildRemoteArgs(serverId, toolName, resolvedArgs) {
   return {
