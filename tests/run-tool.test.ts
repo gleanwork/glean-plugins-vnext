@@ -397,7 +397,7 @@ describe("handleRunTool (connector auth)", () => {
     // Informational dialog fired (not gated by ENABLE_HITL, which is unset).
     expect(elicit).toHaveBeenCalledTimes(1);
     expect(elicit.mock.calls[0][0].message).toContain("authorize its connector");
-    expect(elicit.mock.calls[0][0].message).toContain("separate from Glean setup");
+    expect(elicit.mock.calls[0][0].message).toContain("sign-in link");
 
     // Original envelope (authUrls) preserved + disambiguation note appended.
     expect((result.content[0] as { text: string }).text).toContain("authUrls");

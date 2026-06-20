@@ -217,7 +217,7 @@ function connectorAuthPrompt(toolName: string): string {
   return (
     `"${toolName}" needs you to authorize its connector before it can run. ` +
     `The assistant will show the sign-in link(s) — open them, then ask it to ` +
-    `retry. (This is separate from Glean setup; Glean is already connected.)`
+    `retry.`
   );
 }
 
