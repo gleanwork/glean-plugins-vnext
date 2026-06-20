@@ -7,10 +7,12 @@ import {
   buildRemoteArgs,
   FileArgsError,
   handleRunTool,
-  buildCompactArgs,
-  formatArgumentsForFile,
   runToolAnnotations,
 } from "../src/tools/run-tool.js";
+import {
+  buildCompactArgs,
+  formatArgumentsForFile,
+} from "../src/tools/approval-args.js";
 
 describe("resolveFileArgs", () => {
   let tmpDir: string;
@@ -398,10 +400,10 @@ describe("buildCompactArgs", () => {
     expect(needsFile).toBe(true);
   });
 
-  it("truncates a long single-line string and flags a file", () => {
+  it("truncates a long single-line string with a (truncated) suffix and flags a file", () => {
     const { lines, needsFile } = buildCompactArgs({ note: "x".repeat(300) });
-    expect(lines[0].endsWith("…")).toBe(true);
-    expect(lines[0].length).toBeLessThan(140);
+    expect(lines[0].endsWith("(truncated)")).toBe(true);
+    expect(lines[0].length).toBeLessThan(150);
     expect(needsFile).toBe(true);
   });
 
