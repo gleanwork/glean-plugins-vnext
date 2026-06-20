@@ -342,6 +342,124 @@ describe("handleRunTool (HITL)", () => {
   });
 });
 
+describe("handleRunTool (connector auth)", () => {
+  let tmpDir: string;
+  const baseArgs = {
+    server_id: "composio/jira-pack",
+    tool_name: "jirasearch",
+    arguments: { project: "ABC" },
+  };
+  // What the gateway returns when a downstream connector needs the user to
+  // authorize their account (Glean itself is already authenticated).
+  const authResult = {
+    isError: true,
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          error: "This tool requires authentication. Show the user each URL...",
+          authUrls: ["https://connect.example.com/jira"],
+        }),
+      },
+    ],
+  };
+
+  function remoteReturning(result: unknown) {
+    return {
+      callTool: vi.fn().mockResolvedValue(result),
+      close: vi.fn(),
+    } as any;
+  }
+
+  function lastText(result: {
+    content: Array<{ type: string; text?: string }>;
+  }): string {
+    const block = result.content[result.content.length - 1];
+    return block.type === "text" ? block.text ?? "" : "";
+  }
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "run-tool-connauth-test-"));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("elicits (best-effort) and appends the disambiguation suffix on connector AUTH_REQUIRED", async () => {
+    const remote = remoteReturning(authResult);
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    // Informational dialog fired (not gated by ENABLE_HITL, which is unset).
+    expect(elicit).toHaveBeenCalledTimes(1);
+    expect(elicit.mock.calls[0][0].message).toContain("authorize its connector");
+    expect(elicit.mock.calls[0][0].message).toContain("separate from Glean setup");
+
+    // Original envelope (authUrls) preserved + disambiguation note appended.
+    expect((result.content[0] as { text: string }).text).toContain("authUrls");
+    expect(lastText(result)).toContain("NOT [SETUP_REQUIRED]");
+    expect(lastText(result)).toContain("Do NOT call");
+    expect(result.isError).toBe(true);
+  });
+
+  it("appends the suffix without eliciting when the client cannot elicit", async () => {
+    const remote = remoteReturning(authResult);
+    const server = makeServer({ elicitation: false });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(server.elicitInput).not.toHaveBeenCalled();
+    expect(lastText(result)).toContain("NOT [SETUP_REQUIRED]");
+  });
+
+  it("still appends the suffix when the dialog is declined or errors", async () => {
+    const elicits = [
+      vi.fn().mockResolvedValue({ action: "decline" }),
+      vi.fn().mockRejectedValue(new Error("timed out")),
+    ];
+    for (const elicit of elicits) {
+      const remote = remoteReturning(authResult);
+      const server = makeServer({ elicitation: true, elicit });
+
+      const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+      expect(lastText(result)).toContain("NOT [SETUP_REQUIRED]");
+      expect(result.isError).toBe(true);
+    }
+  });
+
+  it("passes a normal (non-error) result through unchanged", async () => {
+    const remote = remoteReturning({ content: [{ type: "text", text: "ok" }] });
+    const elicit = vi.fn();
+    const server = makeServer({ elicitation: true, elicit });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit).not.toHaveBeenCalled();
+    expect(result.content).toHaveLength(1);
+    expect((result.content[0] as { text: string }).text).toBe("ok");
+  });
+
+  it("passes an ordinary (non-JSON) error through unchanged", async () => {
+    const remote = remoteReturning({
+      isError: true,
+      content: [{ type: "text", text: "Backend exploded" }],
+    });
+    const elicit = vi.fn();
+    const server = makeServer({ elicitation: true, elicit });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit).not.toHaveBeenCalled();
+    expect(result.content).toHaveLength(1);
+    expect(lastText(result)).not.toContain("SETUP_REQUIRED");
+  });
+});
+
 describe("runToolAnnotations", () => {
   it("marks run_tool read-only when HITL gates an elicitation-capable client", () => {
     expect(runToolAnnotations(true, true)).toEqual({ readOnlyHint: true });

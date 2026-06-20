@@ -25769,6 +25769,34 @@ function buildApprovalMessage(mcpServer, toolName, args) {
   }
   return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
 }
+var CONNECTOR_AUTH_SUFFIX = "NOTE: This is NOT [SETUP_REQUIRED]. Glean itself is already authenticated \u2014 only this downstream tool/connector needs authorization. Do NOT call `setup`. Show the link(s) above, have the user authorize, then retry this tool.";
+function parseConnectorAuth(result) {
+  if (!result.isError) return null;
+  const text = result.content?.find((c) => c.type === "text");
+  if (!text || text.type !== "text") return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(text.text);
+  } catch {
+    return null;
+  }
+  if (parsed && typeof parsed === "object" && Array.isArray(parsed.authUrls)) {
+    const authUrls = parsed.authUrls.filter(
+      (u) => typeof u === "string"
+    );
+    if (authUrls.length > 0) return { authUrls };
+  }
+  return null;
+}
+function connectorAuthPrompt(toolName) {
+  return `"${toolName}" needs you to authorize its connector before it can run. The assistant will show the sign-in link(s) \u2014 open them, then ask it to retry. (This is separate from Glean setup; Glean is already connected.)`;
+}
+function withConnectorAuthSuffix(result) {
+  return {
+    ...result,
+    content: [...result.content, { type: "text", text: CONNECTOR_AUTH_SUFFIX }]
+  };
+}
 async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
   const serverId = args.server_id;
   const toolName = args.tool_name;
@@ -25787,19 +25815,19 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
       const message = buildApprovalMessage(mcpServer, toolName, args.arguments);
       const timeout = hitlTimeoutMs();
       try {
-        const result = await mcpServer.elicitInput(
+        const result2 = await mcpServer.elicitInput(
           {
             message,
             requestedSchema: { type: "object", properties: {} }
           },
           { timeout }
         );
-        if (result.action !== "accept") {
+        if (result2.action !== "accept") {
           return {
             content: [
               {
                 type: "text",
-                text: `Action ${toolName} was ${result.action === "decline" ? "declined" : "cancelled"} by the user.`
+                text: `Action ${toolName} was ${result2.action === "decline" ? "declined" : "cancelled"} by the user.`
               }
             ]
           };
@@ -25831,11 +25859,27 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
     }
     throw err;
   }
-  return callRemoteTool(
+  const result = await callRemoteTool(
     remoteClient,
     "run_tool",
     buildRemoteArgs(serverId, toolName, resolvedArgs)
   );
+  if (parseConnectorAuth(result)) {
+    if (mcpServer.getClientCapabilities()?.elicitation) {
+      try {
+        await mcpServer.elicitInput(
+          {
+            message: connectorAuthPrompt(toolName),
+            requestedSchema: { type: "object", properties: {} }
+          },
+          { timeout: hitlTimeoutMs() }
+        );
+      } catch {
+      }
+    }
+    return withConnectorAuthSuffix(result);
+  }
+  return result;
 }
 function buildRemoteArgs(serverId, toolName, resolvedArgs) {
   return {

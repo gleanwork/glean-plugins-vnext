@@ -170,6 +170,66 @@ function buildApprovalMessage(
   return [`Action: ${toolName}`, "Arguments:", formatArguments(args)].join("\n");
 }
 
+// Appended to a connector AUTH_REQUIRED result so the model surfaces the
+// connector sign-in and does not confuse it with the plugin's own
+// [SETUP_REQUIRED] (Glean sign-in). Plain text — clients don't reliably render
+// markdown here.
+const CONNECTOR_AUTH_SUFFIX =
+  "NOTE: This is NOT [SETUP_REQUIRED]. Glean itself is already authenticated " +
+  "— only this downstream tool/connector needs authorization. Do NOT call " +
+  "`setup`. Show the link(s) above, have the user authorize, then retry this " +
+  "tool.";
+
+// Detect the gateway's connector AUTH_REQUIRED envelope: an error result whose
+// first text content is JSON carrying a non-empty `authUrls` array. Returns the
+// parsed auth URLs when matched, else null. This is third-party connector auth
+// (the user authorizing e.g. Jira/Slack) — distinct from the plugin's own
+// [SETUP_REQUIRED] Glean sign-in.
+function parseConnectorAuth(
+  result: CallToolResult,
+): { authUrls: string[] } | null {
+  if (!result.isError) return null;
+  const text = result.content?.find((c) => c.type === "text");
+  if (!text || text.type !== "text") return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text.text);
+  } catch {
+    return null;
+  }
+  if (
+    parsed &&
+    typeof parsed === "object" &&
+    Array.isArray((parsed as { authUrls?: unknown }).authUrls)
+  ) {
+    const authUrls = (parsed as { authUrls: unknown[] }).authUrls.filter(
+      (u): u is string => typeof u === "string",
+    );
+    if (authUrls.length > 0) return { authUrls };
+  }
+  return null;
+}
+
+// Plain-text heads-up shown to the user when a connector needs authorization.
+// No clickable URLs (clients don't render markdown in elicitation; the spec
+// discourages URLs in form fields) — the links come from the result text.
+function connectorAuthPrompt(toolName: string): string {
+  return (
+    `"${toolName}" needs you to authorize its connector before it can run. ` +
+    `The assistant will show the sign-in link(s) — open them, then ask it to ` +
+    `retry. (This is separate from Glean setup; Glean is already connected.)`
+  );
+}
+
+// Returns a copy of `result` with the disambiguation note appended as an extra
+// text content block (the original envelope, including authUrls, stays intact).
+function withConnectorAuthSuffix(result: CallToolResult): CallToolResult {
+  return {
+    ...result,
+    content: [...result.content, { type: "text", text: CONNECTOR_AUTH_SUFFIX }],
+  };
+}
+
 export async function handleRunTool(
   remoteClient: Client,
   mcpServer: Server,
@@ -250,11 +310,39 @@ export async function handleRunTool(
     throw err;
   }
 
-  return callRemoteTool(
+  const result = await callRemoteTool(
     remoteClient,
     "run_tool",
     buildRemoteArgs(serverId, toolName, resolvedArgs),
   );
+
+  // A downstream connector (Jira/Slack/...) can require the user to authorize
+  // their account even though Glean itself is authenticated. The gateway
+  // surfaces that as an error result whose text is a JSON envelope with
+  // `authUrls`. Make it explicit via a best-effort dialog and append a note so
+  // the model doesn't confuse it with the plugin's own [SETUP_REQUIRED] and
+  // wrongly call `setup`. Always-on (not gated by ENABLE_HITL) — this is
+  // surfacing, not an approval gate.
+  if (parseConnectorAuth(result)) {
+    if (mcpServer.getClientCapabilities()?.elicitation) {
+      try {
+        await mcpServer.elicitInput(
+          {
+            message: connectorAuthPrompt(toolName),
+            requestedSchema: { type: "object", properties: {} } as any,
+          },
+          { timeout: hitlTimeoutMs() },
+        );
+      } catch {
+        // Informational only: a declined/cancelled/timed-out dialog must not
+        // change the outcome — the suffixed result still carries the links and
+        // the retry instruction for the model.
+      }
+    }
+    return withConnectorAuthSuffix(result);
+  }
+
+  return result;
 }
 
 /**
