@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { resolveSessionId } from "../session-id.js";
 
 // The argument section of the approval prompt is capped to this many lines so
 // the Accept/Decline buttons stay in view. When a spill file is needed, one of
@@ -114,18 +115,21 @@ export function formatArgumentsForFile(
   return out.join("\n");
 }
 
-// The full arguments are written to a single fixed file under the plugin's
-// data dir (CLAUDE_PLUGIN_DATA, exported by start.sh as PLUGIN_DATA_DIR). It is
-// intentionally overwritten on each approval — only the most recent prompt's
-// arguments need to be inspectable.
+// The full arguments are written to a per-session file under the plugin's data
+// dir (CLAUDE_PLUGIN_DATA, exported by start.sh as PLUGIN_DATA_DIR). The file is
+// scoped to the chat session id so parallel sessions don't overwrite each
+// other; within a session it is intentionally overwritten on each approval —
+// only the most recent prompt's arguments need to be inspectable.
 export async function writeApprovalArgsFile(
   toolName: string,
   args: unknown,
 ): Promise<string> {
-  const dir =
+  const base =
     process.env.PLUGIN_DATA_DIR ||
     process.env.CLAUDE_PLUGIN_DATA ||
     os.tmpdir();
+  const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
+  const dir = path.join(base, "glean-approvals", sessionId);
   await fs.mkdir(dir, { recursive: true });
   const file = path.join(dir, "glean-approval-args.md");
   await fs.writeFile(file, formatArgumentsForFile(toolName, args), "utf-8");

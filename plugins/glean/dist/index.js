@@ -25668,6 +25668,22 @@ import path4 from "node:path";
 import fs3 from "node:fs/promises";
 import path3 from "node:path";
 import os from "node:os";
+
+// src/session-id.ts
+import { randomUUID } from "node:crypto";
+var fallbackSessionId;
+function resolveSessionId() {
+  const fromHost = process.env.GLEAN_SESSION_ID?.trim();
+  if (fromHost && !fromHost.startsWith("${")) {
+    return fromHost;
+  }
+  if (!fallbackSessionId) {
+    fallbackSessionId = randomUUID();
+  }
+  return fallbackSessionId;
+}
+
+// src/tools/approval-args.ts
 var maxArgSectionLines = 8;
 var maxApprovalArgChars = 120;
 function safeJson(value) {
@@ -25739,7 +25755,9 @@ function formatArgumentsForFile(toolName, args) {
   return out.join("\n");
 }
 async function writeApprovalArgsFile(toolName, args) {
-  const dir = process.env.PLUGIN_DATA_DIR || process.env.CLAUDE_PLUGIN_DATA || os.tmpdir();
+  const base = process.env.PLUGIN_DATA_DIR || process.env.CLAUDE_PLUGIN_DATA || os.tmpdir();
+  const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
+  const dir = path3.join(base, "glean-approvals", sessionId);
   await fs3.mkdir(dir, { recursive: true });
   const file = path3.join(dir, "glean-approval-args.md");
   await fs3.writeFile(file, formatArgumentsForFile(toolName, args), "utf-8");
@@ -26146,20 +26164,6 @@ async function dispatchRemoteTool(toolName, args, ctx) {
   } finally {
     await remoteClient.close();
   }
-}
-
-// src/session-id.ts
-import { randomUUID } from "node:crypto";
-var fallbackSessionId;
-function resolveSessionId() {
-  const fromHost = process.env.GLEAN_SESSION_ID?.trim();
-  if (fromHost && !fromHost.startsWith("${")) {
-    return fromHost;
-  }
-  if (!fallbackSessionId) {
-    fallbackSessionId = randomUUID();
-  }
-  return fallbackSessionId;
 }
 
 // src/index.ts
