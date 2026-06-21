@@ -26,20 +26,11 @@ Today it ships one plugin:
 
 ### Codex and Cursor
 
-The same plugin ships host-specific manifests so it can be installed from
-Codex and Cursor as well:
-
-- **Codex** reads `.agents/plugins/marketplace.json` (marketplace
-  `glean-plugins-vnext`) and the per-host manifest at
-  `plugins/glean/.codex-plugin/plugin.json`, which points the MCP server at
-  `.mcp.codex.json`.
-- **Cursor** reads `.cursor-plugin/marketplace.json` (marketplace
-  `glean-plugins`) and `plugins/glean/.cursor-plugin/plugin.json`, which reuses
-  the shared `.mcp.json`.
-
-Point the host at this repo (`gleanwork/glean-plugins-vnext`) and install
-**glean-vnext** through that host's plugin flow. The launcher, skills, and
-server bundle are shared across all hosts.
+This repo is also a plugin marketplace for **Codex** and **Cursor**: point the
+host at `gleanwork/glean-plugins-vnext` and install **glean-vnext** through that
+host's plugin flow. The launcher, skills, and server bundle are shared across
+all hosts. For Cursor, see
+[Team marketplaces](https://cursor.com/docs/plugins#team-marketplaces).
 
 ## First run
 
@@ -108,50 +99,43 @@ Then just `git checkout` whichever branch you want to test.
 
 ## Configuration
 
-Primary configuration is interactive, not environment-based: the `setup` tool
-captures your Glean Server URL and drives OAuth sign-in on first run (see
-[First run](#first-run)), persisting both under `~/.glean/`. The environment
-variables below are optional and read directly by the server bundle —
-`GLEAN_MCP_SERVER_URL` overrides the URL saved by `setup`, the storage and
-session variables are normally derived by the launcher
-(`plugins/glean/start.sh`) from what the host provides, and the rest tune
-runtime behavior. None are required for normal use.
+Configuration is interactive: the `setup` tool captures your Glean Server URL
+and drives OAuth sign-in on first run (see [First run](#first-run)), persisting
+both under `~/.glean/`. No environment variables are required.
+
+A few optional variables let you override behavior. Set them in the host's MCP
+server `env` block — the shipped `.mcp.json` / `.mcp.codex.json` already set the
+HITL ones — or in your shell:
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `GLEAN_MCP_SERVER_URL` | Overrides the Glean server URL. When unset, the URL saved by the `setup` tool is used. | (stored config from `setup`) |
-| `ENABLE_HITL` | Enables human-in-the-loop confirmation before `run_tool` executes a downstream tool. Active only when set to exactly `true`. | disabled |
-| `HITL_TIMEOUT_MS` | Timeout, in milliseconds, for a human-in-the-loop confirmation prompt. Must be a positive integer. | `300000` (5 min) |
-| `GLEAN_FILE_ARG_MAX_BYTES` | Maximum size, in bytes, of each file read via `run_tool`'s `file_args`. Must be a positive integer. | `1048576` (1 MiB) |
-| `PLUGIN_DATA_DIR` | Directory for cached credentials, the remote-tools cache, the saved server URL, and `glean-server.log`. Will also hold staged arguments for write tools. | `~/.glean` |
-| `SKILLS_BASE_DIR` | Directory where discovered skill files are written. | `/tmp/glean-skills-cache` |
-| `GLEAN_SESSION_ID` | Chat session id sent with backend calls. | a UUID generated once per process |
+| `GLEAN_MCP_SERVER_URL` | Overrides the Glean server URL captured by `setup`. | URL saved by `setup` |
+| `ENABLE_HITL` | Human-in-the-loop confirmation before `run_tool` runs a downstream tool. Active only when set to exactly `true`. | `true` (set in the shipped `.mcp.json`) |
+| `HITL_TIMEOUT_MS` | Timeout in milliseconds for a HITL confirmation prompt. Positive integer. | `300000` (5 min), set in `.mcp.json` |
+| `GLEAN_FILE_ARG_MAX_BYTES` | Maximum size in bytes of each file read via `run_tool`'s `file_args`. Positive integer. | `1048576` (1 MiB), bundle default |
+| `USE_CLAUDE_PROJECT_DIR` | Set to `1` to route the skills cache under the launch project's `.claude/tmp/`, so the `glean_run` skill's `Read` glob can match cache files. | unset |
 
-Empty values and un-interpolated `${VAR}` placeholders are ignored, so a host
-that passes an unset variable through verbatim falls back to the default.
+Empty values and un-interpolated `${VAR}` placeholders are ignored, falling back
+to the default.
 
-The defaults above are the bundle's built-in fallbacks. The shipped MCP
-manifests (`plugins/glean/.mcp.json` and `.mcp.codex.json`) set
-`ENABLE_HITL=true` and `HITL_TIMEOUT_MS=300000` in their `env` block, so
-human-in-the-loop confirmation is **on by default** in the packaged plugin.
+The launcher (`plugins/glean/start.sh`) also derives and **exports** three more
+variables the bundle reads, so these are internal — start.sh overwrites them on
+every launch and setting them yourself has no effect:
 
-### Launcher-managed variables
-
-`start.sh` runs host-side and normalizes the following host inputs into the
-plugin variables above, keeping the server bundle host-agnostic:
-
-| Host variable | Effect |
-| --- | --- |
-| `CLAUDE_PLUGIN_DATA` | Host-managed lifecycle dir. When set, both `PLUGIN_DATA_DIR` and `SKILLS_BASE_DIR` (as `<dir>/glean-skills-cache`) are anchored under it. |
-| `USE_CLAUDE_PROJECT_DIR` | Opt-in (`=1`): routes the skills cache under the launch project's `.claude/tmp/` so the `glean_run` skill's `Read` glob can match cache files. |
-| `CLAUDE_CODE_SESSION_ID` | Claude Code's conversation id; copied into `GLEAN_SESSION_ID` so the session id tracks the host conversation. |
-| `CODEX_THREAD_ID` | Codex's conversation id; used as `GLEAN_SESSION_ID` when `CLAUDE_CODE_SESSION_ID` is unset. (Cursor exposes no session id, so the plugin generates one.) |
-| `HOME` | Fallback base for `PLUGIN_DATA_DIR` (`~/.glean`) and `SKILLS_BASE_DIR` when `CLAUDE_PLUGIN_DATA` is absent. |
+- `PLUGIN_DATA_DIR` — directory for credentials, caches, the saved server URL,
+  `glean-server.log`, and (planned) staged write-tool arguments. Defaults to
+  `~/.glean`, or the host's `CLAUDE_PLUGIN_DATA` dir when provided.
+- `SKILLS_BASE_DIR` — where discovered skill files are written; anchored under
+  the host's `CLAUDE_PLUGIN_DATA` dir (or `~/.claude/tmp`), or redirected under
+  the launch project when `USE_CLAUDE_PROJECT_DIR=1`.
+- `GLEAN_SESSION_ID` — the host's conversation id: `CLAUDE_CODE_SESSION_ID` for
+  Claude Code, `CODEX_THREAD_ID` for Codex, otherwise a generated UUID.
 
 ## Troubleshooting
 
-- **Sign-in loop** — the cached OAuth provider state may be stale. Delete
-  `~/.glean/mcp-credentials.json` and retry.
+- **Sign-in loop or stale auth** — call the `setup` tool with `reset=true` to
+  clear the saved configuration and credentials, then call `setup` again to
+  re-authenticate.
 - **Tools return `[SETUP_REQUIRED]`** — the plugin isn't configured or
   authenticated yet. Call the `setup` tool (no arguments) to advance through
   the next missing stage: saving the Server URL, signing in, then fetching the
