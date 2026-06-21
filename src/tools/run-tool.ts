@@ -5,6 +5,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
+import {
+  isToolAutoApproved,
+  setToolAutoApproved,
+} from "../tool-permissions-store.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 
@@ -199,7 +203,7 @@ export async function handleRunTool(
   if (hitlEnabled && mcpServer.getClientCapabilities()?.elicitation) {
     const toolMeta = await findToolJson(skillsBaseDir, toolName);
 
-    if (toolMeta?.requires_approval) {
+    if (toolMeta?.requires_approval && !isToolAutoApproved(toolName)) {
       const message = await buildApprovalMessage(
         mcpServer,
         toolName,
@@ -211,7 +215,18 @@ export async function handleRunTool(
         const result = await mcpServer.elicitInput(
           {
             message,
-            requestedSchema: { type: "object", properties: {} } as any,
+            requestedSchema: {
+              type: "object",
+              properties: {
+                always_allow: {
+                  type: "boolean",
+                  title: "Always allow",
+                  description:
+                    "Skip approval for future calls to this tool",
+                  default: false,
+                },
+              },
+            } as any,
           },
           { timeout },
         );
@@ -225,6 +240,14 @@ export async function handleRunTool(
               },
             ],
           };
+        }
+
+        if (
+          result.content &&
+          typeof result.content === "object" &&
+          (result.content as Record<string, unknown>).always_allow === true
+        ) {
+          setToolAutoApproved(toolName);
         }
       } catch (err) {
         // Fail CLOSED. An approval gate that executes the action when the
