@@ -33,6 +33,7 @@ import {
   saveRemoteTools,
   clearRemoteTools,
 } from "./remote-tools-cache-store.js";
+import { clearToolPermissions } from "./tool-permissions-store.js";
 import {
   REMOTE_TOOLS_ALLOWLIST,
   dispatchRemoteTool,
@@ -680,6 +681,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clearServerUrl();
         clearCredentials();
         clearRemoteTools();
+        clearToolPermissions();
         oauthProvider = undefined;
         cachedRemoteTools = [];
         logLine("setup.reset");

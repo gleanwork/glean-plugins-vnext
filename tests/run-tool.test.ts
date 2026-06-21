@@ -13,6 +13,11 @@ import {
   buildCompactArgs,
   formatArgumentsForFile,
 } from "../src/tools/approval-args.js";
+import {
+  isToolAutoApproved,
+  setToolAutoApproved,
+  clearToolPermissions,
+} from "../src/tool-permissions-store.js";
 
 describe("resolveFileArgs", () => {
   let tmpDir: string;
@@ -343,6 +348,66 @@ describe("handleRunTool (HITL)", () => {
     expect(message).toContain("Submit to allow and Cancel to deny");
     expect(message).not.toContain("Arguments:");
     expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("includes always_allow in the elicitation schema", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    const schema = elicit.mock.calls[0][0].requestedSchema;
+    expect(schema.properties.always_allow).toBeDefined();
+    expect(schema.properties.always_allow.type).toBe("boolean");
+  });
+
+  it("saves auto-approve when user accepts with always_allow=true", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi
+      .fn()
+      .mockResolvedValue({ action: "accept", content: { always_allow: true } });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    clearToolPermissions();
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(isToolAutoApproved("jirasearch")).toBe(true);
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+    clearToolPermissions();
+  });
+
+  it("does not save auto-approve when user accepts without always_allow", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    clearToolPermissions();
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(isToolAutoApproved("jirasearch")).toBe(false);
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+    clearToolPermissions();
+  });
+
+  it("skips elicitation for auto-approved tools", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const server = makeServer({ elicitation: true });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    setToolAutoApproved("jirasearch");
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(server.elicitInput).not.toHaveBeenCalled();
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+    clearToolPermissions();
   });
 
   it("spills large arguments to a file and keeps the prompt short", async () => {
