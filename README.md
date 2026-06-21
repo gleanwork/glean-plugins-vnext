@@ -123,11 +123,11 @@ variables the bundle reads, so these are internal — start.sh overwrites them o
 every launch and setting them yourself has no effect:
 
 - `PLUGIN_DATA_DIR` — directory for credentials, caches, the saved server URL,
-  `glean-server.log`, and (planned) staged write-tool arguments. Defaults to
-  `~/.glean`, or the host's `CLAUDE_PLUGIN_DATA` dir when provided.
-- `SKILLS_BASE_DIR` — where discovered skill files are written; anchored under
-  the host's `CLAUDE_PLUGIN_DATA` dir (or `~/.claude/tmp`), or redirected under
-  the launch project when `USE_CLAUDE_PROJECT_DIR=1`.
+  and `glean-server.log`. Defaults to `~/.glean`, or the host's
+  `CLAUDE_PLUGIN_DATA` dir when provided.
+- `SKILLS_BASE_DIR` — where discovered skill files are written; defaults to
+  `<PLUGIN_DATA_DIR>/glean-skills-cache`, or redirected under the launch
+  project's `.claude/tmp/` when `USE_CLAUDE_PROJECT_DIR=1`.
 - `GLEAN_SESSION_ID` — the host's conversation id: `CLAUDE_CODE_SESSION_ID` for
   Claude Code, `CODEX_THREAD_ID` for Codex, otherwise a generated UUID.
 

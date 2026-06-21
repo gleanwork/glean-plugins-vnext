@@ -7,13 +7,17 @@ set -e
 LAUNCH_CWD="$PWD"
 PLUGIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Resolve where discovered skill files are written.
+# Resolve where credentials, caches, and config are stored.
 # CLAUDE_PLUGIN_DATA is the managed lifecycle dir provided by the plugin host.
 if [ -n "${CLAUDE_PLUGIN_DATA}" ]; then
-  export SKILLS_BASE_DIR="$CLAUDE_PLUGIN_DATA/glean-skills-cache"
+  export PLUGIN_DATA_DIR="$CLAUDE_PLUGIN_DATA"
 else
-  export SKILLS_BASE_DIR="${HOME:-/tmp}/.claude/tmp/glean-skills-cache"
+  export PLUGIN_DATA_DIR="${HOME:-/tmp}/.glean"
 fi
+
+# Discovered skill files are written under the data dir by default, so the
+# skills cache tracks PLUGIN_DATA_DIR instead of being resolved separately.
+export SKILLS_BASE_DIR="$PLUGIN_DATA_DIR/glean-skills-cache"
 
 # Opt-in: when USE_CLAUDE_PROJECT_DIR=1, route the skills cache under the
 # launch project's .claude/tmp/ so the glean_run skill's allowed-tools Read
@@ -26,13 +30,6 @@ if [ "${USE_CLAUDE_PROJECT_DIR:-}" = "1" ]; then
     PROJECT_DIR="$LAUNCH_CWD"
   fi
   export SKILLS_BASE_DIR="$PROJECT_DIR/.claude/tmp/glean-skills-cache"
-fi
-
-# Resolve where credentials and pending auth state are stored.
-if [ -n "${CLAUDE_PLUGIN_DATA}" ]; then
-  export PLUGIN_DATA_DIR="$CLAUDE_PLUGIN_DATA"
-else
-  export PLUGIN_DATA_DIR="${HOME:-/tmp}/.glean"
 fi
 
 # Resolve the chat session id host-side. Host-awareness lives here, not in the
