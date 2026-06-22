@@ -172,6 +172,11 @@ const FIND_SKILLS_TOOL: Tool = {
     "sub-tasks and pass each as a separate entry in the 'queries' array. " +
     "Discovered skills are written to local files and an XML skill " +
     "index with usage instructions is returned. " +
+    "If a returned skill lists no tools and its playbook does not let you " +
+    "complete the task, first check whether tools already in scope can do it — " +
+    "tools from other skills in this response, tools from earlier find_skills " +
+    "calls, or tools you can already call directly. If none fit, call find_skills " +
+    "again with reworded or additional queries. " +
     "If a previously-cached skill file referenced from memory or instructions " +
     "is missing on disk, call find_skills again to re-fetch it before failing.",
   inputSchema: {
