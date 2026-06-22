@@ -32,11 +32,19 @@ Today it ships one plugin:
 
 ## First run
 
-The first tool call triggers OAuth sign-in to Glean via the `setup` tool.
-The agent's skill walks the user through the sign-in URL and paste-back
-flow. After sign-in, OAuth credentials are cached to `~/.glean/` and reused
-across sessions — you won't be prompted again until the refresh token
-expires.
+Setup resolves your Glean instance automatically from your work email, then
+triggers OAuth sign-in to Glean via the `setup` tool. 
+
+### Setting the Server URL manually
+
+You normally don't need this — `setup` derives the Server (QE) URL from your
+work email. Set it explicitly only when you're testing a specific deployment
+or your email domain isn't recognized. Two options:
+
+- Pass `server_url` to the `setup` tool with your **Server instance (QE)** URL
+  (e.g. `https://acme-be.glean.com`). Admins can find this at
+  https://app.glean.com/admin/about-glean.
+- Or set the `GLEAN_MCP_SERVER_URL` environment variable.
 
 ## Updates
 

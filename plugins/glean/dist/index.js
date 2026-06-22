@@ -26166,6 +26166,66 @@ async function dispatchRemoteTool(toolName, args, ctx) {
   }
 }
 
+// src/config-search.ts
+var CONFIG_SEARCH_URL = "https://app.glean.com/config/search";
+var emailPattern = /^[^@\s]+@([^@\s]+\.[^@\s]+)$/;
+async function resolveServerUrlFromEmail(email2, fetchImpl = fetch) {
+  const trimmed = email2.trim();
+  const match = emailPattern.exec(trimmed);
+  if (!match) {
+    return { ok: false, error: `"${email2}" is not a valid email address.` };
+  }
+  const emailDomain = match[1].toLowerCase();
+  let resp;
+  try {
+    resp = await fetchImpl(CONFIG_SEARCH_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json"
+      },
+      body: JSON.stringify({ email: trimmed, emailDomain, isGleanApp: true })
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      error: `Could not reach Glean to look up your instance: ${msg}`
+    };
+  }
+  if (!resp.ok) {
+    return {
+      ok: false,
+      error: `Glean instance lookup failed (HTTP ${resp.status}).`
+    };
+  }
+  let data;
+  try {
+    data = await resp.json();
+  } catch {
+    return {
+      ok: false,
+      error: "Glean instance lookup returned an unexpected response."
+    };
+  }
+  const cfg = data.search_config;
+  const queryUrl = cfg?.queryURL;
+  if (!queryUrl || cfg?.centralURL && cfg.isMultiTenant !== true && sameOrigin(queryUrl, cfg.centralURL)) {
+    return {
+      ok: false,
+      error: `No Glean instance is registered for "${emailDomain}".`
+    };
+  }
+  return { ok: true, queryUrl };
+}
+function sameOrigin(a, b) {
+  try {
+    return new URL(a).origin === new URL(b).origin;
+  } catch {
+    return false;
+  }
+}
+
 // src/index.ts
 function readEnv(...keys) {
   for (const key of keys) {
@@ -26187,12 +26247,9 @@ function normalizeServerUrl(raw) {
 }
 var SETUP_REQUIRED_TEXT = `[SETUP_REQUIRED]
 
-To connect this plugin to your Glean instance:
-1. Visit https://app.glean.com/admin/about-glean (log in if needed)
-2. Copy the **Server instance (QE)** URL shown on that page (e.g. https://acme-be.glean.com/)
-3. Paste it here
-
-Then call this tool again with the server_url parameter set to the URL you copied.`;
+To connect, enter your work email (e.g. you@acme.com) and we'll find your Glean instance automatically.
+`;
+var EMAIL_RESOLVE_FAILED_TEXT = `Double-check the email for typos and try again with the corrected email.`;
 var SETUP_NEEDED_ERROR = "Glean is not configured yet. Call the `setup` tool first to provide your Glean Server URL before using find_skills or run_tool.";
 var AUTH_REDIRECT_TO_SETUP_TEXT = "[SETUP_REQUIRED]\n\nAuthentication is required. Call the `setup` tool (no arguments) to sign in to Glean, then retry this tool.";
 function resolveLogPath() {
@@ -26289,13 +26346,17 @@ var RUN_TOOL_TOOL = {
 var SETUP_TOOL = {
   name: "setup",
   annotations: { readOnlyHint: true },
-  description: "Check or configure the Glean connection. Setup completes in three stages: (1) save the Server URL, (2) sign in, (3) fetch the remote tool catalog. Call with no arguments to advance through the next missing stage; it opens the Glean sign-in page in the browser when needed. Call with server_url to (re)configure. Call with reset=true to clear all configuration.",
+  description: "Check or configure the Glean connection. Setup completes in three stages: (1) resolve and save the Server URL, (2) authenticate, (3) fetch the remote tool catalog. Call with no arguments to advance through the next missing stage. Call with email to look up and (re)configure user's Glean instance. Call with reset=true to clear all configuration.",
   inputSchema: {
     type: "object",
     properties: {
+      email: {
+        type: "string",
+        description: "User's work email (e.g. you@acme.com). Used to look up and configure your Glean Server instance (QE) URL automatically."
+      },
       server_url: {
         type: "string",
-        description: "Glean Server Instance (QE) URL (e.g. https://acme-be.glean.com)."
+        description: "Advanced. Sets the Glean Server (QE) URL directly instead of resolving it from email. Do not suggest this to users \u2014 email is the preferred path. Documented in the README for technical users who ask for it explicitly."
       },
       reset: {
         type: "boolean",
@@ -26663,12 +26724,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: "Glean configuration has been reset. Call setup again with server_url to reconfigure."
+              text: "Glean configuration has been reset. Call setup again with your email to reconfigure."
             }
           ]
         };
       }
-      const rawUrl = typeof args.server_url === "string" ? args.server_url.trim() : "";
+      let rawUrl = typeof args.server_url === "string" ? args.server_url.trim() : "";
+      const email2 = typeof args.email === "string" ? args.email.trim() : "";
+      if (!rawUrl && email2) {
+        const resolved = await resolveServerUrlFromEmail(email2);
+        if (!resolved.ok) {
+          logLine("setup.email-resolve-failed", { email: email2, error: resolved.error });
+          return {
+            content: [
+              {
+                type: "text",
+                text: `${resolved.error}
+
+${EMAIL_RESOLVE_FAILED_TEXT}`
+              }
+            ],
+            isError: true
+          };
+        }
+        rawUrl = resolved.queryUrl;
+        logLine("setup.email-resolved", { email: email2, queryUrl: rawUrl });
+      }
       if (rawUrl) {
         let normalized;
         try {
@@ -26678,7 +26759,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: [
               {
                 type: "text",
-                text: `Invalid URL: "${rawUrl}". Please provide the Server instance (QE) URL from https://app.glean.com/admin/about-glean (e.g. https://acme-be.glean.com).`
+                text: `Invalid URL: "${rawUrl}". Please provide the Server instance (QE) URL (e.g. https://acme-be.glean.com), or pass your email instead.`
               }
             ],
             isError: true

@@ -22,8 +22,8 @@ returns a response containing `[SETUP_REQUIRED]`, the user needs to
 When this happens:
 1. Call `setup` (no arguments).
    - If no Server URL is configured, `setup` returns `[SETUP_REQUIRED]` with
-     instructions. Relay them, ask the user for their Glean Server instance
-     (QE) URL, then call `setup` again with `server_url` set to that URL.
+     instructions. Relay them, ask the user for their work email, then call
+     `setup` again with `email` set to what they provided. 
    - Once a Server URL is configured, `setup` opens the Glean sign-in page in
      the browser and waits for sign-in.
 2. Once `setup` returns "Glean setup is complete", retry the original tool

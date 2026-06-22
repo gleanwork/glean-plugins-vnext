@@ -40,6 +40,7 @@ import {
   type DispatchContext,
 } from "./tools/remote-passthrough.js";
 import { resolveSessionId } from "./session-id.js";
+import { resolveServerUrlFromEmail } from "./config-search.js";
 
 function readEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -64,11 +65,14 @@ function normalizeServerUrl(raw: string): string {
 
 const SETUP_REQUIRED_TEXT =
   `[SETUP_REQUIRED]\n\n` +
-  `To connect this plugin to your Glean instance:\n` +
-  `1. Visit https://app.glean.com/admin/about-glean (log in if needed)\n` +
-  `2. Copy the **Server instance (QE)** URL shown on that page (e.g. https://acme-be.glean.com/)\n` +
-  `3. Paste it here\n\n` +
-  `Then call this tool again with the server_url parameter set to the URL you copied.`;
+  `To connect, enter your work email (e.g. you@acme.com) and we'll find ` +
+  `your Glean instance automatically.\n`;
+
+// A failed lookup asks the user to retry with a corrected email. 
+// Admins who must set the URL manually use
+// the server_url parameter (documented in the README)
+const EMAIL_RESOLVE_FAILED_TEXT =
+  `Double-check the email for typos and try again with the corrected email.`;
 
 const SETUP_NEEDED_ERROR =
   "Glean is not configured yet. Call the `setup` tool first to provide " +
@@ -232,18 +236,27 @@ const SETUP_TOOL: Tool = {
   annotations: { readOnlyHint: true },
   description:
     "Check or configure the Glean connection. Setup completes in three " +
-    "stages: (1) save the Server URL, (2) sign in, (3) fetch the remote " +
-    "tool catalog. Call with no arguments to advance through the next " +
-    "missing stage; it opens the Glean sign-in page in the browser when " +
-    "needed. Call with server_url to (re)configure. Call with reset=true to " +
-    "clear all configuration.",
+    "stages: (1) resolve and save the Server URL, (2) authenticate, " +
+    "(3) fetch the remote tool catalog. Call with no arguments to advance " +
+    "through the next missing stage. Call with email to look up and " +
+    "(re)configure user's Glean instance. Call with reset=true to clear " +
+    "all configuration.",
   inputSchema: {
     type: "object" as const,
     properties: {
+      email: {
+        type: "string",
+        description:
+          "User's work email (e.g. you@acme.com). Used to look up and " +
+          "configure your Glean Server instance (QE) URL automatically.",
+      },
       server_url: {
         type: "string",
         description:
-          "Glean Server Instance (QE) URL (e.g. https://acme-be.glean.com).",
+          "Advanced. Sets the Glean Server (QE) URL directly instead of " +
+          "resolving it from email. Do not suggest this to users — email " +
+          "is the preferred path. Documented in the README for technical " +
+          "users who ask for it explicitly.",
       },
       reset: {
         type: "boolean",
@@ -694,14 +707,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text:
                 "Glean configuration has been reset. Call setup again with " +
-                "server_url to reconfigure.",
+                "your email to reconfigure.",
             },
           ],
         };
       }
 
-      const rawUrl =
+      // An explicit server_url wins; otherwise derive the QE URL from the
+      // user's email via the public config/search lookup.
+      let rawUrl =
         typeof args.server_url === "string" ? args.server_url.trim() : "";
+      const email = typeof args.email === "string" ? args.email.trim() : "";
+
+      if (!rawUrl && email) {
+        const resolved = await resolveServerUrlFromEmail(email);
+        if (!resolved.ok) {
+          logLine("setup.email-resolve-failed", { email, error: resolved.error });
+          return {
+            content: [
+              {
+                type: "text",
+                text: `${resolved.error}\n\n${EMAIL_RESOLVE_FAILED_TEXT}`,
+              },
+            ],
+            isError: true,
+          };
+        }
+        rawUrl = resolved.queryUrl;
+        logLine("setup.email-resolved", { email, queryUrl: rawUrl });
+      }
 
       if (rawUrl) {
         let normalized: string;
@@ -714,8 +748,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 type: "text",
                 text:
                   `Invalid URL: "${rawUrl}". Please provide the Server instance (QE) URL ` +
-                  `from https://app.glean.com/admin/about-glean ` +
-                  `(e.g. https://acme-be.glean.com).`,
+                  `(e.g. https://acme-be.glean.com), or pass your email instead.`,
               },
             ],
             isError: true,

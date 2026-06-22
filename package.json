@@ -17,13 +17,15 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "esbuild": "^0.28.0",
+    "esbuild": "^0.28.1",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"
   },
-  "//overrides": "Pin hono>=4.12.25 to bypass CVE-2026-54290 (transitive dep from @modelcontextprotocol/sdk)",
+  "//overrides": "Pin hono>=4.12.25 (CVE-2026-54290, transitive from @modelcontextprotocol/sdk); pin esbuild/vite to clear CVE blocks that prevented install",
   "overrides": {
-    "hono": "^4.12.25"
+    "hono": "^4.12.25",
+    "esbuild": "$esbuild",
+    "vite": "7.3.5"
   }
 }
