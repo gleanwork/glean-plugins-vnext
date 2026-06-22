@@ -1,5 +1,14 @@
 {
   "enabledPlugins": {
     "glean-vnext@glean-plugins-vnext": true
+  },
+  "extraKnownMarketplaces": {
+    "glean-plugins-vnext": {
+      "source": {
+        "source": "github",
+        "repo": "gleanwork/glean-plugins-vnext",
+        "ref": "main"
+      }
+    }
   }
 }
