@@ -1,8 +1,9 @@
 {
   "name": "glean-vnext",
-  "version": "0.2.30",
+  "version": "0.2.31",
   "description": "Glean plugin for discovering skills and running tools.",
   "author": {
     "name": "Glean"
-  }
+  },
+  "hooks": "./hooks/hooks.json"
 }
