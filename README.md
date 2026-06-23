@@ -143,7 +143,7 @@ every launch and setting them yourself has no effect:
 
 ## Development
 
-Prerequisites: Node 22+, npm.
+Prerequisites: Node >=22 <26, npm.
 
 ```bash
 npm install
