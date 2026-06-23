@@ -1,7 +1,7 @@
 {
   "name": "glean",
   "type": "module",
-  "engines":{
+  "engines": {
     "node": ">=22 <26"
   },
   "scripts": {
