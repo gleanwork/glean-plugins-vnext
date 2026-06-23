@@ -1,6 +1,9 @@
 {
   "name": "glean",
   "type": "module",
+  "engines":{
+    "node": ">=22 <26"
+  },
   "scripts": {
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
