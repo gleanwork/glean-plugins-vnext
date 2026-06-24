@@ -280,7 +280,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       !!server.getClientCapabilities()?.elicitation,
     ),
   };
-  const tools: Tool[] = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
+  const staticTools: Tool[] = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
+
+  // One structured line on every return path, so "why don't my tools appear?"
+  // is answerable from the log alone: `static` is constant, `names` lists the
+  // dynamic tools we actually surfaced (freshly fetched or served from cache),
+  // and `state` names the path we took. The allow-list only ever drops tools
+  // outside our fixed set, so a missing allow-listed name (e.g. `chat`) means
+  // the backend never returned it. Only tool *names*, counts and the state
+  // tag are logged — never argument values, which can carry PII/secrets.
+  const serve = (state: string, dynamic: Tool[]): { tools: Tool[] } => {
+    logLine("tools-list.served", {
+      static: staticTools.length,
+      dynamic: dynamic.length,
+      names: dynamic.map((t) => t.name),
+      state,
+    });
+    return { tools: [...staticTools, ...dynamic] };
+  };
 
   // Pre-auth gate: tokens() is sync. When unauthenticated (or unconfigured)
   // skip the remote round-trip — but keep surfacing whatever we successfully
@@ -290,11 +307,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   // emits [AUTHENTICATION_REQUIRED] during the sign-in step.
   const serverUrl = resolveServerUrl();
   if (!serverUrl) {
-    return { tools: [...tools, ...cachedRemoteTools] };
+    return serve("unconfigured", cachedRemoteTools);
   }
   const provider = getOAuthProvider();
   if (!provider.tokens()) {
-    return { tools: [...tools, ...cachedRemoteTools] };
+    return serve("unauthenticated", cachedRemoteTools);
   }
 
   let remoteClient;
@@ -309,23 +326,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     // static + last-known dynamic tools. Agent isn't blocked.
     const msg = err instanceof Error ? err.message : String(err);
     logLine("connect.backend-error", { label: "tools/list", msg });
-    return { tools: [...tools, ...cachedRemoteTools] };
+    return serve("connect-error", cachedRemoteTools);
   }
 
   try {
     const remoteTools = await fetchAllowedRemoteTools(remoteClient);
     cachedRemoteTools = remoteTools;
     saveRemoteTools(serverUrl, remoteTools);
-    tools.push(...remoteTools);
+    return serve("fetched", remoteTools);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logLine("tools-list.fetch-failed", { label: "tools/list", msg });
-    tools.push(...cachedRemoteTools);
+    return serve("fetch-failed", cachedRemoteTools);
   } finally {
     await remoteClient.close();
   }
-
-  return { tools };
 });
 
 // How long to wait for the user to complete the browser sign-in (open the
