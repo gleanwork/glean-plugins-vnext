@@ -1,8 +1,9 @@
 # Glean plugin
 
 Glean's plugin for [Claude Code](https://code.claude.com/docs/en/overview),
-Codex, and Cursor. This repo is a single-plugin marketplace, shipping one
-manifest per host.
+Codex, Cursor, and [GitHub Copilot](https://docs.github.com/en/copilot) (CLI and
+VS Code). This repo is a single-plugin marketplace, shipping one manifest per
+host.
 
 Today it ships one plugin:
 
@@ -31,6 +32,32 @@ host at `gleanwork/glean-plugins-vnext` and install **glean-vnext** through that
 host's plugin flow. The launcher, skills, and server bundle are shared across
 all hosts. For Cursor, see
 [Team marketplaces](https://cursor.com/docs/plugins#team-marketplaces).
+
+### GitHub Copilot (CLI and VS Code)
+
+GitHub Copilot uses the same agent-plugin format as Claude Code, so the shipped
+Claude-format manifest (`.claude-plugin/plugin.json` + `.mcp.json` + `skills/`)
+is what Copilot loads — there is no separate Copilot plugin manifest. The repo
+exposes a Copilot-native marketplace at `.github/plugin/marketplace.json`.
+
+**Copilot CLI:**
+
+```
+copilot plugin marketplace add gleanwork/glean-plugins-vnext
+copilot plugin install glean-vnext@glean-plugins-vnext
+```
+
+**VS Code:** register the marketplace via the `chat.plugins.marketplaces`
+setting (or run **Chat: Install Plugin From Source** with this repo's Git URL),
+then install **glean-vnext** from the **Agent Plugins** view (`@agentPlugins` in
+the Extensions search). VS Code also auto-discovers plugins you installed with
+the Copilot CLI from `~/.copilot/installed-plugins/`.
+
+The plugin stays in Claude format on purpose: its `.mcp.json` references
+`${CLAUDE_PLUGIN_ROOT}` to locate `start.sh`, and that token is only substituted
+for Claude-format plugins — the Copilot-native format defines no plugin-root
+token. Adding a `.plugin/plugin.json` would make Copilot treat the plugin as
+native format and break that path resolution, so we don't ship one.
 
 ## First run
 
@@ -127,7 +154,8 @@ every launch and setting them yourself has no effect:
   `<PLUGIN_DATA_DIR>/glean-skills-cache`, or redirected under the launch
   project's `.claude/tmp/` when `USE_CLAUDE_PROJECT_DIR=1`.
 - `GLEAN_SESSION_ID` — the host's conversation id: `CLAUDE_CODE_SESSION_ID` for
-  Claude Code, `CODEX_THREAD_ID` for Codex, otherwise a generated UUID.
+  Claude Code, `CODEX_THREAD_ID` for Codex, `COPILOT_AGENT_SESSION_ID` for
+  GitHub Copilot, otherwise a generated UUID.
 
 ## Troubleshooting
 
@@ -180,15 +208,20 @@ runtime lives under `plugins/glean/`. See the Layout section below.
   marketplace.json        Marketplace manifest for Cursor.
 .agents/plugins/
   marketplace.json        Marketplace manifest for Codex.
+.github/plugin/
+  marketplace.json        Marketplace manifest for GitHub Copilot
+                          (CLI + VS Code).
 plugins/glean/
   .claude-plugin/
-    plugin.json           Claude plugin manifest — name, version, description
+    plugin.json           Claude plugin manifest — name, version, description.
+                          Also the manifest GitHub Copilot loads (shared
+                          Claude/Copilot agent-plugin format).
   .codex-plugin/
     plugin.json           Codex plugin manifest (skills, mcpServers, interface)
   .cursor-plugin/
     plugin.json           Cursor plugin manifest
-  .mcp.json               MCP server invocation for Claude / Cursor. Source
-                          of truth; sets ENABLE_HITL / HITL_TIMEOUT_MS.
+  .mcp.json               MCP server invocation for Claude / Cursor / Copilot.
+                          Source of truth; sets ENABLE_HITL / HITL_TIMEOUT_MS.
   .mcp.codex.json         MCP server invocation for Codex
   assets/                 Shared brand assets (logo) referenced by manifests
   dist/index.js           Built server bundle (every dep inlined; produced

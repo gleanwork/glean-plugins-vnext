@@ -35,13 +35,16 @@ fi
 # Resolve the chat session id host-side. Host-awareness lives here, not in the
 # plugin: the launcher reads whatever variable this host exposes and exports the
 # normalized GLEAN_SESSION_ID that the Node bundle reads. Claude Code exposes
-# CLAUDE_CODE_SESSION_ID; Codex exposes the conversation id as CODEX_THREAD_ID.
-# Hosts that expose no session id (Cursor) leave it unset, and the plugin falls
-# back to a generated per-process id.
+# CLAUDE_CODE_SESSION_ID; Codex exposes the conversation id as CODEX_THREAD_ID;
+# GitHub Copilot (CLI and VS Code) exposes COPILOT_AGENT_SESSION_ID to MCP
+# servers. Hosts that expose no session id (Cursor) leave it unset, and the
+# plugin falls back to a generated per-process id.
 if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
   export GLEAN_SESSION_ID="$CLAUDE_CODE_SESSION_ID"
 elif [ -n "${CODEX_THREAD_ID:-}" ]; then
   export GLEAN_SESSION_ID="$CODEX_THREAD_ID"
+elif [ -n "${COPILOT_AGENT_SESSION_ID:-}" ]; then
+  export GLEAN_SESSION_ID="$COPILOT_AGENT_SESSION_ID"
 fi
 
 exec node "$PLUGIN_DIR/dist/index.js"
