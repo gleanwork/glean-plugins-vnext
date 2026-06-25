@@ -3236,8 +3236,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path8) {
-      let input = path8;
+    function removeDotSegments(path9) {
+      let input = path9;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3489,8 +3489,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path8, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
+        const [path9, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path9 && path9 !== "/" ? path9 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -6973,17 +6973,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path8) {
-      const ctrl = callVisitor(key, node, visitor, path8);
+    function visit_(key, node, visitor, path9) {
+      const ctrl = callVisitor(key, node, visitor, path9);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path8, ctrl);
-        return visit_(key, ctrl, visitor, path8);
+        replaceNode(key, path9, ctrl);
+        return visit_(key, ctrl, visitor, path9);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path8 = Object.freeze(path8.concat(node));
+          path9 = Object.freeze(path9.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path8);
+            const ci = visit_(i, node.items[i], visitor, path9);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -6994,13 +6994,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path8 = Object.freeze(path8.concat(node));
-          const ck = visit_("key", node.key, visitor, path8);
+          path9 = Object.freeze(path9.concat(node));
+          const ck = visit_("key", node.key, visitor, path9);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path8);
+          const cv = visit_("value", node.value, visitor, path9);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -7021,17 +7021,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path8) {
-      const ctrl = await callVisitor(key, node, visitor, path8);
+    async function visitAsync_(key, node, visitor, path9) {
+      const ctrl = await callVisitor(key, node, visitor, path9);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path8, ctrl);
-        return visitAsync_(key, ctrl, visitor, path8);
+        replaceNode(key, path9, ctrl);
+        return visitAsync_(key, ctrl, visitor, path9);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path8 = Object.freeze(path8.concat(node));
+          path9 = Object.freeze(path9.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path8);
+            const ci = await visitAsync_(i, node.items[i], visitor, path9);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -7042,13 +7042,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path8 = Object.freeze(path8.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path8);
+          path9 = Object.freeze(path9.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path9);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path8);
+          const cv = await visitAsync_("value", node.value, visitor, path9);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -7075,23 +7075,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path8) {
+    function callVisitor(key, node, visitor, path9) {
       if (typeof visitor === "function")
-        return visitor(key, node, path8);
+        return visitor(key, node, path9);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path8);
+        return visitor.Map?.(key, node, path9);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path8);
+        return visitor.Seq?.(key, node, path9);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path8);
+        return visitor.Pair?.(key, node, path9);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path8);
+        return visitor.Scalar?.(key, node, path9);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path8);
+        return visitor.Alias?.(key, node, path9);
       return void 0;
     }
-    function replaceNode(key, path8, node) {
-      const parent = path8[path8.length - 1];
+    function replaceNode(key, path9, node) {
+      const parent = path9[path9.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -7701,10 +7701,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path8, value) {
+    function collectionFromPath(schema, path9, value) {
       let v = value;
-      for (let i = path8.length - 1; i >= 0; --i) {
-        const k = path8[i];
+      for (let i = path9.length - 1; i >= 0; --i) {
+        const k = path9[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -7723,7 +7723,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path8) => path8 == null || typeof path8 === "object" && !!path8[Symbol.iterator]().next().done;
+    var isEmptyPath = (path9) => path9 == null || typeof path9 === "object" && !!path9[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -7753,11 +7753,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path8, value) {
-        if (isEmptyPath(path8))
+      addIn(path9, value) {
+        if (isEmptyPath(path9))
           this.add(value);
         else {
-          const [key, ...rest] = path8;
+          const [key, ...rest] = path9;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -7771,8 +7771,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path8) {
-        const [key, ...rest] = path8;
+      deleteIn(path9) {
+        const [key, ...rest] = path9;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -7786,8 +7786,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path8, keepScalar) {
-        const [key, ...rest] = path8;
+      getIn(path9, keepScalar) {
+        const [key, ...rest] = path9;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -7805,8 +7805,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path8) {
-        const [key, ...rest] = path8;
+      hasIn(path9) {
+        const [key, ...rest] = path9;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -7816,8 +7816,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path8, value) {
-        const [key, ...rest] = path8;
+      setIn(path9, value) {
+        const [key, ...rest] = path9;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -10332,9 +10332,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path8, value) {
+      addIn(path9, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path8, value);
+          this.contents.addIn(path9, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -10409,14 +10409,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path8) {
-        if (Collection.isEmptyPath(path8)) {
+      deleteIn(path9) {
+        if (Collection.isEmptyPath(path9)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path8) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path9) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -10431,10 +10431,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path8, keepScalar) {
-        if (Collection.isEmptyPath(path8))
+      getIn(path9, keepScalar) {
+        if (Collection.isEmptyPath(path9))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path8, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path9, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -10445,10 +10445,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path8) {
-        if (Collection.isEmptyPath(path8))
+      hasIn(path9) {
+        if (Collection.isEmptyPath(path9))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path8) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path9) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -10465,13 +10465,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path8, value) {
-        if (Collection.isEmptyPath(path8)) {
+      setIn(path9, value) {
+        if (Collection.isEmptyPath(path9)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path8), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path9), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path8, value);
+          this.contents.setIn(path9, value);
         }
       }
       /**
@@ -12431,9 +12431,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path8) => {
+    visit.itemAtPath = (cst, path9) => {
       let item = cst;
-      for (const [field, index] of path8) {
+      for (const [field, index] of path9) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -12442,23 +12442,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path8) => {
-      const parent = visit.itemAtPath(cst, path8.slice(0, -1));
-      const field = path8[path8.length - 1][0];
+    visit.parentCollection = (cst, path9) => {
+      const parent = visit.itemAtPath(cst, path9.slice(0, -1));
+      const field = path9[path9.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path8, item, visitor) {
-      let ctrl = visitor(item, path8);
+    function _visit(path9, item, visitor) {
+      let ctrl = visitor(item, path9);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path8.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path9.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -12469,10 +12469,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path8);
+            ctrl = ctrl(item, path9);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path8) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path9) : ctrl;
     }
     exports.visit = visit;
   }
@@ -14466,10 +14466,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path8) {
-  if (!path8)
+function getElementAtPath(obj, path9) {
+  if (!path9)
     return obj;
-  return path8.reduce((acc, key) => acc?.[key], obj);
+  return path9.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -14878,11 +14878,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path8, issues) {
+function prefixIssues(path9, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path8);
+    iss.path.unshift(path9);
     return iss;
   });
 }
@@ -15029,16 +15029,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path8 = []) => {
+  const processError = (error3, path9 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path9, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path9, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -22982,9 +22982,7 @@ var StdioServerTransport = class {
 };
 
 // src/index.ts
-import path7 from "node:path";
-import fs7 from "node:fs";
-import { homedir as homedir4 } from "node:os";
+import path8 from "node:path";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/client.js
 var ExperimentalClientTasks = class {
@@ -25127,6 +25125,40 @@ var StreamableHTTPClientTransport = class {
   }
 };
 
+// src/log.ts
+import path from "node:path";
+import fs from "node:fs";
+import { homedir } from "node:os";
+function resolveLogPath() {
+  const base = process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
+  return path.join(base, "glean-server.log");
+}
+var ensuredDir;
+function ensureLogDir(logPath) {
+  const dir = path.dirname(logPath);
+  if (ensuredDir === dir) return;
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 448 });
+    fs.chmodSync(dir, 448);
+  } catch {
+  }
+  ensuredDir = dir;
+}
+function logLine(label, detail) {
+  const ts = (/* @__PURE__ */ new Date()).toISOString();
+  const suffix = detail ? ` ${JSON.stringify(detail)}` : "";
+  const line = `${ts} ${label}${suffix}
+`;
+  const logPath = resolveLogPath();
+  ensureLogDir(logPath);
+  try {
+    fs.appendFileSync(logPath, line, { mode: 384 });
+    fs.chmodSync(logPath, 384);
+  } catch {
+  }
+  console.error(line.trimEnd());
+}
+
 // src/remote-client.ts
 var GLEAN_PLUGIN = "GLEAN_PLUGIN";
 function encodeVarint(value) {
@@ -25213,16 +25245,16 @@ async function createRemoteClient(serverUrl, opts, chatSessionId) {
   const authProvider = opts.authProvider;
   if (authProvider?.pendingAuthCode) {
     const transportForAuth = pendingTransport ?? buildTransport(serverUrl, opts, chatSessionId);
-    console.error("[auth] Auth code received, exchanging for tokens...");
+    logLine("auth.code-exchange-start", { sessionId: chatSessionId });
     try {
       await transportForAuth.finishAuth(authProvider.pendingAuthCode);
       authProvider.clearPendingAuth();
       pendingTransport = void 0;
-      console.error("[auth] Token exchange complete, reconnecting...");
+      logLine("auth.code-exchange-complete", { sessionId: chatSessionId });
       return createRemoteClient(serverUrl, opts, chatSessionId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[auth] Code exchange failed: ${msg} \u2014 discarding stale auth state`);
+      logLine("auth.code-exchange-failed", { sessionId: chatSessionId, msg });
       authProvider.clearPendingAuth();
       pendingTransport = void 0;
       await authProvider.invalidateCredentials("all");
@@ -25230,7 +25262,7 @@ async function createRemoteClient(serverUrl, opts, chatSessionId) {
     }
   }
   if (authProvider?.needsFreshClient()) {
-    console.error("[auth] Previous auth URL didn't complete \u2014 forcing fresh DCR");
+    logLine("auth.fresh-dcr", { sessionId: chatSessionId });
     await authProvider.invalidateCredentials("all");
   }
   const client = new Client(
@@ -25342,21 +25374,21 @@ function closeCallbackServer() {
 }
 
 // src/token-store.ts
-import fs from "node:fs";
-import path from "node:path";
-import { homedir } from "node:os";
+import fs2 from "node:fs";
+import path2 from "node:path";
+import { homedir as homedir2 } from "node:os";
 var CREDENTIALS_FILENAME = "mcp-credentials.json";
 var DIR_MODE = 448;
 var FILE_MODE = 384;
 function resolveCredentialsDir() {
-  return process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
+  return process.env.PLUGIN_DATA_DIR || path2.join(homedir2(), ".glean");
 }
 function credentialsFile() {
-  return path.join(resolveCredentialsDir(), CREDENTIALS_FILENAME);
+  return path2.join(resolveCredentialsDir(), CREDENTIALS_FILENAME);
 }
 function loadCredentials() {
   try {
-    const raw = fs.readFileSync(credentialsFile(), "utf-8");
+    const raw = fs2.readFileSync(credentialsFile(), "utf-8");
     return JSON.parse(raw);
   } catch {
     return void 0;
@@ -25365,26 +25397,26 @@ function loadCredentials() {
 function saveCredentials(tokens, clientInfo) {
   try {
     const filePath = credentialsFile();
-    const dir = path.dirname(filePath);
-    fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    fs.chmodSync(dir, DIR_MODE);
+    const dir = path2.dirname(filePath);
+    fs2.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+    fs2.chmodSync(dir, DIR_MODE);
     const data = { tokens, clientInfo };
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), {
+    fs2.writeFileSync(filePath, JSON.stringify(data, null, 2), {
       encoding: "utf-8",
       mode: FILE_MODE
     });
-    fs.chmodSync(filePath, FILE_MODE);
+    fs2.chmodSync(filePath, FILE_MODE);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[auth] Failed to persist credentials: ${msg}`);
+    logLine("auth.persist-failed", { msg });
   }
 }
 function clearCredentials() {
   try {
-    fs.rmSync(credentialsFile(), { force: true });
+    fs2.rmSync(credentialsFile(), { force: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[auth] Failed to clear credentials: ${msg}`);
+    logLine("auth.clear-failed", { msg });
   }
 }
 
@@ -25450,7 +25482,7 @@ var GleanOAuthClientProvider = class {
     this.onTokensChanged?.(tokens);
   }
   async invalidateCredentials(scope) {
-    console.error(`[auth] Invalidating credentials: scope=${scope}`);
+    logLine("auth.invalidate", { scope });
     const tokensClearedBefore = this._tokens === void 0;
     switch (scope) {
       case "all":
@@ -25518,11 +25550,11 @@ var GleanOAuthClientProvider = class {
 
 // src/skill-writer.ts
 var import_yaml = __toESM(require_dist2(), 1);
-import fs2 from "node:fs/promises";
-import path2 from "node:path";
+import fs3 from "node:fs/promises";
+import path3 from "node:path";
 function isInsideDir(filePath, dir) {
-  const resolved = path2.resolve(filePath);
-  return resolved.startsWith(path2.resolve(dir) + path2.sep);
+  const resolved = path3.resolve(filePath);
+  return resolved.startsWith(path3.resolve(dir) + path3.sep);
 }
 function parseFrontmatter(content) {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -25547,7 +25579,7 @@ function parseFrontmatter(content) {
 async function evictStaleSkills(baseDir, maxAgeMs, log, now = Date.now()) {
   let entries;
   try {
-    entries = await fs2.readdir(baseDir, { withFileTypes: true });
+    entries = await fs3.readdir(baseDir, { withFileTypes: true });
   } catch {
     return;
   }
@@ -25555,12 +25587,12 @@ async function evictStaleSkills(baseDir, maxAgeMs, log, now = Date.now()) {
   await Promise.all(
     entries.map(async (entry) => {
       if (!entry.isDirectory()) return;
-      const skillDir = path2.resolve(baseDir, entry.name);
+      const skillDir = path3.resolve(baseDir, entry.name);
       if (!isInsideDir(skillDir, baseDir)) return;
       try {
-        const stat = await fs2.stat(skillDir);
+        const stat = await fs3.stat(skillDir);
         if (stat.mtimeMs < cutoff) {
-          await fs2.rm(skillDir, { recursive: true, force: true });
+          await fs3.rm(skillDir, { recursive: true, force: true });
           log?.("evict-stale-skill", { skill: entry.name });
         }
       } catch (err) {
@@ -25573,21 +25605,21 @@ async function evictStaleSkills(baseDir, maxAgeMs, log, now = Date.now()) {
 async function writeSkillsToDisk(skills, baseDir) {
   const index = [];
   for (const [skillName, fileMap] of Object.entries(skills)) {
-    const skillDir = path2.resolve(baseDir, skillName);
+    const skillDir = path3.resolve(baseDir, skillName);
     if (!isInsideDir(skillDir, baseDir)) {
       continue;
     }
-    await fs2.rm(skillDir, { recursive: true, force: true });
-    await fs2.mkdir(skillDir, { recursive: true });
+    await fs3.rm(skillDir, { recursive: true, force: true });
+    await fs3.mkdir(skillDir, { recursive: true });
     const writtenFiles = [];
     for (const [filePath, content] of Object.entries(fileMap)) {
-      const fullPath = path2.resolve(skillDir, filePath);
+      const fullPath = path3.resolve(skillDir, filePath);
       if (!isInsideDir(fullPath, skillDir)) {
         continue;
       }
-      await fs2.mkdir(path2.dirname(fullPath), { recursive: true });
+      await fs3.mkdir(path3.dirname(fullPath), { recursive: true });
       const text = typeof content === "string" ? content : JSON.stringify(content);
-      await fs2.writeFile(fullPath, text, "utf-8");
+      await fs3.writeFile(fullPath, text, "utf-8");
       writtenFiles.push(fullPath);
     }
     const rawSkillMd = fileMap["SKILL.md"] ?? "";
@@ -25661,12 +25693,12 @@ async function handleFindSkills(remoteClient, skillsBaseDir, args) {
 }
 
 // src/tools/run-tool.ts
-import fs4 from "node:fs/promises";
-import path4 from "node:path";
+import fs5 from "node:fs/promises";
+import path5 from "node:path";
 
 // src/tools/approval-args.ts
-import fs3 from "node:fs/promises";
-import path3 from "node:path";
+import fs4 from "node:fs/promises";
+import path4 from "node:path";
 import os from "node:os";
 
 // src/session-id.ts
@@ -25757,10 +25789,10 @@ function formatArgumentsForFile(toolName, args) {
 async function writeApprovalArgsFile(toolName, args) {
   const base = process.env.PLUGIN_DATA_DIR || process.env.CLAUDE_PLUGIN_DATA || os.tmpdir();
   const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
-  const dir = path3.join(base, "glean-approvals", sessionId);
-  await fs3.mkdir(dir, { recursive: true });
-  const file = path3.join(dir, "glean-approval-args.md");
-  await fs3.writeFile(file, formatArgumentsForFile(toolName, args), "utf-8");
+  const dir = path4.join(base, "glean-approvals", sessionId);
+  await fs4.mkdir(dir, { recursive: true });
+  const file = path4.join(dir, "glean-approval-args.md");
+  await fs4.writeFile(file, formatArgumentsForFile(toolName, args), "utf-8");
   return file;
 }
 
@@ -25802,7 +25834,7 @@ async function resolveFileArgs(fileArgs, baseArgs) {
         `file_args.${argName} must be a non-empty string path`
       );
     }
-    if (!path4.isAbsolute(filePathRaw)) {
+    if (!path5.isAbsolute(filePathRaw)) {
       throw new FileArgsError(
         `file_args.${argName} must be an absolute path; got "${filePathRaw}"`
       );
@@ -25814,7 +25846,7 @@ async function resolveFileArgs(fileArgs, baseArgs) {
     }
     let stat;
     try {
-      stat = await fs4.stat(filePathRaw);
+      stat = await fs5.stat(filePathRaw);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new FileArgsError(
@@ -25831,18 +25863,18 @@ async function resolveFileArgs(fileArgs, baseArgs) {
         `file_args.${argName}: "${filePathRaw}" is ${stat.size} bytes, exceeds ${maxBytes} byte limit (set GLEAN_FILE_ARG_MAX_BYTES to override)`
       );
     }
-    merged[argName] = await fs4.readFile(filePathRaw, "utf-8");
+    merged[argName] = await fs5.readFile(filePathRaw, "utf-8");
   }
   return merged;
 }
 async function findToolJson(skillsBaseDir, toolName) {
   try {
-    const skillDirs = await fs4.readdir(skillsBaseDir, { withFileTypes: true });
+    const skillDirs = await fs5.readdir(skillsBaseDir, { withFileTypes: true });
     for (const dir of skillDirs) {
       if (!dir.isDirectory()) continue;
-      const toolPath = path4.join(skillsBaseDir, dir.name, "tools", `${toolName}.json`);
+      const toolPath = path5.join(skillsBaseDir, dir.name, "tools", `${toolName}.json`);
       try {
-        const content = await fs4.readFile(toolPath, "utf-8");
+        const content = await fs5.readFile(toolPath, "utf-8");
         return JSON.parse(content);
       } catch {
         continue;
@@ -25967,21 +25999,21 @@ function runToolAnnotations(enableHitl, clientSupportsElicitation) {
 }
 
 // src/url-config-store.ts
-import fs5 from "node:fs";
-import path5 from "node:path";
-import { homedir as homedir2 } from "node:os";
+import fs6 from "node:fs";
+import path6 from "node:path";
+import { homedir as homedir3 } from "node:os";
 var CONFIG_FILENAME = "mcp-server-url.json";
 var DIR_MODE2 = 448;
 var FILE_MODE2 = 384;
 function resolveConfigDir() {
-  return process.env.PLUGIN_DATA_DIR || path5.join(homedir2(), ".glean");
+  return process.env.PLUGIN_DATA_DIR || path6.join(homedir3(), ".glean");
 }
 function configFile() {
-  return path5.join(resolveConfigDir(), CONFIG_FILENAME);
+  return path6.join(resolveConfigDir(), CONFIG_FILENAME);
 }
 function loadServerUrl() {
   try {
-    const raw = fs5.readFileSync(configFile(), "utf-8");
+    const raw = fs6.readFileSync(configFile(), "utf-8");
     const data = JSON.parse(raw);
     if (typeof data.serverUrl !== "string" || !data.serverUrl) return void 0;
     return data.serverUrl;
@@ -25991,39 +26023,39 @@ function loadServerUrl() {
 }
 function saveServerUrl(url2) {
   const filePath = configFile();
-  const dir = path5.dirname(filePath);
-  fs5.mkdirSync(dir, { recursive: true, mode: DIR_MODE2 });
-  fs5.chmodSync(dir, DIR_MODE2);
+  const dir = path6.dirname(filePath);
+  fs6.mkdirSync(dir, { recursive: true, mode: DIR_MODE2 });
+  fs6.chmodSync(dir, DIR_MODE2);
   const data = { serverUrl: url2 };
-  fs5.writeFileSync(filePath, JSON.stringify(data, null, 2), {
+  fs6.writeFileSync(filePath, JSON.stringify(data, null, 2), {
     encoding: "utf-8",
     mode: FILE_MODE2
   });
-  fs5.chmodSync(filePath, FILE_MODE2);
+  fs6.chmodSync(filePath, FILE_MODE2);
 }
 function clearServerUrl() {
   try {
-    fs5.rmSync(configFile(), { force: true });
+    fs6.rmSync(configFile(), { force: true });
   } catch {
   }
 }
 
 // src/remote-tools-cache-store.ts
-import fs6 from "node:fs";
-import path6 from "node:path";
-import { homedir as homedir3 } from "node:os";
+import fs7 from "node:fs";
+import path7 from "node:path";
+import { homedir as homedir4 } from "node:os";
 var CACHE_FILENAME = "remote-tools-cache.json";
 var DIR_MODE3 = 448;
 var FILE_MODE3 = 384;
 function resolveCacheDir() {
-  return process.env.PLUGIN_DATA_DIR || path6.join(homedir3(), ".glean");
+  return process.env.PLUGIN_DATA_DIR || path7.join(homedir4(), ".glean");
 }
 function cacheFile() {
-  return path6.join(resolveCacheDir(), CACHE_FILENAME);
+  return path7.join(resolveCacheDir(), CACHE_FILENAME);
 }
 function readStore() {
   try {
-    const raw = fs6.readFileSync(cacheFile(), "utf-8");
+    const raw = fs7.readFileSync(cacheFile(), "utf-8");
     const data = JSON.parse(raw);
     if (data && typeof data === "object" && !Array.isArray(data)) {
       return data;
@@ -26035,14 +26067,14 @@ function readStore() {
 }
 function writeStore(store) {
   const filePath = cacheFile();
-  const dir = path6.dirname(filePath);
-  fs6.mkdirSync(dir, { recursive: true, mode: DIR_MODE3 });
-  fs6.chmodSync(dir, DIR_MODE3);
-  fs6.writeFileSync(filePath, JSON.stringify(store, null, 2), {
+  const dir = path7.dirname(filePath);
+  fs7.mkdirSync(dir, { recursive: true, mode: DIR_MODE3 });
+  fs7.chmodSync(dir, DIR_MODE3);
+  fs7.writeFileSync(filePath, JSON.stringify(store, null, 2), {
     encoding: "utf-8",
     mode: FILE_MODE3
   });
-  fs6.chmodSync(filePath, FILE_MODE3);
+  fs7.chmodSync(filePath, FILE_MODE3);
 }
 function loadRemoteTools(serverUrl) {
   if (!serverUrl) return [];
@@ -26065,14 +26097,14 @@ function saveRemoteTools(serverUrl, tools) {
 function clearRemoteTools(serverUrl) {
   try {
     if (!serverUrl) {
-      fs6.rmSync(cacheFile(), { force: true });
+      fs7.rmSync(cacheFile(), { force: true });
       return;
     }
     const store = readStore();
     if (store[serverUrl] !== void 0) {
       delete store[serverUrl];
       if (Object.keys(store).length === 0) {
-        fs6.rmSync(cacheFile(), { force: true });
+        fs7.rmSync(cacheFile(), { force: true });
       } else {
         writeStore(store);
       }
@@ -26235,7 +26267,7 @@ function sameOrigin(a, b) {
 }
 
 // src/index.ts
-var PLUGIN_VERSION = true ? "0.2.36" : "dev";
+var PLUGIN_VERSION = true ? "0.2.37" : "dev";
 function readEnv(...keys) {
   for (const key of keys) {
     const v = process.env[key];
@@ -26261,34 +26293,11 @@ To connect, enter your work email (e.g. you@acme.com) and we'll find your Glean 
 var EMAIL_RESOLVE_FAILED_TEXT = `Double-check the email for typos and try again with the corrected email.`;
 var SETUP_NEEDED_ERROR = "Glean is not configured yet. Call the `setup` tool first to provide your Glean Server URL before using find_skills or run_tool.";
 var AUTH_REDIRECT_TO_SETUP_TEXT = "[SETUP_REQUIRED]\n\nAuthentication is required. Call the `setup` tool (no arguments) to sign in to Glean, then retry this tool.";
-function resolveLogPath() {
-  const base = process.env.PLUGIN_DATA_DIR || path7.join(homedir4(), ".glean");
-  return path7.join(base, "glean-server.log");
-}
-var LOG_PATH = resolveLogPath();
-try {
-  const logDir = path7.dirname(LOG_PATH);
-  fs7.mkdirSync(logDir, { recursive: true, mode: 448 });
-  fs7.chmodSync(logDir, 448);
-} catch {
-}
-function logLine(label, detail) {
-  const ts = (/* @__PURE__ */ new Date()).toISOString();
-  const suffix = detail ? ` ${JSON.stringify(detail)}` : "";
-  const line = `${ts} ${label}${suffix}
-`;
-  try {
-    fs7.appendFileSync(LOG_PATH, line, { mode: 384 });
-    fs7.chmodSync(LOG_PATH, 384);
-  } catch {
-  }
-  console.error(line.trimEnd());
-}
 function resolveSkillsBaseDir() {
   if (process.env.SKILLS_BASE_DIR) {
     return process.env.SKILLS_BASE_DIR;
   }
-  return path7.join("/tmp", "glean-skills-cache");
+  return path8.join("/tmp", "glean-skills-cache");
 }
 var server = new Server(
   { name: "glean", version: "1.0.0" },
@@ -26505,6 +26514,7 @@ async function connectWithSignIn(serverUrl) {
       }
       authUrl = err.authUrl;
     }
+    logLine("setup.sign-in-started", { sessionId: resolveSessionId() });
     openBrowser(authUrl);
     let code;
     try {
@@ -26555,6 +26565,10 @@ async function advanceSetup() {
     const remoteTools = await fetchAllowedRemoteTools(remoteClient);
     cachedRemoteTools = remoteTools;
     saveRemoteTools(serverUrl, remoteTools);
+    logLine("setup.complete", {
+      sessionId: resolveSessionId(),
+      toolCount: remoteTools.length
+    });
     const toolNames = remoteTools.map((t) => t.name).join(", ") || "(none)";
     return {
       content: [

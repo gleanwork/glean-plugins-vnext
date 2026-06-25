@@ -8,6 +8,7 @@ import { execFile, spawn } from "node:child_process";
 import { platform } from "node:os";
 import { getCallbackUrl, setExpectedState } from "./auth-callback-server.js";
 import { clearCredentials, loadCredentials, saveCredentials } from "./token-store.js";
+import { logLine } from "./log.js";
 
 export type InvalidationScope = "all" | "client" | "tokens" | "verifier";
 
@@ -88,7 +89,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   }
 
   async invalidateCredentials(scope: InvalidationScope): Promise<void> {
-    console.error(`[auth] Invalidating credentials: scope=${scope}`);
+    logLine("auth.invalidate", { scope });
     const tokensClearedBefore = this._tokens === undefined;
     switch (scope) {
       case "all":

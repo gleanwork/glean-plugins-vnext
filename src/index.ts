@@ -7,13 +7,12 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import path from "node:path";
-import fs from "node:fs";
-import { homedir } from "node:os";
 import {
   AuthRequiredError,
   createRemoteClient,
   type RemoteClientOptions,
 } from "./remote-client.js";
+import { logLine } from "./log.js";
 import { GleanOAuthClientProvider, openBrowser } from "./auth-provider.js";
 import {
   startCallbackServer,
@@ -94,33 +93,6 @@ const SETUP_NEEDED_ERROR =
 const AUTH_REDIRECT_TO_SETUP_TEXT =
   "[SETUP_REQUIRED]\n\nAuthentication is required. Call the `setup` tool " +
   "(no arguments) to sign in to Glean, then retry this tool.";
-
-function resolveLogPath(): string {
-  const base = process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
-  return path.join(base, "glean-server.log");
-}
-
-const LOG_PATH = resolveLogPath();
-try {
-  const logDir = path.dirname(LOG_PATH);
-  fs.mkdirSync(logDir, { recursive: true, mode: 0o700 });
-  fs.chmodSync(logDir, 0o700);
-} catch {
-  /* ignore */
-}
-
-function logLine(label: string, detail?: Record<string, unknown>): void {
-  const ts = new Date().toISOString();
-  const suffix = detail ? ` ${JSON.stringify(detail)}` : "";
-  const line = `${ts} ${label}${suffix}\n`;
-  try {
-    fs.appendFileSync(LOG_PATH, line, { mode: 0o600 });
-    fs.chmodSync(LOG_PATH, 0o600);
-  } catch {
-    /* ignore */
-  }
-  console.error(line.trimEnd());
-}
 
 function resolveSkillsBaseDir(): string {
   if (process.env.SKILLS_BASE_DIR) {
@@ -455,6 +427,7 @@ async function connectWithSignIn(
 
     // Open the Glean sign-in page; the loopback (already listening) captures
     // the redirect automatically once the user signs in.
+    logLine("setup.sign-in-started", { sessionId: resolveSessionId() });
     openBrowser(authUrl);
 
     let code: string;
@@ -517,6 +490,10 @@ async function advanceSetup(): Promise<CallToolResult> {
     const remoteTools = await fetchAllowedRemoteTools(remoteClient);
     cachedRemoteTools = remoteTools;
     saveRemoteTools(serverUrl, remoteTools);
+    logLine("setup.complete", {
+      sessionId: resolveSessionId(),
+      toolCount: remoteTools.length,
+    });
     const toolNames = remoteTools.map((t) => t.name).join(", ") || "(none)";
     return {
       content: [
