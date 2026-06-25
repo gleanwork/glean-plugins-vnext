@@ -42,6 +42,14 @@ import {
 import { resolveSessionId } from "./session-id.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
 
+// Injected at build time by scripts/build.mjs from the plugin manifest version.
+// Absent under `tsx` dev runs — the typeof guard falls back to "dev" there.
+declare const __GLEAN_PLUGIN_VERSION__: string | undefined;
+const PLUGIN_VERSION =
+  typeof __GLEAN_PLUGIN_VERSION__ !== "undefined"
+    ? __GLEAN_PLUGIN_VERSION__
+    : "dev";
+
 function readEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
     const v = process.env[key];
@@ -812,6 +820,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 async function main() {
   // Run once per session at MCP server startup.
+  // First line per process: stamps the plugin version (+ node/pid) so any
+  // session's log is traceable to the exact build that served it.
+  logLine("server.start", {
+    version: PLUGIN_VERSION,
+    node: process.version,
+    pid: process.pid,
+  });
   const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
   try {
     await evictStaleSkills(resolveSkillsBaseDir(), ONE_WEEK_MS, logLine);
