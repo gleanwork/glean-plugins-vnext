@@ -21,6 +21,7 @@ import {
 } from "./auth-callback-server.js";
 import { handleFindSkills } from "./tools/find-skills.js";
 import { handleRunTool, runToolAnnotations } from "./tools/run-tool.js";
+import { handleRunCode } from "./tools/run-code.js";
 import { evictStaleSkills } from "./skill-writer.js";
 import {
   loadServerUrl,
@@ -120,6 +121,13 @@ function resolveSkillsBaseDir(): string {
   }
   return path.join("/tmp", "glean-skills-cache");
 }
+
+// Experimental "code mode". When ON, the model additionally gets `run_code`: it
+// writes JavaScript that calls each downstream tool as an async `PTC_<TOOL>()`
+// function, and the plugin executes that code in a persistent sandbox. Default
+// OFF so deployed behavior (run_tool) is untouched.
+const RUN_CODE_ENABLED =
+  process.env.DANGEROUSLY_ENABLE_UNSTABLE_RUN_CODE_FEATURE === "true";
 
 const server = new Server(
   { name: "glean", version: "1.0.0" },
@@ -236,6 +244,74 @@ const RUN_TOOL_TOOL: Tool = {
   },
 };
 
+const RUN_CODE_TOOL: Tool = {
+  name: "run_code",
+  description:
+    "Run JavaScript that calls Glean tools as async functions — best for BATCH " +
+    "jobs (2+ calls: chaining, fan-out, or a loop). For a single one-off call, " +
+    "`run_tool` is simpler. Each discovered tool is `PTC_<TOOL_NAME>(args)` " +
+    "(server_id bound for you; first-class tools like `PTC_search` too). Call " +
+    "find_skills first and read each tool's JSON for its arg names.\n\n" +
+    "A PTC_ call resolves to a ToolResult: `.json()` (parsed, or undefined for " +
+    "non-JSON — branch on `.format` = 'json'|'text'|'empty', NOT `if(r.json())`), " +
+    "`.text`, `.get('a.b', fallback)` (never throws). `return` sends a value back " +
+    "VERBATIM. So return/print ONLY what you need; full data stays " +
+    "in the runtime. To persist a variable across calls use a BARE assignment " +
+    "(`x = await PTC_...()`); var/let/const are temporary. `inspect(x)` shows a " +
+    "value's shape; `print(...)` for output. Top-level await works. " +
+    "Call run_code ONE AT A TIME — await each call's result before issuing the " +
+    "next; do NOT make parallel run_code calls.\n\n" +
+    "The result is JSON: { ok, value?, stdout?, session?, error? }. A failed PTC_ call " +
+    "THROWS (`Error: PTC_<TOOL> failed: <reason>`); an uncaught throw ends the cell " +
+    "with `ok:false` + `error.message`. Use try/catch to handle a failure " +
+    "or keep a batch going (writes already made are NOT rolled back). " +
+    "See find_skills output for the full guide.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      code: {
+        type: "string",
+        description:
+          "JavaScript to execute. Tools are async `PTC_<TOOL_NAME>(args)` " +
+          "functions. Use `return` to send a value back.",
+      },
+      reset: {
+        type: "boolean",
+        description:
+          "If true, clear all persisted session variables and start a fresh " +
+          "runtime before executing this code.",
+      },
+    },
+    required: ["code"],
+  },
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      ok: {
+        type: "boolean",
+        description: "true if the cell finished without throwing.",
+      },
+      // The cell's return value, verbatim — any JSON type; omitted on error.
+      value: {},
+      stdout: { type: "string", description: "print(...) output, if any." },
+      session: {
+        type: "object",
+        properties: { fresh: { type: "boolean" } },
+      },
+      error: {
+        type: "object",
+        properties: {
+          message: {
+            type: "string",
+            description: "Thrown message, e.g. `PTC_X failed: <reason>`.",
+          },
+        },
+      },
+    },
+    required: ["ok"],
+  },
+};
+
 const SETUP_TOOL: Tool = {
   name: "setup",
   annotations: { readOnlyHint: true },
@@ -280,7 +356,13 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       !!server.getClientCapabilities()?.elicitation,
     ),
   };
-  const staticTools: Tool[] = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
+  // Code mode ADDS run_code alongside run_tool (it does not replace it):
+  // run_tool handles single one-off calls, run_code is for batches (2+ calls /
+  // chaining / fan-out). When the flag is off the surface is identical to
+  // what's deployed today.
+  const staticTools: Tool[] = RUN_CODE_ENABLED
+    ? [FIND_SKILLS_TOOL, runTool, RUN_CODE_TOOL, SETUP_TOOL]
+    : [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
 
   // One structured line on every return path, so "why don't my tools appear?"
   // is answerable from the log alone: `static` is constant, `names` lists the
@@ -552,6 +634,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   // setup has provided a server URL. Auth is handled by dispatchRemoteTool
   // via the standard [AUTHENTICATION_REQUIRED] flow.
   if (REMOTE_TOOLS_ALLOWLIST.has(name)) {
+    // First-class tools run directly. A single call belongs here, not in
+    // run_code (which is scoped to batches); they remain usable as PTC_<name>
+    // inside run_code when the model is batching/composing.
     const serverUrl = resolveServerUrl();
     if (!serverUrl) {
       return {
@@ -630,6 +715,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           remoteClient,
           skillsBaseDir,
           args,
+          { codeMode: RUN_CODE_ENABLED },
         );
         return { content: [{ type: "text", text }] };
       } catch (err) {
@@ -697,6 +783,72 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         console.error(`run_tool: execution failed: ${msg}`);
         return {
           content: [{ type: "text", text: `run_tool failed: ${msg}` }],
+          isError: true,
+        };
+      } finally {
+        await remoteClient.close();
+      }
+    }
+
+    case "run_code": {
+      if (!RUN_CODE_ENABLED) {
+        return {
+          content: [{ type: "text", text: "run_code is not enabled." }],
+          isError: true,
+        };
+      }
+
+      const serverUrl = resolveServerUrl();
+      if (!serverUrl) {
+        return {
+          content: [{ type: "text", text: SETUP_NEEDED_ERROR }],
+          isError: true,
+        };
+      }
+      if (!getOAuthProvider().tokens()) {
+        return {
+          content: [{ type: "text", text: AUTH_REDIRECT_TO_SETUP_TEXT }],
+        };
+      }
+
+      const sessionId = resolveSessionId();
+
+      let remoteClient;
+      try {
+        remoteClient = await createRemoteClient(
+          serverUrl,
+          getRemoteClientOpts(),
+          sessionId,
+        );
+      } catch (err) {
+        if (err instanceof AuthRequiredError) {
+          return {
+            content: [{ type: "text", text: AUTH_REDIRECT_TO_SETUP_TEXT }],
+          };
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        logLine("connect.backend-error", { label: "run_code", msg });
+        return {
+          content: [
+            { type: "text", text: `Failed to connect to Glean backend: ${msg}` },
+          ],
+          isError: true,
+        };
+      }
+      try {
+        const skillsBaseDir = resolveSkillsBaseDir();
+        return await handleRunCode(
+          remoteClient,
+          server,
+          skillsBaseDir,
+          args,
+          cachedRemoteTools,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`run_code: execution failed: ${msg}`);
+        return {
+          content: [{ type: "text", text: `run_code failed: ${msg}` }],
           isError: true,
         };
       } finally {
