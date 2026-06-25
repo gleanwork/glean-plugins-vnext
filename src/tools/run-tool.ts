@@ -6,6 +6,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
+import { findToolMeta } from "../skill-tools.js";
+
+// Read at call time (not module load) so tests and a mid-session env flip take
+// effect. Named distinctly from handleRunTool's local `hitlEnabled` boolean.
+const hitlOn = () => process.env.ENABLE_HITL === "true";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 
@@ -320,4 +325,100 @@ export function runToolAnnotations(
   return enableHitl && clientSupportsElicitation
     ? { readOnlyHint: true }
     : undefined;
+}
+
+/**
+ * Pure dispatch core — no approval. Resolves file_args, shapes the remote
+ * payload, and calls the gateway's `run_tool`. Shared by run_tool and every
+ * run_code PTC_ binding so auth, file_args, and the wire shape live in one
+ * place. Throws FileArgsError on bad file_args (caller surfaces it).
+ */
+export async function invokeTool(
+  remoteClient: Client,
+  params: {
+    serverId: string;
+    toolName: string;
+    arguments?: unknown;
+    fileArgs?: unknown;
+  },
+): Promise<CallToolResult> {
+  const baseArgs =
+    params.arguments != null && typeof params.arguments === "object"
+      ? (params.arguments as Record<string, unknown>)
+      : {};
+  const resolvedArgs = await resolveFileArgs(params.fileArgs, baseArgs);
+
+  return callRemoteTool(
+    remoteClient,
+    "run_tool",
+    buildRemoteArgs(params.serverId, params.toolName, resolvedArgs),
+  );
+}
+
+export type ApprovalOutcome =
+  | { kind: "approved" }
+  | { kind: "declined"; action: string };
+
+/**
+ * Per-tool HITL gate used by run_code's just-in-time approval path. (run_tool's
+ * own HITL is inlined in handleRunTool above, with richer compact-args /
+ * auto-dismiss handling.) Auto-approves unless ALL of: ENABLE_HITL is set, the
+ * client supports elicitation, and the tool JSON marks `requires_approval`. On
+ * an elicitation transport error the behavior depends on `failClosed`:
+ * run_code passes failClosed=true so a broken approval channel never silently
+ * runs a write.
+ */
+export async function requestToolApproval(
+  mcpServer: Server,
+  skillsBaseDir: string,
+  toolName: string,
+  serverId: string,
+  opts: {
+    message?: string;
+    failClosed?: boolean;
+    // Callers that already hold the tool's metadata (e.g. run_code) pass these
+    // so we skip the findToolMeta disk rescan of the whole skills tree.
+    requiresApproval?: boolean;
+    description?: string;
+  } = {},
+): Promise<ApprovalOutcome> {
+  if (!hitlOn() || !mcpServer.getClientCapabilities()?.elicitation) {
+    return { kind: "approved" };
+  }
+
+  let requiresApproval = opts.requiresApproval;
+  let description = opts.description;
+  if (requiresApproval === undefined) {
+    const meta = await findToolMeta(skillsBaseDir, toolName);
+    requiresApproval = meta?.requiresApproval;
+    description = meta?.description;
+  }
+  if (!requiresApproval) return { kind: "approved" };
+
+  const message =
+    opts.message ??
+    [
+      `**Action: ${toolName}**`,
+      description || "",
+      `Server: ${serverId}`,
+      "",
+      "Accept to execute, or decline to cancel.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+  try {
+    const result = await mcpServer.elicitInput({
+      message,
+      requestedSchema: { type: "object", properties: {} } as never,
+    });
+    if (result.action !== "accept") {
+      return { kind: "declined", action: result.action };
+    }
+    return { kind: "approved" };
+  } catch {
+    return opts.failClosed
+      ? { kind: "declined", action: "elicitation-error" }
+      : { kind: "approved" };
+  }
 }
