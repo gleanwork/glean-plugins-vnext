@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { GleanOAuthClientProvider } from "./auth-provider.js";
+import { logLine } from "./log.js";
 
 const GLEAN_PLUGIN = "GLEAN_PLUGIN";
 
@@ -142,16 +143,16 @@ export async function createRemoteClient(
   if (authProvider?.pendingAuthCode) {
     const transportForAuth =
       pendingTransport ?? buildTransport(serverUrl, opts, chatSessionId);
-    console.error("[auth] Auth code received, exchanging for tokens...");
+    logLine("auth.code-exchange-start", { sessionId: chatSessionId });
     try {
       await transportForAuth.finishAuth(authProvider.pendingAuthCode);
       authProvider.clearPendingAuth();
       pendingTransport = undefined;
-      console.error("[auth] Token exchange complete, reconnecting...");
+      logLine("auth.code-exchange-complete", { sessionId: chatSessionId });
       return createRemoteClient(serverUrl, opts, chatSessionId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[auth] Code exchange failed: ${msg} — discarding stale auth state`);
+      logLine("auth.code-exchange-failed", { sessionId: chatSessionId, msg });
       authProvider.clearPendingAuth();
       pendingTransport = undefined;
       await authProvider.invalidateCredentials("all");
@@ -164,7 +165,7 @@ export async function createRemoteClient(
   // cached DCR client was deleted server-side). Force a fresh DCR so the next
   // URL we generate uses a valid, server-known client_id.
   if (authProvider?.needsFreshClient()) {
-    console.error("[auth] Previous auth URL didn't complete — forcing fresh DCR");
+    logLine("auth.fresh-dcr", { sessionId: chatSessionId });
     await authProvider.invalidateCredentials("all");
   }
 

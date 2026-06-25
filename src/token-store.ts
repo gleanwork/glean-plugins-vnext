@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
+import { logLine } from "./log.js";
 
 const CREDENTIALS_FILENAME = "mcp-credentials.json";
 const DIR_MODE = 0o700;
@@ -42,7 +43,7 @@ export function saveCredentials(tokens: unknown, clientInfo: unknown): void {
     fs.chmodSync(filePath, FILE_MODE);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[auth] Failed to persist credentials: ${msg}`);
+    logLine("auth.persist-failed", { msg });
   }
 }
 
@@ -51,6 +52,6 @@ export function clearCredentials(): void {
     fs.rmSync(credentialsFile(), { force: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[auth] Failed to clear credentials: ${msg}`);
+    logLine("auth.clear-failed", { msg });
   }
 }
