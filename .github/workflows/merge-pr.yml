@@ -1,7 +1,7 @@
 name: Merge PR
 
 on:
-  push:
+  pull_request:
     branches: [main]
 
 jobs:
