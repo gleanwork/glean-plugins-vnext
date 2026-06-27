@@ -1,0 +1,45 @@
+name: Merge PR
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build and test
+        uses: ./.github/workflows/build-and-test.yml
+
+  bump-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      
+      - name: Fetch current version
+        id: fetch-current-version
+        run: |
+          echo "currentVersion=$(cat ./plugins/glean/.claude-plugin/plugin.json | jq .version)" >> $GITHUB_OUTPUT
+
+      - name: Print current version
+        env:
+          CURRENT_VERSION: ${{ steps.fetch-current-version.outputs.currentVersion }}
+        run: |
+          echo "Current version: $CURRENT_VERSION"
+
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Fetch branch version
+        id: fetch-branch-version
+        run: |
+          echo "branchVersion=$(cat ./plugins/glean/.claude-plugin/plugin.json | jq .version)" >> $GITHUB_OUTPUT
+
+      - name: Print branch version
+        env:
+          BRANCH_VERSION: ${{ steps.fetch-branch-version.outputs.branchVersion }}
+        run: |
+          echo "Branch version: $BRANCH_VERSION"
