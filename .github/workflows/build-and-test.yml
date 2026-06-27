@@ -1,8 +1,6 @@
 name: Build and test
 
 on:
-  pull_request:
-    branches: [main]
   workflow_call: 
 
 jobs:
