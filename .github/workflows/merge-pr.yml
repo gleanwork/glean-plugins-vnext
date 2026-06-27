@@ -8,6 +8,8 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v7
+      
       - name: Build and test
         uses: ./.github/workflows/build-and-test.yml
 
