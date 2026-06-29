@@ -141,6 +141,81 @@ describe("resolveFileArgs", () => {
       resolveFileArgs({ body: file }, { body: "existing" }),
     ).rejects.toThrow(/conflicts/);
   });
+
+  it("parses JSON into an object when the param type is object", async () => {
+    const file = path.join(tmpDir, "spec.json");
+    await fs.writeFile(file, '{"name":"agent","steps":[1,2,3]}');
+
+    const result = await resolveFileArgs({ spec: file }, {}, {
+      properties: { spec: { type: "object" } },
+    });
+
+    expect(result.spec).toEqual({ name: "agent", steps: [1, 2, 3] });
+  });
+
+  it("parses JSON into an array when the param type is array", async () => {
+    const file = path.join(tmpDir, "items.json");
+    await fs.writeFile(file, '["a","b"]');
+
+    const result = await resolveFileArgs({ items: file }, {}, {
+      properties: { items: { type: "array" } },
+    });
+
+    expect(result.items).toEqual(["a", "b"]);
+  });
+
+  it("parses when type is given as an array including object", async () => {
+    const file = path.join(tmpDir, "spec.json");
+    await fs.writeFile(file, '{"k":1}');
+
+    const result = await resolveFileArgs({ spec: file }, {}, {
+      properties: { spec: { type: ["object", "null"] } },
+    });
+
+    expect(result.spec).toEqual({ k: 1 });
+  });
+
+  it("keeps raw string for a string param even when content is JSON", async () => {
+    const file = path.join(tmpDir, "body.json");
+    await fs.writeFile(file, '{"looks":"like json"}');
+
+    const result = await resolveFileArgs({ body: file }, {}, {
+      properties: { body: { type: "string" } },
+    });
+
+    expect(result.body).toBe('{"looks":"like json"}');
+  });
+
+  it("keeps raw string when no schema is provided (backward compat)", async () => {
+    const file = path.join(tmpDir, "body.json");
+    await fs.writeFile(file, '{"a":1}');
+
+    const result = await resolveFileArgs({ body: file }, {});
+
+    expect(result.body).toBe('{"a":1}');
+  });
+
+  it("throws a clear error when an object-typed param gets invalid JSON", async () => {
+    const file = path.join(tmpDir, "spec.json");
+    await fs.writeFile(file, "not json {");
+
+    await expect(
+      resolveFileArgs({ spec: file }, {}, {
+        properties: { spec: { type: "object" } },
+      }),
+    ).rejects.toThrow(/must contain valid JSON/);
+  });
+
+  it("falls back to the raw string for a string|object union with invalid JSON", async () => {
+    const file = path.join(tmpDir, "val.txt");
+    await fs.writeFile(file, "plain text");
+
+    const result = await resolveFileArgs({ val: file }, {}, {
+      properties: { val: { type: ["string", "object"] } },
+    });
+
+    expect(result.val).toBe("plain text");
+  });
 });
 
 describe("buildRemoteArgs", () => {
@@ -432,6 +507,32 @@ describe("handleRunTool (HITL)", () => {
     expect(message).toContain("TITLE: Doc");
     expect(message).toContain("BODY: FILE_SOURCED_BODY"); // file-sourced arg shown
     expect(remote.callTool).toHaveBeenCalledTimes(1); // executed on accept
+  });
+
+  it("parses an object-typed file_arg from the tool schema and forwards it as structured data", async () => {
+    vi.stubEnv("ENABLE_HITL", "false");
+    const remote = makeRemote();
+    const server = makeServer({ elicitation: false });
+    await writeToolJson(tmpDir, "save_agent", {
+      requires_approval: false,
+      inputSchema: { properties: { spec: { type: "object" } } },
+    });
+    const specFile = path.join(tmpDir, "spec.json");
+    await fs.writeFile(specFile, '{"name":"my-agent","steps":[1,2]}', "utf-8");
+
+    await handleRunTool(remote, server, tmpDir, {
+      server_id: "default",
+      tool_name: "save_agent",
+      arguments: {},
+      file_args: { spec: specFile },
+    });
+
+    const call = remote.callTool.mock.calls[0][0];
+    expect(call.name).toBe("run_tool");
+    expect(call.arguments.arguments.spec).toEqual({
+      name: "my-agent",
+      steps: [1, 2],
+    });
   });
 
   it("fails before prompting when a file_args path is unreadable", async () => {

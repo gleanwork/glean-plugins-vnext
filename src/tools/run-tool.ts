@@ -21,6 +21,30 @@ export class FileArgsError extends Error {
   }
 }
 
+// A downstream tool parameter's JSON Schema, narrowed to the bits we use.
+// `type` may be a single string or an array (e.g. ["object", "null"]).
+interface ParamSchema {
+  type?: string | string[];
+}
+interface ToolInputSchema {
+  properties?: Record<string, ParamSchema>;
+}
+
+// The set of JSON Schema types declared for a top-level parameter. file_args
+// keys always map to top-level argument names, so a direct properties lookup
+// is sufficient — no need to walk nested schemas.
+function declaredParamTypes(
+  inputSchema: ToolInputSchema | undefined,
+  argName: string,
+): Set<string> {
+  const t = inputSchema?.properties?.[argName]?.type;
+  if (typeof t === "string") return new Set([t]);
+  if (Array.isArray(t)) {
+    return new Set(t.filter((x): x is string => typeof x === "string"));
+  }
+  return new Set();
+}
+
 function fileArgsMaxBytes(): number {
   const raw = process.env.GLEAN_FILE_ARG_MAX_BYTES;
   if (!raw) return DEFAULT_FILE_ARG_MAX_BYTES;
@@ -38,13 +62,19 @@ function hitlTimeoutMs(): number {
 }
 
 /**
- * Reads each `file_args` entry from disk and merges its UTF-8 content into
- * `baseArgs` under the given key. Throws FileArgsError on any validation
- * failure so the caller can surface the message verbatim to the model.
+ * Reads each `file_args` entry from disk and merges its content into
+ * `baseArgs` under the given key. The downstream tool's `inputSchema` decides
+ * how the content is injected: a parameter typed `object`/`array` is JSON-
+ * parsed into structured data (a raw string would fail the downstream schema
+ * with "Expected object, given string"), while everything else — the common
+ * case of long-form text bodies — is injected verbatim as a UTF-8 string.
+ * Throws FileArgsError on any validation failure so the caller can surface the
+ * message verbatim to the model.
  */
 export async function resolveFileArgs(
   fileArgs: unknown,
   baseArgs: Record<string, unknown>,
+  inputSchema?: ToolInputSchema,
 ): Promise<Record<string, unknown>> {
   if (fileArgs === undefined || fileArgs === null) return baseArgs;
   if (
@@ -99,7 +129,27 @@ export async function resolveFileArgs(
       );
     }
 
-    merged[argName] = await fs.readFile(filePathRaw, "utf-8");
+    const content = await fs.readFile(filePathRaw, "utf-8");
+    const types = declaredParamTypes(inputSchema, argName);
+    if (types.has("object") || types.has("array")) {
+      try {
+        merged[argName] = JSON.parse(content);
+      } catch (err) {
+        // A union like ["string", "object"] can legitimately take raw text, so
+        // keep the string. A pure object/array param cannot — fail with a clear
+        // message before the opaque downstream "Expected object, given string".
+        if (types.has("string")) {
+          merged[argName] = content;
+        } else {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new FileArgsError(
+            `file_args.${argName}: "${filePathRaw}" must contain valid JSON for the object/array-typed parameter, but parsing failed: ${msg}`,
+          );
+        }
+      }
+    } else {
+      merged[argName] = content;
+    }
   }
 
   return merged;
@@ -110,6 +160,7 @@ interface ToolMetadata {
   name?: string;
   description?: string;
   server_id?: string;
+  inputSchema?: ToolInputSchema;
 }
 
 async function findToolJson(
@@ -207,6 +258,11 @@ export async function handleRunTool(
     };
   }
 
+  // Load the downstream tool's metadata once, up front: its inputSchema drives
+  // file_args JSON-parsing (object/array params) and its requires_approval
+  // drives the HITL gate. Both paths must see it regardless of ENABLE_HITL.
+  const toolMeta = await findToolJson(skillsBaseDir, toolName);
+
   // Resolve file_args up front so the approval prompt shows the COMPLETE input
   // (file-sourced values included, not just the inline `arguments`), and so an
   // unreadable file_args path fails before we prompt the user.
@@ -216,7 +272,11 @@ export async function handleRunTool(
       : {};
   let resolvedArgs: Record<string, unknown>;
   try {
-    resolvedArgs = await resolveFileArgs(args.file_args, baseArgs);
+    resolvedArgs = await resolveFileArgs(
+      args.file_args,
+      baseArgs,
+      toolMeta?.inputSchema,
+    );
   } catch (err) {
     if (err instanceof FileArgsError) {
       return {
@@ -229,8 +289,6 @@ export async function handleRunTool(
 
   const hitlEnabled = process.env.ENABLE_HITL === "true";
   if (hitlEnabled && mcpServer.getClientCapabilities()?.elicitation) {
-    const toolMeta = await findToolJson(skillsBaseDir, toolName);
-
     if (toolMeta?.requires_approval) {
       const message = await buildApprovalMessage(
         mcpServer,
