@@ -4,7 +4,7 @@
       "command": "node",
       "args": ["${CLAUDE_PLUGIN_ROOT}/start.mjs"],
       "env": {
-        "ENABLE_HITL": "true",
+        "ENABLE_HITL": "false",
         "HITL_TIMEOUT_MS": "300000"
       }
     }
