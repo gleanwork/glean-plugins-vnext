@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Produce a .plugin bundle for testing. The output is named
 # glean-<version>.plugin, consumable by Cowork's local upload.
 set -euo pipefail
