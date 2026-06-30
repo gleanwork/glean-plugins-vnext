@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "glean-local": {
-      "command": "bash",
-      "args": ["./start.sh"],
+      "command": "node",
+      "args": ["./start.mjs"],
       "cwd": ".",
       "env": {
         "ENABLE_HITL": "true",

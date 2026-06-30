@@ -22984,7 +22984,7 @@ var StdioServerTransport = class {
 // src/index.ts
 import path7 from "node:path";
 import fs7 from "node:fs";
-import { homedir as homedir4 } from "node:os";
+import { homedir as homedir4, tmpdir } from "node:os";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/client.js
 var ExperimentalClientTasks = class {
@@ -26287,7 +26287,7 @@ function resolveSkillsBaseDir() {
   if (process.env.SKILLS_BASE_DIR) {
     return process.env.SKILLS_BASE_DIR;
   }
-  return path7.join("/tmp", "glean-skills-cache");
+  return path7.join(tmpdir(), "glean-skills-cache");
 }
 var server = new Server(
   { name: "glean", version: "1.0.0" },

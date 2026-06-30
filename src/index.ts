@@ -8,7 +8,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import path from "node:path";
 import fs from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import {
   AuthRequiredError,
   createRemoteClient,
@@ -118,7 +118,7 @@ function resolveSkillsBaseDir(): string {
   if (process.env.SKILLS_BASE_DIR) {
     return process.env.SKILLS_BASE_DIR;
   }
-  return path.join("/tmp", "glean-skills-cache");
+  return path.join(tmpdir(), "glean-skills-cache");
 }
 
 const server = new Server(
