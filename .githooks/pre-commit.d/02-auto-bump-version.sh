@@ -12,9 +12,9 @@
 # increment of v_main. Versions are plain x.y.z (no pre-release or build metadata). A
 # manifest whose version is not a plain x.y.z string is dropped from the max computation
 # but still rewritten to v_new; a manifest that is not valid JSON aborts the commit with
-# a message. A manifest listed below but missing from the working tree also aborts the
-# commit, unless its deletion is staged (i.e. it is being removed) — this keeps MANIFESTS
-# in lockstep with the files on disk and matches the CI gate (scripts/check-version-bump.sh).
+# a message. Every manifest listed below must exist in the working tree — a missing one
+# aborts the commit (to remove a host, drop it from MANIFESTS in the same commit). This
+# keeps MANIFESTS in lockstep with the files on disk.
 set -e
 cd "$(git rev-parse --show-toplevel)"
 
@@ -48,24 +48,16 @@ for m in "${MANIFESTS[@]}"; do
   [ -n "$v" ] && base_versions+=("$v")
 done
 
-# Manifests staged for deletion in this commit. A missing manifest is tolerated only if
-# its removal is staged here; any other absence is drift (an accidental delete or a stale
-# MANIFESTS entry) and aborts the commit, matching the CI gate.
-staged_deletes=$(git diff --cached --diff-filter=D --name-only)
-
-# Versions in the working tree. A missing-but-not-being-deleted manifest aborts. Invalid
-# JSON aborts. A valid-JSON manifest whose version is not a plain x.y.z string stays in the
-# write set (so it gets rewritten to the target) but is dropped from the max so it cannot
-# poison the result.
+# Versions in the working tree. Every manifest in MANIFESTS must exist — a missing one
+# aborts (to remove a host, drop it from MANIFESTS in the same commit). Invalid JSON aborts.
+# A valid-JSON manifest whose version is not a plain x.y.z string stays in the write set (so
+# it gets rewritten to the target) but is dropped from the max so it cannot poison the result.
 current_versions=()
 existing_manifests=()
 for m in "${MANIFESTS[@]}"; do
   if [ ! -f "$m" ]; then
-    if printf '%s\n' "$staged_deletes" | grep -qxF "$m"; then
-      continue
-    fi
-    echo "pre-commit: $m is listed in MANIFESTS but is missing and its removal is not staged." >&2
-    echo "pre-commit: restore the file, or drop it from MANIFESTS (here and in scripts/check-version-bump.sh)." >&2
+    echo "pre-commit: $m is listed in MANIFESTS but is missing." >&2
+    echo "pre-commit: to remove this host, drop it from MANIFESTS in this commit (and from scripts/check-version-bump.sh)." >&2
     exit 1
   fi
   if ! v=$(node -e '
@@ -82,7 +74,7 @@ for m in "${MANIFESTS[@]}"; do
   [ -n "$v" ] && current_versions+=("$v")
 done
 
-# No manifests on disk => nothing to bump.
+# Empty MANIFESTS (e.g. all hosts removed) => nothing to bump.
 [ ${#existing_manifests[@]} -eq 0 ] && exit 0
 
 # Non-semver versions were filtered out above,
