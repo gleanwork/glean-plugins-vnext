@@ -12,7 +12,9 @@
 # increment of v_main. Versions are plain x.y.z (no pre-release or build metadata). A
 # manifest whose version is not a plain x.y.z string is dropped from the max computation
 # but still rewritten to v_new; a manifest that is not valid JSON aborts the commit with
-# a message.
+# a message. A manifest listed below but missing from the working tree also aborts the
+# commit, unless its deletion is staged (i.e. it is being removed) — this keeps MANIFESTS
+# in lockstep with the files on disk and matches the CI gate (scripts/check-version-bump.sh).
 set -e
 cd "$(git rev-parse --show-toplevel)"
 
@@ -46,14 +48,26 @@ for m in "${MANIFESTS[@]}"; do
   [ -n "$v" ] && base_versions+=("$v")
 done
 
-# Versions in the working tree. A missing manifest is skipped (e.g. a platform being
-# removed). Invalid JSON aborts the commit with a clear message. A valid-JSON manifest
-# whose version is not a plain x.y.z string stays in the write set (so it gets rewritten
-# to the target) but is dropped from the max so it cannot poison the result.
+# Manifests staged for deletion in this commit. A missing manifest is tolerated only if
+# its removal is staged here; any other absence is drift (an accidental delete or a stale
+# MANIFESTS entry) and aborts the commit, matching the CI gate.
+staged_deletes=$(git diff --cached --diff-filter=D --name-only)
+
+# Versions in the working tree. A missing-but-not-being-deleted manifest aborts. Invalid
+# JSON aborts. A valid-JSON manifest whose version is not a plain x.y.z string stays in the
+# write set (so it gets rewritten to the target) but is dropped from the max so it cannot
+# poison the result.
 current_versions=()
 existing_manifests=()
 for m in "${MANIFESTS[@]}"; do
-  [ -f "$m" ] || continue
+  if [ ! -f "$m" ]; then
+    if printf '%s\n' "$staged_deletes" | grep -qxF "$m"; then
+      continue
+    fi
+    echo "pre-commit: $m is listed in MANIFESTS but is missing and its removal is not staged." >&2
+    echo "pre-commit: restore the file, or drop it from MANIFESTS (here and in scripts/check-version-bump.sh)." >&2
+    exit 1
+  fi
   if ! v=$(node -e '
     const fs = require("fs");
     let pkg;
