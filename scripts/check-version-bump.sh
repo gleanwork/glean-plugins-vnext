@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # CI check: verify the plugin version was incremented when plugin files change.
 #
 # The plugin ships one manifest per host (Claude, Codex, Cursor). They must

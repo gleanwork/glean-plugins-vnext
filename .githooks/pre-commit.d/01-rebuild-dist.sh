@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Rebuild dist/index.js and stage it on every commit that touches source files.
 set -e
 cd "$(git rev-parse --show-toplevel)"
