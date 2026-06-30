@@ -26235,6 +26235,7 @@ function sameOrigin(a, b) {
 }
 
 // src/index.ts
+var PLUGIN_VERSION = true ? "0.2.36" : "dev";
 function readEnv(...keys) {
   for (const key of keys) {
     const v = process.env[key];
@@ -26807,6 +26808,11 @@ ${EMAIL_RESOLVE_FAILED_TEXT}`
   }
 });
 async function main() {
+  logLine("server.start", {
+    version: PLUGIN_VERSION,
+    node: process.version,
+    pid: process.pid
+  });
   const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1e3;
   try {
     await evictStaleSkills(resolveSkillsBaseDir(), ONE_WEEK_MS, logLine);

@@ -18,16 +18,32 @@
 
 import { build } from "esbuild";
 import { builtinModules } from "node:module";
+import { readFileSync } from "node:fs";
 
 const nodeBuiltins = [
   ...builtinModules,
   ...builtinModules.map((m) => `node:${m}`),
 ];
 
+// Stamp the plugin version into the bundle as a compile-time constant so the
+// running server can log which version it is. The per-host manifests are the
+// single source of truth (kept aligned by check-version-bump.sh), so reading
+// the Claude manifest is representative. Under `tsx` dev (no bundle), the
+// constant is absent and src/index.ts falls back to "dev".
+const pluginVersion = JSON.parse(
+  readFileSync(
+    new URL("../plugins/glean/.claude-plugin/plugin.json", import.meta.url),
+    "utf8",
+  ),
+).version;
+
 await build({
   entryPoints: ["src/index.ts"],
   outfile: "plugins/glean/dist/index.js",
   bundle: true,
+  define: {
+    __GLEAN_PLUGIN_VERSION__: JSON.stringify(pluginVersion),
+  },
   platform: "node",
   format: "esm",
   target: "node20",
