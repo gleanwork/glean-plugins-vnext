@@ -23,6 +23,7 @@ async function runHook(
   toolName: string,
   env: Record<string, string>,
   extraInput: Record<string, unknown> = {},
+  seed?: { sessionId: string; mode: string },
 ): Promise<HookResult> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "approve-hook-"));
   await fs.writeFile(
@@ -32,6 +33,16 @@ async function runHook(
   // Isolate the marker under a throwaway CLAUDE_PLUGIN_DATA so the hook never
   // touches the developer's real ~/.glean during tests.
   const dataDir = path.join(root, "plugin-data");
+  // Optionally pre-seed a leftover marker (e.g. from a prior
+  // --dangerously-skip-permissions session) to prove the hook overwrites it.
+  if (seed) {
+    const dir = path.join(dataDir, "glean-hitl-mode");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(
+      path.join(dir, `${seed.sessionId}.json`),
+      JSON.stringify({ permission_mode: seed.mode, ts: 0 }),
+    );
+  }
   try {
     const out = await new Promise<string>((resolve, reject) => {
       const child = spawn("node", [HOOK], {
@@ -146,5 +157,19 @@ describe("auto-approve-run-tool hook (permission-mode marker)", () => {
     });
     expect(markerFiles).toHaveLength(1);
     expect(markerFiles[0]).toMatch(/^[a-zA-Z0-9_-]+\.json$/);
+  });
+
+  it("overwrites a leftover bypass marker when the session is resumed without the flag", async () => {
+    // Session was first launched with --dangerously-skip-permissions (leftover
+    // marker = bypassPermissions), then resumed WITHOUT the flag (current mode
+    // = default). The hook rewrites the same per-session marker, clearing the
+    // stale bypass so the server re-engages its gate on this call.
+    const { marker } = await runHook(
+      glean("run_tool"),
+      hitlOn,
+      { permission_mode: "default", session_id: "sess-1" },
+      { sessionId: "sess-1", mode: "bypassPermissions" },
+    );
+    expect(marker).toMatchObject({ permission_mode: "default" });
   });
 });

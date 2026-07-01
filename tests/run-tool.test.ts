@@ -294,7 +294,7 @@ async function writeModeMarker(
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(
     path.join(dir, `${sessionId}.json`),
-    JSON.stringify({ permission_mode: mode, ts: 123 }),
+    JSON.stringify({ permission_mode: mode, ts: Date.now() }),
     "utf-8",
   );
 }

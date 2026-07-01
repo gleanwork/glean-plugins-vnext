@@ -262,6 +262,14 @@ function permissionModeMarkerPath(): string {
 // on the current call. Returns null when the marker is missing, unreadable, or
 // malformed — the caller treats null as "unknown" and keeps the approval gate,
 // so any failure fails toward prompting, never toward a silent bypass.
+//
+// Resume safety: the PreToolUse hook rewrites this marker with the CURRENT mode
+// on every run_tool call (see hooks/auto-approve-run-tool.mjs), and PreToolUse
+// always runs before the tool executes, so the value read here is the one
+// written for this exact call. A session first launched with
+// --dangerously-skip-permissions and later resumed WITHOUT it (same session id)
+// therefore has its stale bypass marker overwritten with the resumed mode on
+// the resumed session's first run_tool call, re-engaging the gate.
 async function currentPermissionMode(): Promise<string | null> {
   try {
     const raw = await fs.readFile(permissionModeMarkerPath(), "utf-8");
