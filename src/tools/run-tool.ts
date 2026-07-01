@@ -251,7 +251,7 @@ function permissionModeMarkerPath(): string {
   const base =
     process.env.PLUGIN_DATA_DIR ||
     process.env.CLAUDE_PLUGIN_DATA ||
-    os.tmpdir();
+    path.join(os.homedir(), ".glean");
   const sessionId = resolveSessionId()
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .slice(0, 64);

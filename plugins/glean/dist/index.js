@@ -25909,7 +25909,7 @@ function primeElicitationCancellation(mcpServer) {
   });
 }
 function permissionModeMarkerPath() {
-  const base = process.env.PLUGIN_DATA_DIR || process.env.CLAUDE_PLUGIN_DATA || os2.tmpdir();
+  const base = process.env.PLUGIN_DATA_DIR || process.env.CLAUDE_PLUGIN_DATA || path4.join(os2.homedir(), ".glean");
   const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
   return path4.join(base, "glean-hitl-mode", `${sessionId}.json`);
 }
