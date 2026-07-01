@@ -25662,6 +25662,7 @@ async function handleFindSkills(remoteClient, skillsBaseDir, args) {
 
 // src/tools/run-tool.ts
 import fs4 from "node:fs/promises";
+import os2 from "node:os";
 import path4 from "node:path";
 
 // src/tools/approval-args.ts
@@ -25907,6 +25908,20 @@ function primeElicitationCancellation(mcpServer) {
   void mcpServer.request({ method: "ping" }, EmptyResultSchema).catch(() => {
   });
 }
+function permissionModeMarkerPath() {
+  const base = process.env.PLUGIN_DATA_DIR || process.env.CLAUDE_PLUGIN_DATA || os2.tmpdir();
+  const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
+  return path4.join(base, "glean-hitl-mode", `${sessionId}.json`);
+}
+async function currentPermissionMode() {
+  try {
+    const raw = await fs4.readFile(permissionModeMarkerPath(), "utf-8");
+    const parsed = JSON.parse(raw);
+    return typeof parsed.permission_mode === "string" ? parsed.permission_mode : null;
+  } catch {
+    return null;
+  }
+}
 async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
   const serverId = args.server_id;
   const toolName = args.tool_name;
@@ -25937,8 +25952,9 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
     throw err;
   }
   const hitlEnabled = process.env.ENABLE_HITL === "true";
-  if (hitlEnabled && mcpServer.getClientCapabilities()?.elicitation) {
-    if (toolMeta?.requires_approval) {
+  if (hitlEnabled && toolMeta?.requires_approval && mcpServer.getClientCapabilities()?.elicitation) {
+    const bypass = await currentPermissionMode() === "bypassPermissions";
+    if (!bypass) {
       const message = await buildApprovalMessage(
         mcpServer,
         toolName,

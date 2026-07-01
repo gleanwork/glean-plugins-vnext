@@ -283,6 +283,22 @@ async function writeToolJson(
   );
 }
 
+// Mirrors the marker the PreToolUse hook writes: <dataDir>/glean-hitl-mode/
+// <sessionId>.json. The server reads it via PLUGIN_DATA_DIR + GLEAN_SESSION_ID.
+async function writeModeMarker(
+  dataDir: string,
+  sessionId: string,
+  mode: string,
+) {
+  const dir = path.join(dataDir, "glean-hitl-mode");
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, `${sessionId}.json`),
+    JSON.stringify({ permission_mode: mode, ts: 123 }),
+    "utf-8",
+  );
+}
+
 describe("handleRunTool (HITL)", () => {
   let tmpDir: string;
   const baseArgs = {
@@ -552,6 +568,69 @@ describe("handleRunTool (HITL)", () => {
     expect(result.isError).toBe(true);
     expect(elicit).not.toHaveBeenCalled(); // no prompt for unreadable input
     expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  it("skips the elicitation gate and executes directly in bypassPermissions mode", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
+    vi.stubEnv("GLEAN_SESSION_ID", "sess-bypass");
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    await writeModeMarker(tmpDir, "sess-bypass", "bypassPermissions");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit).not.toHaveBeenCalled();
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("still elicits when the session's permission mode is not bypass", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
+    vi.stubEnv("GLEAN_SESSION_ID", "sess-default");
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    await writeModeMarker(tmpDir, "sess-default", "default");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit).toHaveBeenCalledTimes(1);
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("still elicits when no permission-mode marker exists (fails toward the gate)", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
+    vi.stubEnv("GLEAN_SESSION_ID", "sess-none");
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    // Deliberately write no marker.
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a bypass marker written for a different session (no cross-session leak)", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
+    vi.stubEnv("GLEAN_SESSION_ID", "sess-A");
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    // Another concurrent session opted into bypass; ours did not.
+    await writeModeMarker(tmpDir, "sess-B", "bypassPermissions");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit).toHaveBeenCalledTimes(1); // gate preserved for THIS session
   });
 });
 

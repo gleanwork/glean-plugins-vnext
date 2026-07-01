@@ -12,6 +12,7 @@
 // write. When ENABLE_HITL is not "true" the hook does nothing and the normal
 // permission flow runs.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 function readStdin() {
@@ -49,6 +50,34 @@ try {
 }
 
 if (env.ENABLE_HITL === "true") {
+  // Record Claude Code's live permission mode so the MCP server can skip its
+  // own elicitation gate when the user launched with
+  // --dangerously-skip-permissions (permission_mode "bypassPermissions").
+  // Written on every run_tool call and keyed by session id, so it is always
+  // fresh for the call that immediately follows and never leaks across
+  // sessions. The base dir and session-id sanitization MUST match
+  // run-tool.ts (permissionModeMarkerPath) and start.sh's PLUGIN_DATA_DIR:
+  // CLAUDE_PLUGIN_DATA when set, else ~/.glean. Best-effort — marker I/O must
+  // never break the approval decision below.
+  try {
+    const permissionMode = String(input.permission_mode ?? "");
+    const sessionId = String(input.session_id ?? "")
+      .replace(/[^a-zA-Z0-9_-]/g, "-")
+      .slice(0, 64);
+    if (permissionMode && sessionId) {
+      const base =
+        process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), ".glean");
+      const dir = path.join(base, "glean-hitl-mode");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, `${sessionId}.json`),
+        JSON.stringify({ permission_mode: permissionMode, ts: Date.now() }),
+      );
+    }
+  } catch {
+    // Ignore: a failed marker write just means the server keeps prompting.
+  }
+
   process.stdout.write(
     JSON.stringify({
       hookSpecificOutput: {

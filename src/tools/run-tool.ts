@@ -3,9 +3,11 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { EmptyResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
+import { resolveSessionId } from "../session-id.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 
@@ -240,6 +242,38 @@ function primeElicitationCancellation(mcpServer: Server): void {
   });
 }
 
+// Path to the per-session permission-mode marker the PreToolUse hook writes
+// immediately before each run_tool call (see hooks/auto-approve-run-tool.mjs).
+// The base dir and session-id sanitization MUST stay in lockstep with the hook
+// and with start.sh's PLUGIN_DATA_DIR export, or the server reads a path the
+// hook never wrote and silently falls back to prompting.
+function permissionModeMarkerPath(): string {
+  const base =
+    process.env.PLUGIN_DATA_DIR ||
+    process.env.CLAUDE_PLUGIN_DATA ||
+    os.tmpdir();
+  const sessionId = resolveSessionId()
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .slice(0, 64);
+  return path.join(base, "glean-hitl-mode", `${sessionId}.json`);
+}
+
+// Claude Code's live permission mode for THIS session, as captured by the hook
+// on the current call. Returns null when the marker is missing, unreadable, or
+// malformed — the caller treats null as "unknown" and keeps the approval gate,
+// so any failure fails toward prompting, never toward a silent bypass.
+async function currentPermissionMode(): Promise<string | null> {
+  try {
+    const raw = await fs.readFile(permissionModeMarkerPath(), "utf-8");
+    const parsed = JSON.parse(raw) as { permission_mode?: unknown };
+    return typeof parsed.permission_mode === "string"
+      ? parsed.permission_mode
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function handleRunTool(
   remoteClient: Client,
   mcpServer: Server,
@@ -288,8 +322,20 @@ export async function handleRunTool(
   }
 
   const hitlEnabled = process.env.ENABLE_HITL === "true";
-  if (hitlEnabled && mcpServer.getClientCapabilities()?.elicitation) {
-    if (toolMeta?.requires_approval) {
+  if (
+    hitlEnabled &&
+    toolMeta?.requires_approval &&
+    mcpServer.getClientCapabilities()?.elicitation
+  ) {
+    // In bypassPermissions mode (`claude --dangerously-skip-permissions`) the
+    // user has opted out of every approval prompt for the session, so our own
+    // elicitation gate is just a redundant popup — skip it and execute
+    // directly. The mode comes from the PreToolUse hook, which writes it keyed
+    // by session id immediately before this call, so it reflects the current
+    // call and never leaks across sessions. Any other or unknown mode keeps the
+    // gate. Only bypassPermissions is skipped (deliberately narrow).
+    const bypass = (await currentPermissionMode()) === "bypassPermissions";
+    if (!bypass) {
       const message = await buildApprovalMessage(
         mcpServer,
         toolName,
