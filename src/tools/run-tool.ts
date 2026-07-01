@@ -244,14 +244,13 @@ function primeElicitationCancellation(mcpServer: Server): void {
 
 // Path to the per-session permission-mode marker the PreToolUse hook writes
 // immediately before each run_tool call (see hooks/auto-approve-run-tool.mjs).
-// The base dir and session-id sanitization MUST stay in lockstep with the hook
-// and with start.sh's PLUGIN_DATA_DIR export, or the server reads a path the
-// hook never wrote and silently falls back to prompting.
+// This resolution MUST match the hook's exactly. The hook cannot see the
+// server-only PLUGIN_DATA_DIR that start.sh derives, so both sides key off
+// CLAUDE_PLUGIN_DATA (falling back to ~/.glean) — the one anchor available to
+// both processes. Under start.sh, PLUGIN_DATA_DIR resolves to this same path.
 function permissionModeMarkerPath(): string {
   const base =
-    process.env.PLUGIN_DATA_DIR ||
-    process.env.CLAUDE_PLUGIN_DATA ||
-    path.join(os.homedir(), ".glean");
+    process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), ".glean");
   const sessionId = resolveSessionId()
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .slice(0, 64);

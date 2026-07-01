@@ -284,7 +284,7 @@ async function writeToolJson(
 }
 
 // Mirrors the marker the PreToolUse hook writes: <dataDir>/glean-hitl-mode/
-// <sessionId>.json. The server reads it via PLUGIN_DATA_DIR + GLEAN_SESSION_ID.
+// <sessionId>.json. The server reads it via CLAUDE_PLUGIN_DATA + GLEAN_SESSION_ID.
 async function writeModeMarker(
   dataDir: string,
   sessionId: string,
@@ -572,7 +572,7 @@ describe("handleRunTool (HITL)", () => {
 
   it("skips the elicitation gate and executes directly in bypassPermissions mode", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
-    vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
+    vi.stubEnv("CLAUDE_PLUGIN_DATA", tmpDir);
     vi.stubEnv("GLEAN_SESSION_ID", "sess-bypass");
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
     await writeModeMarker(tmpDir, "sess-bypass", "bypassPermissions");
@@ -588,7 +588,7 @@ describe("handleRunTool (HITL)", () => {
 
   it("still elicits when the session's permission mode is not bypass", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
-    vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
+    vi.stubEnv("CLAUDE_PLUGIN_DATA", tmpDir);
     vi.stubEnv("GLEAN_SESSION_ID", "sess-default");
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
     await writeModeMarker(tmpDir, "sess-default", "default");
@@ -604,7 +604,7 @@ describe("handleRunTool (HITL)", () => {
 
   it("still elicits when no permission-mode marker exists (fails toward the gate)", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
-    vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
+    vi.stubEnv("CLAUDE_PLUGIN_DATA", tmpDir);
     vi.stubEnv("GLEAN_SESSION_ID", "sess-none");
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
     // Deliberately write no marker.
@@ -619,7 +619,7 @@ describe("handleRunTool (HITL)", () => {
 
   it("ignores a bypass marker written for a different session (no cross-session leak)", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
-    vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
+    vi.stubEnv("CLAUDE_PLUGIN_DATA", tmpDir);
     vi.stubEnv("GLEAN_SESSION_ID", "sess-A");
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
     // Another concurrent session opted into bypass; ours did not.
