@@ -1,5 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { buildGatewayMetadataHeader } from "../src/remote-client.js";
+import { describe, it, expect, afterEach } from "vitest";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import {
+  buildGatewayMetadataHeader,
+  callRemoteTool,
+  remoteToolTimeoutMs,
+} from "../src/remote-client.js";
 
 describe("buildGatewayMetadataHeader", () => {
   it("produces stable output without session ID", () => {
@@ -52,5 +57,78 @@ describe("buildGatewayMetadataHeader", () => {
     const bytes = Buffer.from(header, "base64");
     const content = bytes.toString("utf-8");
     expect(content).toContain("my-session-42");
+  });
+});
+
+describe("remoteToolTimeoutMs", () => {
+  const KEY = "GLEAN_REMOTE_TOOL_TIMEOUT_MS";
+  const original = process.env[KEY];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it("defaults to 300000ms when unset", () => {
+    delete process.env[KEY];
+    expect(remoteToolTimeoutMs()).toBe(300_000);
+  });
+
+  it("honors a valid positive override", () => {
+    process.env[KEY] = "120000";
+    expect(remoteToolTimeoutMs()).toBe(120_000);
+  });
+
+  it("falls back to default on a non-numeric value", () => {
+    process.env[KEY] = "not-a-number";
+    expect(remoteToolTimeoutMs()).toBe(300_000);
+  });
+
+  it("falls back to default on zero or negative values", () => {
+    process.env[KEY] = "0";
+    expect(remoteToolTimeoutMs()).toBe(300_000);
+    process.env[KEY] = "-5";
+    expect(remoteToolTimeoutMs()).toBe(300_000);
+  });
+});
+
+describe("callRemoteTool", () => {
+  const KEY = "GLEAN_REMOTE_TOOL_TIMEOUT_MS";
+  const original = process.env[KEY];
+
+  afterEach(() => {
+    if (original === undefined) delete process.env[KEY];
+    else process.env[KEY] = original;
+  });
+
+  it("passes the configured timeout to client.callTool", async () => {
+    const calls: Array<{ params: unknown; schema: unknown; options: unknown }> =
+      [];
+    const fakeClient = {
+      callTool: async (params: unknown, schema: unknown, options: unknown) => {
+        calls.push({ params, schema, options });
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    } as unknown as Client;
+
+    process.env[KEY] = "12345";
+    const result = await callRemoteTool(fakeClient, "some_tool", { a: 1 });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].params).toEqual({
+      name: "some_tool",
+      arguments: { a: 1 },
+    });
+    expect(calls[0].options).toEqual({ timeout: 12345 });
+    expect(result.content).toEqual([{ type: "text", text: "ok" }]);
+  });
+
+  it("normalizes a result with no content field", async () => {
+    const fakeClient = {
+      callTool: async () => ({}),
+    } as unknown as Client;
+
+    const result = await callRemoteTool(fakeClient, "some_tool", {});
+    expect(result).toEqual({ content: [] });
   });
 });

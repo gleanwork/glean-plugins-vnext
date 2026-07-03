@@ -6,6 +6,22 @@ import type { GleanOAuthClientProvider } from "./auth-provider.js";
 
 const GLEAN_PLUGIN = "GLEAN_PLUGIN";
 
+// The MCP SDK applies DEFAULT_REQUEST_TIMEOUT_MSEC (60s) to every request when
+// callTool is invoked without an explicit timeout. Downstream Glean tools can
+// legitimately take longer than 60s, so we override the per-call timeout.
+// Configurable via GLEAN_REMOTE_TOOL_TIMEOUT_MS; falls back to a generous
+// default that mirrors HITL_TIMEOUT_MS.
+const DEFAULT_REMOTE_TOOL_TIMEOUT_MS = 300_000;
+
+export function remoteToolTimeoutMs(): number {
+  const raw = process.env.GLEAN_REMOTE_TOOL_TIMEOUT_MS;
+  if (!raw) return DEFAULT_REMOTE_TOOL_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_REMOTE_TOOL_TIMEOUT_MS;
+}
+
 function encodeVarint(value: number): number[] {
   const bytes: number[] = [];
   while (value > 0x7f) {
@@ -193,7 +209,11 @@ export async function callRemoteTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<CallToolResult> {
-  const result = await client.callTool({ name, arguments: args });
+  // Pass an explicit timeout so the call isn't capped at the SDK's 60s default.
+  // `undefined` for resultSchema keeps the SDK's CallToolResultSchema default.
+  const result = await client.callTool({ name, arguments: args }, undefined, {
+    timeout: remoteToolTimeoutMs(),
+  });
   if (!("content" in result)) {
     return { content: [] };
   }
