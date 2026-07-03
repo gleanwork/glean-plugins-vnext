@@ -141,6 +141,81 @@ describe("resolveFileArgs", () => {
       resolveFileArgs({ body: file }, { body: "existing" }),
     ).rejects.toThrow(/conflicts/);
   });
+
+  it("parses JSON into an object when the param type is object", async () => {
+    const file = path.join(tmpDir, "spec.json");
+    await fs.writeFile(file, '{"name":"agent","steps":[1,2,3]}');
+
+    const result = await resolveFileArgs({ spec: file }, {}, {
+      properties: { spec: { type: "object" } },
+    });
+
+    expect(result.spec).toEqual({ name: "agent", steps: [1, 2, 3] });
+  });
+
+  it("parses JSON into an array when the param type is array", async () => {
+    const file = path.join(tmpDir, "items.json");
+    await fs.writeFile(file, '["a","b"]');
+
+    const result = await resolveFileArgs({ items: file }, {}, {
+      properties: { items: { type: "array" } },
+    });
+
+    expect(result.items).toEqual(["a", "b"]);
+  });
+
+  it("parses when type is given as an array including object", async () => {
+    const file = path.join(tmpDir, "spec.json");
+    await fs.writeFile(file, '{"k":1}');
+
+    const result = await resolveFileArgs({ spec: file }, {}, {
+      properties: { spec: { type: ["object", "null"] } },
+    });
+
+    expect(result.spec).toEqual({ k: 1 });
+  });
+
+  it("keeps raw string for a string param even when content is JSON", async () => {
+    const file = path.join(tmpDir, "body.json");
+    await fs.writeFile(file, '{"looks":"like json"}');
+
+    const result = await resolveFileArgs({ body: file }, {}, {
+      properties: { body: { type: "string" } },
+    });
+
+    expect(result.body).toBe('{"looks":"like json"}');
+  });
+
+  it("keeps raw string when no schema is provided (backward compat)", async () => {
+    const file = path.join(tmpDir, "body.json");
+    await fs.writeFile(file, '{"a":1}');
+
+    const result = await resolveFileArgs({ body: file }, {});
+
+    expect(result.body).toBe('{"a":1}');
+  });
+
+  it("throws a clear error when an object-typed param gets invalid JSON", async () => {
+    const file = path.join(tmpDir, "spec.json");
+    await fs.writeFile(file, "not json {");
+
+    await expect(
+      resolveFileArgs({ spec: file }, {}, {
+        properties: { spec: { type: "object" } },
+      }),
+    ).rejects.toThrow(/must contain valid JSON/);
+  });
+
+  it("falls back to the raw string for a string|object union with invalid JSON", async () => {
+    const file = path.join(tmpDir, "val.txt");
+    await fs.writeFile(file, "plain text");
+
+    const result = await resolveFileArgs({ val: file }, {}, {
+      properties: { val: { type: ["string", "object"] } },
+    });
+
+    expect(result.val).toBe("plain text");
+  });
 });
 
 describe("buildRemoteArgs", () => {
@@ -204,6 +279,22 @@ async function writeToolJson(
   await fs.writeFile(
     path.join(toolsDir, `${toolName}.json`),
     JSON.stringify(meta),
+    "utf-8",
+  );
+}
+
+// Mirrors the marker the PreToolUse hook writes: <dataDir>/glean-hitl-mode/
+// <sessionId>.json. The server reads it via CLAUDE_PLUGIN_DATA + GLEAN_SESSION_ID.
+async function writeModeMarker(
+  dataDir: string,
+  sessionId: string,
+  mode: string,
+) {
+  const dir = path.join(dataDir, "glean-hitl-mode");
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(
+    path.join(dir, `${sessionId}.json`),
+    JSON.stringify({ permission_mode: mode, ts: Date.now() }),
     "utf-8",
   );
 }
@@ -434,6 +525,32 @@ describe("handleRunTool (HITL)", () => {
     expect(remote.callTool).toHaveBeenCalledTimes(1); // executed on accept
   });
 
+  it("parses an object-typed file_arg from the tool schema and forwards it as structured data", async () => {
+    vi.stubEnv("ENABLE_HITL", "false");
+    const remote = makeRemote();
+    const server = makeServer({ elicitation: false });
+    await writeToolJson(tmpDir, "save_agent", {
+      requires_approval: false,
+      inputSchema: { properties: { spec: { type: "object" } } },
+    });
+    const specFile = path.join(tmpDir, "spec.json");
+    await fs.writeFile(specFile, '{"name":"my-agent","steps":[1,2]}', "utf-8");
+
+    await handleRunTool(remote, server, tmpDir, {
+      server_id: "default",
+      tool_name: "save_agent",
+      arguments: {},
+      file_args: { spec: specFile },
+    });
+
+    const call = remote.callTool.mock.calls[0][0];
+    expect(call.name).toBe("run_tool");
+    expect(call.arguments.arguments.spec).toEqual({
+      name: "my-agent",
+      steps: [1, 2],
+    });
+  });
+
   it("fails before prompting when a file_args path is unreadable", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
@@ -451,6 +568,69 @@ describe("handleRunTool (HITL)", () => {
     expect(result.isError).toBe(true);
     expect(elicit).not.toHaveBeenCalled(); // no prompt for unreadable input
     expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  it("skips the elicitation gate and executes directly in bypassPermissions mode", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("CLAUDE_PLUGIN_DATA", tmpDir);
+    vi.stubEnv("GLEAN_SESSION_ID", "sess-bypass");
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    await writeModeMarker(tmpDir, "sess-bypass", "bypassPermissions");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit).not.toHaveBeenCalled();
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("still elicits when the session's permission mode is not bypass", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("CLAUDE_PLUGIN_DATA", tmpDir);
+    vi.stubEnv("GLEAN_SESSION_ID", "sess-default");
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    await writeModeMarker(tmpDir, "sess-default", "default");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit).toHaveBeenCalledTimes(1);
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("still elicits when no permission-mode marker exists (fails toward the gate)", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("CLAUDE_PLUGIN_DATA", tmpDir);
+    vi.stubEnv("GLEAN_SESSION_ID", "sess-none");
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    // Deliberately write no marker.
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a bypass marker written for a different session (no cross-session leak)", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("CLAUDE_PLUGIN_DATA", tmpDir);
+    vi.stubEnv("GLEAN_SESSION_ID", "sess-A");
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    // Another concurrent session opted into bypass; ours did not.
+    await writeModeMarker(tmpDir, "sess-B", "bypassPermissions");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit).toHaveBeenCalledTimes(1); // gate preserved for THIS session
   });
 });
 

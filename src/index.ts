@@ -221,11 +221,14 @@ const RUN_TOOL_TOOL: Tool = {
         type: "object",
         description:
           "Optional map from argument name to absolute local file path. " +
-          "The plugin reads each file and substitutes its UTF-8 contents " +
-          "into the corresponding key in `arguments` before calling the " +
-          "remote tool. Use this for long-form drafted content (Slack " +
-          "message bodies, Confluence pages, doc contents, etc.) so the " +
-          "draft doesn't have to be passed as a huge inline string. " +
+          "The plugin reads each file and substitutes its contents into the " +
+          "corresponding key in `arguments` before calling the remote tool. " +
+          "If the target parameter is typed as an object or array in the " +
+          "tool's inputSchema, the file is parsed as JSON and injected as " +
+          "structured data; otherwise its contents are injected as a UTF-8 " +
+          "string. Use this to keep large values out of the inline call — " +
+          "long-form text (Slack message bodies, Confluence pages, doc " +
+          "contents) or a large structured argument (e.g. an agent spec). " +
           "Paths must be absolute. Each file must be ≤ 1 MB (override " +
           "via GLEAN_FILE_ARG_MAX_BYTES). A key in `file_args` must not " +
           "also appear in `arguments`.",

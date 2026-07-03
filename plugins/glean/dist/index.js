@@ -25662,6 +25662,7 @@ async function handleFindSkills(remoteClient, skillsBaseDir, args) {
 
 // src/tools/run-tool.ts
 import fs4 from "node:fs/promises";
+import os2 from "node:os";
 import path4 from "node:path";
 
 // src/tools/approval-args.ts
@@ -25773,6 +25774,14 @@ var FileArgsError = class extends Error {
     this.name = "FileArgsError";
   }
 };
+function declaredParamTypes(inputSchema, argName) {
+  const t = inputSchema?.properties?.[argName]?.type;
+  if (typeof t === "string") return /* @__PURE__ */ new Set([t]);
+  if (Array.isArray(t)) {
+    return new Set(t.filter((x) => typeof x === "string"));
+  }
+  return /* @__PURE__ */ new Set();
+}
 function fileArgsMaxBytes() {
   const raw = process.env.GLEAN_FILE_ARG_MAX_BYTES;
   if (!raw) return DEFAULT_FILE_ARG_MAX_BYTES;
@@ -25785,7 +25794,7 @@ function hitlTimeoutMs() {
   const parsed = Number.parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultHitlTimeoutMs;
 }
-async function resolveFileArgs(fileArgs, baseArgs) {
+async function resolveFileArgs(fileArgs, baseArgs, inputSchema) {
   if (fileArgs === void 0 || fileArgs === null) return baseArgs;
   if (typeof fileArgs !== "object" || Array.isArray(fileArgs)) {
     throw new FileArgsError(
@@ -25831,7 +25840,24 @@ async function resolveFileArgs(fileArgs, baseArgs) {
         `file_args.${argName}: "${filePathRaw}" is ${stat.size} bytes, exceeds ${maxBytes} byte limit (set GLEAN_FILE_ARG_MAX_BYTES to override)`
       );
     }
-    merged[argName] = await fs4.readFile(filePathRaw, "utf-8");
+    const content = await fs4.readFile(filePathRaw, "utf-8");
+    const types = declaredParamTypes(inputSchema, argName);
+    if (types.has("object") || types.has("array")) {
+      try {
+        merged[argName] = JSON.parse(content);
+      } catch (err) {
+        if (types.has("string")) {
+          merged[argName] = content;
+        } else {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new FileArgsError(
+            `file_args.${argName}: "${filePathRaw}" must contain valid JSON for the object/array-typed parameter, but parsing failed: ${msg}`
+          );
+        }
+      }
+    } else {
+      merged[argName] = content;
+    }
   }
   return merged;
 }
@@ -25882,6 +25908,20 @@ function primeElicitationCancellation(mcpServer) {
   void mcpServer.request({ method: "ping" }, EmptyResultSchema).catch(() => {
   });
 }
+function permissionModeMarkerPath() {
+  const base = process.env.CLAUDE_PLUGIN_DATA || path4.join(os2.homedir(), ".glean");
+  const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
+  return path4.join(base, "glean-hitl-mode", `${sessionId}.json`);
+}
+async function currentPermissionMode() {
+  try {
+    const raw = await fs4.readFile(permissionModeMarkerPath(), "utf-8");
+    const parsed = JSON.parse(raw);
+    return typeof parsed.permission_mode === "string" ? parsed.permission_mode : null;
+  } catch {
+    return null;
+  }
+}
 async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
   const serverId = args.server_id;
   const toolName = args.tool_name;
@@ -25893,10 +25933,15 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
       isError: true
     };
   }
+  const toolMeta = await findToolJson(skillsBaseDir, toolName);
   const baseArgs = args.arguments != null && typeof args.arguments === "object" ? args.arguments : {};
   let resolvedArgs;
   try {
-    resolvedArgs = await resolveFileArgs(args.file_args, baseArgs);
+    resolvedArgs = await resolveFileArgs(
+      args.file_args,
+      baseArgs,
+      toolMeta?.inputSchema
+    );
   } catch (err) {
     if (err instanceof FileArgsError) {
       return {
@@ -25907,9 +25952,9 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
     throw err;
   }
   const hitlEnabled = process.env.ENABLE_HITL === "true";
-  if (hitlEnabled && mcpServer.getClientCapabilities()?.elicitation) {
-    const toolMeta = await findToolJson(skillsBaseDir, toolName);
-    if (toolMeta?.requires_approval) {
+  if (hitlEnabled && toolMeta?.requires_approval && mcpServer.getClientCapabilities()?.elicitation) {
+    const bypass = await currentPermissionMode() === "bypassPermissions";
+    if (!bypass) {
       const message = await buildApprovalMessage(
         mcpServer,
         toolName,
@@ -26344,7 +26389,7 @@ var RUN_TOOL_TOOL = {
       },
       file_args: {
         type: "object",
-        description: "Optional map from argument name to absolute local file path. The plugin reads each file and substitutes its UTF-8 contents into the corresponding key in `arguments` before calling the remote tool. Use this for long-form drafted content (Slack message bodies, Confluence pages, doc contents, etc.) so the draft doesn't have to be passed as a huge inline string. Paths must be absolute. Each file must be \u2264 1 MB (override via GLEAN_FILE_ARG_MAX_BYTES). A key in `file_args` must not also appear in `arguments`.",
+        description: "Optional map from argument name to absolute local file path. The plugin reads each file and substitutes its contents into the corresponding key in `arguments` before calling the remote tool. If the target parameter is typed as an object or array in the tool's inputSchema, the file is parsed as JSON and injected as structured data; otherwise its contents are injected as a UTF-8 string. Use this to keep large values out of the inline call \u2014 long-form text (Slack message bodies, Confluence pages, doc contents) or a large structured argument (e.g. an agent spec). Paths must be absolute. Each file must be \u2264 1 MB (override via GLEAN_FILE_ARG_MAX_BYTES). A key in `file_args` must not also appear in `arguments`.",
         additionalProperties: { type: "string" }
       }
     },

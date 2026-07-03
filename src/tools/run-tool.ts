@@ -3,9 +3,11 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { EmptyResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
+import { resolveSessionId } from "../session-id.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 
@@ -19,6 +21,30 @@ export class FileArgsError extends Error {
     super(message);
     this.name = "FileArgsError";
   }
+}
+
+// A downstream tool parameter's JSON Schema, narrowed to the bits we use.
+// `type` may be a single string or an array (e.g. ["object", "null"]).
+interface ParamSchema {
+  type?: string | string[];
+}
+interface ToolInputSchema {
+  properties?: Record<string, ParamSchema>;
+}
+
+// The set of JSON Schema types declared for a top-level parameter. file_args
+// keys always map to top-level argument names, so a direct properties lookup
+// is sufficient — no need to walk nested schemas.
+function declaredParamTypes(
+  inputSchema: ToolInputSchema | undefined,
+  argName: string,
+): Set<string> {
+  const t = inputSchema?.properties?.[argName]?.type;
+  if (typeof t === "string") return new Set([t]);
+  if (Array.isArray(t)) {
+    return new Set(t.filter((x): x is string => typeof x === "string"));
+  }
+  return new Set();
 }
 
 function fileArgsMaxBytes(): number {
@@ -38,13 +64,19 @@ function hitlTimeoutMs(): number {
 }
 
 /**
- * Reads each `file_args` entry from disk and merges its UTF-8 content into
- * `baseArgs` under the given key. Throws FileArgsError on any validation
- * failure so the caller can surface the message verbatim to the model.
+ * Reads each `file_args` entry from disk and merges its content into
+ * `baseArgs` under the given key. The downstream tool's `inputSchema` decides
+ * how the content is injected: a parameter typed `object`/`array` is JSON-
+ * parsed into structured data (a raw string would fail the downstream schema
+ * with "Expected object, given string"), while everything else — the common
+ * case of long-form text bodies — is injected verbatim as a UTF-8 string.
+ * Throws FileArgsError on any validation failure so the caller can surface the
+ * message verbatim to the model.
  */
 export async function resolveFileArgs(
   fileArgs: unknown,
   baseArgs: Record<string, unknown>,
+  inputSchema?: ToolInputSchema,
 ): Promise<Record<string, unknown>> {
   if (fileArgs === undefined || fileArgs === null) return baseArgs;
   if (
@@ -99,7 +131,27 @@ export async function resolveFileArgs(
       );
     }
 
-    merged[argName] = await fs.readFile(filePathRaw, "utf-8");
+    const content = await fs.readFile(filePathRaw, "utf-8");
+    const types = declaredParamTypes(inputSchema, argName);
+    if (types.has("object") || types.has("array")) {
+      try {
+        merged[argName] = JSON.parse(content);
+      } catch (err) {
+        // A union like ["string", "object"] can legitimately take raw text, so
+        // keep the string. A pure object/array param cannot — fail with a clear
+        // message before the opaque downstream "Expected object, given string".
+        if (types.has("string")) {
+          merged[argName] = content;
+        } else {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new FileArgsError(
+            `file_args.${argName}: "${filePathRaw}" must contain valid JSON for the object/array-typed parameter, but parsing failed: ${msg}`,
+          );
+        }
+      }
+    } else {
+      merged[argName] = content;
+    }
   }
 
   return merged;
@@ -110,6 +162,7 @@ interface ToolMetadata {
   name?: string;
   description?: string;
   server_id?: string;
+  inputSchema?: ToolInputSchema;
 }
 
 async function findToolJson(
@@ -189,6 +242,45 @@ function primeElicitationCancellation(mcpServer: Server): void {
   });
 }
 
+// Path to the per-session permission-mode marker the PreToolUse hook writes
+// immediately before each run_tool call (see hooks/auto-approve-run-tool.mjs).
+// This resolution MUST match the hook's exactly. The hook cannot see the
+// server-only PLUGIN_DATA_DIR that start.sh derives, so both sides key off
+// CLAUDE_PLUGIN_DATA (falling back to ~/.glean) — the one anchor available to
+// both processes. Under start.sh, PLUGIN_DATA_DIR resolves to this same path.
+function permissionModeMarkerPath(): string {
+  const base =
+    process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), ".glean");
+  const sessionId = resolveSessionId()
+    .replace(/[^a-zA-Z0-9_-]/g, "-")
+    .slice(0, 64);
+  return path.join(base, "glean-hitl-mode", `${sessionId}.json`);
+}
+
+// Claude Code's live permission mode for THIS session, as captured by the hook
+// on the current call. Returns null when the marker is missing, unreadable, or
+// malformed — the caller treats null as "unknown" and keeps the approval gate,
+// so any failure fails toward prompting, never toward a silent bypass.
+//
+// Resume safety: the PreToolUse hook rewrites this marker with the CURRENT mode
+// on every run_tool call (see hooks/auto-approve-run-tool.mjs), and PreToolUse
+// always runs before the tool executes, so the value read here is the one
+// written for this exact call. A session first launched with
+// --dangerously-skip-permissions and later resumed WITHOUT it (same session id)
+// therefore has its stale bypass marker overwritten with the resumed mode on
+// the resumed session's first run_tool call, re-engaging the gate.
+async function currentPermissionMode(): Promise<string | null> {
+  try {
+    const raw = await fs.readFile(permissionModeMarkerPath(), "utf-8");
+    const parsed = JSON.parse(raw) as { permission_mode?: unknown };
+    return typeof parsed.permission_mode === "string"
+      ? parsed.permission_mode
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function handleRunTool(
   remoteClient: Client,
   mcpServer: Server,
@@ -207,6 +299,11 @@ export async function handleRunTool(
     };
   }
 
+  // Load the downstream tool's metadata once, up front: its inputSchema drives
+  // file_args JSON-parsing (object/array params) and its requires_approval
+  // drives the HITL gate. Both paths must see it regardless of ENABLE_HITL.
+  const toolMeta = await findToolJson(skillsBaseDir, toolName);
+
   // Resolve file_args up front so the approval prompt shows the COMPLETE input
   // (file-sourced values included, not just the inline `arguments`), and so an
   // unreadable file_args path fails before we prompt the user.
@@ -216,7 +313,11 @@ export async function handleRunTool(
       : {};
   let resolvedArgs: Record<string, unknown>;
   try {
-    resolvedArgs = await resolveFileArgs(args.file_args, baseArgs);
+    resolvedArgs = await resolveFileArgs(
+      args.file_args,
+      baseArgs,
+      toolMeta?.inputSchema,
+    );
   } catch (err) {
     if (err instanceof FileArgsError) {
       return {
@@ -228,10 +329,20 @@ export async function handleRunTool(
   }
 
   const hitlEnabled = process.env.ENABLE_HITL === "true";
-  if (hitlEnabled && mcpServer.getClientCapabilities()?.elicitation) {
-    const toolMeta = await findToolJson(skillsBaseDir, toolName);
-
-    if (toolMeta?.requires_approval) {
+  if (
+    hitlEnabled &&
+    toolMeta?.requires_approval &&
+    mcpServer.getClientCapabilities()?.elicitation
+  ) {
+    // In bypassPermissions mode (`claude --dangerously-skip-permissions`) the
+    // user has opted out of every approval prompt for the session, so our own
+    // elicitation gate is just a redundant popup — skip it and execute
+    // directly. The mode comes from the PreToolUse hook, which writes it keyed
+    // by session id immediately before this call, so it reflects the current
+    // call and never leaks across sessions. Any other or unknown mode keeps the
+    // gate. Only bypassPermissions is skipped (deliberately narrow).
+    const bypass = (await currentPermissionMode()) === "bypassPermissions";
+    if (!bypass) {
       const message = await buildApprovalMessage(
         mcpServer,
         toolName,
