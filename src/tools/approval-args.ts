@@ -116,7 +116,7 @@ export function formatArgumentsForFile(
 }
 
 // The full arguments are written to a per-session file under the plugin's data
-// dir (CLAUDE_PLUGIN_DATA, exported by start.sh as PLUGIN_DATA_DIR). The file is
+// dir (CLAUDE_PLUGIN_DATA, set by start.mjs as PLUGIN_DATA_DIR). The file is
 // scoped to the chat session id so parallel sessions don't overwrite each
 // other; within a session it is intentionally overwritten on each approval —
 // only the most recent prompt's arguments need to be inspectable.

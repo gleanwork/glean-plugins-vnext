@@ -116,8 +116,8 @@ HITL ones — or in your shell:
 Empty values and un-interpolated `${VAR}` placeholders are ignored, falling back
 to the default.
 
-The launcher (`plugins/glean/start.sh`) also derives and **exports** three more
-variables the bundle reads, so these are internal — start.sh overwrites them on
+The launcher (`plugins/glean/start.mjs`) also derives and **exports** three more
+variables the bundle reads, so these are internal — start.mjs overwrites them on
 every launch and setting them yourself has no effect:
 
 - `PLUGIN_DATA_DIR` — directory for credentials, caches, the saved server URL,
@@ -195,9 +195,9 @@ plugins/glean/
                           by `npm run build`; checked in)
   skills/glean_run/       Skill that tells the agent how to use the
                           tools. Uses the open SKILL.md standard.
-  start.sh                Bash launcher: sanitizes env (SKILLS_BASE_DIR,
-                          PLUGIN_DATA_DIR, GLEAN_SESSION_ID), then execs
-                          node on the bundle
+  start.mjs               Cross-platform Node launcher: sanitizes env
+                          (SKILLS_BASE_DIR, PLUGIN_DATA_DIR, GLEAN_SESSION_ID),
+                          then imports the dist/index.js bundle in-process
   package.json            Minimal "type": "module" manifest so Node
                           treats dist/index.js as ESM at runtime
 src/                      TypeScript sources for the MCP server

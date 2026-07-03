@@ -4,7 +4,7 @@ let fallbackSessionId: string | undefined;
 
 /**
  * Resolves the chat session id from GLEAN_SESSION_ID, which the host-aware
- * launcher (start.sh) exports after reading whatever variable the current host
+ * launcher (start.mjs) exports after reading whatever variable the current host
  * uses for the session/conversation id. The plugin itself stays host-agnostic
  * and never reads host-specific env vars.
  *

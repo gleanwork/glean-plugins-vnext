@@ -22,7 +22,7 @@ zip -r "$OUT" \
   .mcp.json \
   dist \
   skills \
-  start.sh \
+  start.mjs \
   package.json \
   >/dev/null
 

@@ -20,7 +20,7 @@ MANIFESTS=(
 )
 
 # Only trigger on files that affect the plugin runtime — not CI or tooling.
-PLUGIN_PATHS='^(src/|plugins/glean/(dist/|skills/|start\.sh|\.mcp\.json|\.mcp\.codex\.json|package\.json|\.(claude|codex|cursor)-plugin/plugin\.json))'
+PLUGIN_PATHS='^(src/|plugins/glean/(dist/|skills/|start\.mjs|\.mcp\.json|\.mcp\.codex\.json|package\.json|\.(claude|codex|cursor)-plugin/plugin\.json))'
 
 if ! git diff --name-only "$BASE_REF"...HEAD | grep -qE "$PLUGIN_PATHS"; then
   echo "No plugin files changed — skipping version check."

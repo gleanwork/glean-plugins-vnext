@@ -27,7 +27,7 @@ MANIFESTS=(
   "plugins/glean/.cursor-plugin/plugin.json"
 )
 
-PLUGIN_PATHS='^(src/|plugins/glean/(dist/|skills/|start\.sh|\.mcp\.json|\.mcp\.codex\.json|package\.json|\.(claude|codex|cursor)-plugin/plugin\.json))'
+PLUGIN_PATHS='^(src/|plugins/glean/(dist/|skills/|start\.mjs|\.mcp\.json|\.mcp\.codex\.json|package\.json|\.(claude|codex|cursor)-plugin/plugin\.json))'
 
 if ! git diff --cached --name-only | grep -qE "$PLUGIN_PATHS"; then
   exit 0
