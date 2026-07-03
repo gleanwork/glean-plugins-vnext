@@ -110,6 +110,7 @@ HITL ones — or in your shell:
 | `GLEAN_MCP_SERVER_URL` | Overrides the Glean server URL captured by `setup`. | URL saved by `setup` |
 | `ENABLE_HITL` | Human-in-the-loop confirmation before `run_tool` runs a downstream tool. Active only when set to exactly `true`. | `true` (set in the shipped `.mcp.json`) |
 | `HITL_TIMEOUT_MS` | Timeout in milliseconds for a HITL confirmation prompt. Positive integer. | `300000` (5 min), set in `.mcp.json` |
+| `GLEAN_REMOTE_TOOL_TIMEOUT_MS` | Timeout in milliseconds for a downstream tool call made via `run_tool` (overrides the MCP SDK's 60s default). Positive integer. | `300000` (5 min), bundle default |
 | `GLEAN_FILE_ARG_MAX_BYTES` | Maximum size in bytes of each file read via `run_tool`'s `file_args`. Positive integer. | `1048576` (1 MiB), bundle default |
 | `USE_CLAUDE_PROJECT_DIR` | Set to `1` to route the skills cache under the launch project's `.claude/tmp/`, so the `glean_run` skill's `Read` glob can match cache files. | unset |
 

@@ -25129,6 +25129,13 @@ var StreamableHTTPClientTransport = class {
 
 // src/remote-client.ts
 var GLEAN_PLUGIN = "GLEAN_PLUGIN";
+var DEFAULT_REMOTE_TOOL_TIMEOUT_MS = 3e5;
+function remoteToolTimeoutMs() {
+  const raw = process.env.GLEAN_REMOTE_TOOL_TIMEOUT_MS;
+  if (!raw) return DEFAULT_REMOTE_TOOL_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_REMOTE_TOOL_TIMEOUT_MS;
+}
 function encodeVarint(value) {
   const bytes = [];
   while (value > 127) {
@@ -25250,7 +25257,9 @@ async function createRemoteClient(serverUrl, opts, chatSessionId) {
   return client;
 }
 async function callRemoteTool(client, name, args) {
-  const result = await client.callTool({ name, arguments: args });
+  const result = await client.callTool({ name, arguments: args }, void 0, {
+    timeout: remoteToolTimeoutMs()
+  });
   if (!("content" in result)) {
     return { content: [] };
   }

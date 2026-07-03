@@ -48,10 +48,14 @@ describe("handleFindSkills", () => {
 
     const result = await handleFindSkills(mockClient, tmpDir, {});
 
-    expect(mockClient.callTool).toHaveBeenCalledWith({
-      name: "find_skills",
-      arguments: {},
-    });
+    expect(mockClient.callTool).toHaveBeenCalledWith(
+      {
+        name: "find_skills",
+        arguments: {},
+      },
+      undefined,
+      expect.objectContaining({ timeout: expect.any(Number) }),
+    );
 
     expect(result).toContain("<available_skills>");
     expect(result).toContain('name="search-jira"');
@@ -70,10 +74,14 @@ describe("handleFindSkills", () => {
       query: "create a calendar event",
     });
 
-    expect(mockClient.callTool).toHaveBeenCalledWith({
-      name: "find_skills",
-      arguments: { queries: ["create a calendar event"] },
-    });
+    expect(mockClient.callTool).toHaveBeenCalledWith(
+      {
+        name: "find_skills",
+        arguments: { queries: ["create a calendar event"] },
+      },
+      undefined,
+      expect.objectContaining({ timeout: expect.any(Number) }),
+    );
   });
 
   it("passes queries array when provided", async () => {
@@ -83,10 +91,14 @@ describe("handleFindSkills", () => {
       queries: ["search emails", "create calendar event"],
     });
 
-    expect(mockClient.callTool).toHaveBeenCalledWith({
-      name: "find_skills",
-      arguments: { queries: ["search emails", "create calendar event"] },
-    });
+    expect(mockClient.callTool).toHaveBeenCalledWith(
+      {
+        name: "find_skills",
+        arguments: { queries: ["search emails", "create calendar event"] },
+      },
+      undefined,
+      expect.objectContaining({ timeout: expect.any(Number) }),
+    );
   });
 
   it("returns empty XML when response has no skills field", async () => {
