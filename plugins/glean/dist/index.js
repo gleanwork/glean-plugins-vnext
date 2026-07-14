@@ -25400,7 +25400,7 @@ function clearCredentials() {
 // src/auth-provider.ts
 function openBrowser(url2) {
   if (platform() === "win32") {
-    spawn("cmd", ["/c", "start", "", url2], {
+    spawn("explorer.exe", [url2], {
       detached: true,
       stdio: "ignore"
     }).unref();

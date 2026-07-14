@@ -18,7 +18,13 @@ export type InvalidationScope = "all" | "client" | "tokens" | "verifier";
  */
 export function openBrowser(url: string): void {
   if (platform() === "win32") {
-    spawn("cmd", ["/c", "start", "", url], {
+    // Open via explorer.exe, not `cmd /c start`: cmd.exe treats the `&`
+    // separating OAuth query params as a command separator, so the URL is
+    // truncated at `?response_type=code` and client_id (plus everything after
+    // the first `&`) is dropped, which the server rejects as invalid_client.
+    // explorer.exe receives the URL as a single argv element with no shell, so
+    // `&` and percent-encoded characters survive intact.
+    spawn("explorer.exe", [url], {
       detached: true,
       stdio: "ignore",
     }).unref();
