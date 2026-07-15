@@ -50,11 +50,15 @@ Confirm `/glean_run` is now available.
 In Cursor's chat, run the `/add-plugin` command pointing at the repo:
 
 ```
-/add-plugin gleanwork/glean-plugins-vnext
+/add-plugin glean-vnext
 ```
 
 This adds the marketplace and installs the **glean-vnext** plugin. Then confirm
-`/glean_run` is available.
+`/glean_run` is available. Or, via the UI:
+
+1. Open Cursor Settings → Plugins → **Browse Marketplace**.
+2. Search for **Glean vNext**, open it, and click **Add to Cursor**.
+3. Verify the plugin appears in the Plugins list and is active.
 
 ## Step 2 — Authenticate and validate
 
