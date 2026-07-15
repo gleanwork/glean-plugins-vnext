@@ -47,18 +47,14 @@ Confirm `/glean_run` is now available.
 
 **Cursor**
 
-Use the plugin commands:
+In Cursor's chat, run the `/add-plugin` command pointing at the repo:
 
 ```
-/plugin marketplace add gleanwork/glean-plugins-vnext
-/plugin install glean-vnext@glean-plugins-vnext
+/add-plugin gleanwork/glean-plugins-vnext
 ```
 
-Then confirm `/glean_run` is available. Or, via the UI:
-
-1. Open Cursor Settings → Plugins → **Browse Marketplace**.
-2. Search for **Glean vNext**, open it, and click **Add to Cursor**.
-3. Verify the plugin appears in the Plugins list and is active.
+This adds the marketplace and installs the **glean-vnext** plugin. Then confirm
+`/glean_run` is available.
 
 ## Step 2 — Authenticate and validate
 
@@ -96,9 +92,6 @@ and is what Git ADLC expects). Each agent gets its own folder:
 Do not edit the `id` field in `spec.yaml` — it links the folder to the live agent
 in Glean.
 
-For the full field-level reference, see
-[Agents Specification](https://developers.glean.com/guides/agents/specification).
-
 ## Step 4 — Build a simple Q&A agent
 
 Guide the user through one concrete example so they see the full shape of an
@@ -116,7 +109,6 @@ Encourage this loop:
 - build an agent
 - preview it on a real input
 - validate and publish if it looks right
-- run an eval cycle and improve
 
 ## Step 5 — Preview, test, and publish
 
@@ -215,18 +207,9 @@ Shared skills, prompts, or sub-agents reused across agents should live once unde
 are rejected). When a shared file changes, every dependent agent re-syncs in the
 same run.
 
-Do not just delete the folder while the agent is still Git-managed — the sync will
-fail. The action does not automatically retire agents.
-
 ## Troubleshooting
 
 - **`/glean_run` not available after install:** reload plugins, confirm the install
   succeeded; in Cursor confirm setup completed and the server URL was configured.
 - **Cursor says setup is required:** enter the work email when prompted, complete
   sign-in, and rerun `/glean_run agent_builder ...`.
-- **Merge sync failed:** re-run the failed job from GitHub Actions, or use manual
-  dispatch from the Actions tab (set `is_draft` to `false` for a real sync; optionally
-  specify `agent_folder`).
-- **Add a new agent directly in Git without exporting:** you can hand-author
-  `spec.yaml` and `instructions.md` as long as the agent already exists in Glean and
-  `spec.yaml` has a valid agent `id`. Create a minimal agent in the UI first to get an `id`.
