@@ -25400,9 +25400,10 @@ function clearCredentials() {
 // src/auth-provider.ts
 function openBrowser(url2) {
   if (platform() === "win32") {
-    spawn("cmd", ["/c", "start", "", url2], {
+    spawn("cmd", ["/c", "start", '""', "/b", url2.replace(/&/g, "^&")], {
       detached: true,
-      stdio: "ignore"
+      stdio: "ignore",
+      windowsVerbatimArguments: true
     }).unref();
   } else {
     const cmd = platform() === "darwin" ? "open" : "xdg-open";
