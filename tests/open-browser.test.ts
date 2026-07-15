@@ -28,18 +28,29 @@ describe("openBrowser", () => {
     vi.clearAllMocks();
   });
 
-  it("passes the full authorize URL as one argument on Windows without routing through cmd", () => {
+  it("escapes `&` as `^&` so the full authorize URL survives cmd on Windows", () => {
     platformMock.mockReturnValue("win32");
 
     openBrowser(authUrl);
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
-    const [command, args] = spawnMock.mock.calls[0] as [string, string[]];
-    // cmd.exe would split the URL on `&`, dropping client_id; the launcher must not be cmd.
-    expect(command).not.toMatch(/^cmd(\.exe)?$/i);
-    // The URL must reach the browser intact, including everything after the first `&`.
-    expect(args).toContain(authUrl);
-    expect(args).not.toContain("/c");
+    const [command, args, options] = spawnMock.mock.calls[0] as [
+      string,
+      string[],
+      { windowsVerbatimArguments?: boolean },
+    ];
+    expect(command).toMatch(/^cmd$/i);
+
+    // The URL is the last arg. Every `&` must be escaped to `^&` so cmd does
+    // not treat it as a command separator and truncate the URL.
+    const urlArg = args[args.length - 1];
+    expect(urlArg).toBe(authUrl.replace(/&/g, "^&"));
+    // Guard the actual regression: client_id lives after the first `&`, so it
+    // must survive, and no un-escaped `&` may remain in the argument.
+    expect(urlArg).toContain("client_id=Glean_Claude_Cod_f345b80b");
+    expect(urlArg.replace(/\^&/g, "").includes("&")).toBe(false);
+    // Verbatim args are required so Node doesn't re-quote and break the `^`.
+    expect(options.windowsVerbatimArguments).toBe(true);
   });
 
   it("opens with execFile on macOS", () => {

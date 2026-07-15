@@ -18,15 +18,19 @@ export type InvalidationScope = "all" | "client" | "tokens" | "verifier";
  */
 export function openBrowser(url: string): void {
   if (platform() === "win32") {
-    // Open via explorer.exe, not `cmd /c start`: cmd.exe treats the `&`
-    // separating OAuth query params as a command separator, so the URL is
-    // truncated at `?response_type=code` and client_id (plus everything after
-    // the first `&`) is dropped, which the server rejects as invalid_client.
-    // explorer.exe receives the URL as a single argv element with no shell, so
-    // `&` and percent-encoded characters survive intact.
-    spawn("explorer.exe", [url], {
+    // Open via `cmd /c start`, which routes through ShellExecute -> the default
+    // browser. The catch: cmd.exe treats a bare `&` as a command separator, so
+    // the OAuth authorize URL would be truncated at the first `&` -- dropping
+    // client_id and everything after it, which the server rejects as
+    // invalid_client. We escape every `&` as `^&` and pass the args verbatim
+    // (windowsVerbatimArguments) so Node doesn't re-wrap them in quotes, inside
+    // which cmd stops honoring the `^` escape. cmd then un-escapes `^&` back to
+    // a literal `&`, so the browser receives the full URL intact. The empty
+    // `""` is start's window-title arg; `/b` avoids spawning a console window.
+    spawn("cmd", ["/c", "start", '""', "/b", url.replace(/&/g, "^&")], {
       detached: true,
       stdio: "ignore",
+      windowsVerbatimArguments: true,
     }).unref();
   } else {
     const cmd = platform() === "darwin" ? "open" : "xdg-open";
