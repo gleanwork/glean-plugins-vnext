@@ -47,7 +47,29 @@ Confirm `/glean_run` is now available.
 
 **Cursor**
 
-In Cursor's chat, run the `/add-plugin` command pointing at the repo:
+_Prerequisite — Admin setup._ Before any user can install the plugin, a Cursor
+admin must add the marketplace to the team once:
+
+1. Open the Cursor Admin UI.
+2. Go to **Team Settings → Plugins**.
+3. Choose the option to add a marketplace, then click **Import from repo** to add
+   a custom marketplace/plugin repository.
+4. Enter the repository URL:
+
+```
+https://github.com/gleanwork/glean-plugins-vnext
+```
+
+5. Keep **Auto Refresh** enabled so updates are picked up when Glean publishes
+   beta fixes.
+6. Set access to **Default on** (recommended) or **Default off**.
+7. Save the configuration.
+
+If access is set to **Default off**, pilot users must install the plugin
+themselves (see below).
+
+_User install._ Once the admin has added the marketplace, in Cursor's chat run
+the `/add-plugin` command pointing at the plugin:
 
 ```
 /add-plugin glean-vnext
@@ -59,6 +81,10 @@ This adds the marketplace and installs the **glean-vnext** plugin. Then confirm
 1. Open Cursor Settings → Plugins → **Browse Marketplace**.
 2. Search for **Glean vNext**, open it, and click **Add to Cursor**.
 3. Verify the plugin appears in the Plugins list and is active.
+
+If you can't see the Glean vNext marketplace or plugin at all, the admin
+prerequisite above hasn't been completed for your team — **contact your Cursor
+admin first** before continuing.
 
 ## Step 2 — Authenticate and validate
 
