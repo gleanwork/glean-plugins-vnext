@@ -25893,7 +25893,7 @@ function isCursorClient(mcpServer) {
 }
 async function buildApprovalMessage(mcpServer, toolName, args) {
   if (isCursorClient(mcpServer)) {
-    return `Review the tool and arguments shown above, click on Submit to allow and Cancel to deny.`;
+    return `Review the tool and arguments shown above, then choose Approve to run it or Deny to block it, and submit.`;
   }
   const { lines, needsFile } = buildCompactArgs(args);
   const message = [
@@ -25910,6 +25910,28 @@ async function buildApprovalMessage(mcpServer, toolName, args) {
     }
   }
   return message.join("\n");
+}
+function approvalRequestedSchema(isCursor) {
+  if (!isCursor) {
+    return { type: "object", properties: {} };
+  }
+  return {
+    type: "object",
+    properties: {
+      decision: {
+        type: "string",
+        title: "Approve this action?",
+        description: "Approve to run the tool, or Deny to block it.",
+        enum: ["Approve", "Deny"]
+      }
+    },
+    required: ["decision"]
+  };
+}
+function isApproved(isCursor, result) {
+  if (result.action !== "accept") return false;
+  if (!isCursor) return true;
+  return result.content?.decision === "Approve";
 }
 var elicitationIdPrimed = /* @__PURE__ */ new WeakSet();
 function primeElicitationCancellation(mcpServer) {
@@ -25971,21 +25993,22 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
         resolvedArgs
       );
       const timeout = hitlTimeoutMs();
+      const cursor = isCursorClient(mcpServer);
       primeElicitationCancellation(mcpServer);
       try {
         const result = await mcpServer.elicitInput(
           {
             message,
-            requestedSchema: { type: "object", properties: {} }
+            requestedSchema: approvalRequestedSchema(cursor)
           },
           { timeout }
         );
-        if (result.action !== "accept") {
+        if (!isApproved(cursor, result)) {
           return {
             content: [
               {
                 type: "text",
-                text: `Action ${toolName} was ${result.action === "decline" ? "declined" : "cancelled"} by the user.`
+                text: `Action ${toolName} was ${result.action === "cancel" ? "cancelled" : "declined"} by the user.`
               }
             ]
           };

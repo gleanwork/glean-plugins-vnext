@@ -8,6 +8,8 @@ import {
   FileArgsError,
   handleRunTool,
   runToolAnnotations,
+  approvalRequestedSchema,
+  isApproved,
 } from "../src/tools/run-tool.js";
 import {
   buildCompactArgs,
@@ -456,7 +458,9 @@ describe("handleRunTool (HITL)", () => {
   it("gives Cursor a one-line prompt without an arguments block", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
-    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const elicit = vi
+      .fn()
+      .mockResolvedValue({ action: "accept", content: { decision: "Approve" } });
     const server = makeServer({
       elicitation: true,
       clientName: "cursor-vscode",
@@ -467,9 +471,68 @@ describe("handleRunTool (HITL)", () => {
     await handleRunTool(remote, server, tmpDir, baseArgs);
 
     const message = elicit.mock.calls[0][0].message as string;
-    expect(message).toContain("Submit to allow and Cancel to deny");
+    expect(message).toContain("Approve to run it or Deny to block it");
     expect(message).not.toContain("Arguments:");
     expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends Cursor a non-empty form schema so its banner renders", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi
+      .fn()
+      .mockResolvedValue({ action: "accept", content: { decision: "Approve" } });
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    const schema = elicit.mock.calls[0][0].requestedSchema;
+    expect(schema.properties.decision).toBeDefined();
+    expect(schema.properties.decision.enum).toEqual(["Approve", "Deny"]);
+    expect(schema.required).toContain("decision");
+  });
+
+  it("keeps an empty form schema for non-Cursor clients", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({
+      elicitation: true,
+      clientName: "claude-code",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    const schema = elicit.mock.calls[0][0].requestedSchema;
+    expect(schema.properties).toEqual({});
+    expect(schema.required).toBeUndefined();
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not execute when Cursor submits the form with Deny", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi
+      .fn()
+      .mockResolvedValue({ action: "accept", content: { decision: "Deny" } });
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(remote.callTool).not.toHaveBeenCalled();
+    expect((result.content[0] as { text: string }).text).toContain("declined");
   });
 
   it("spills large arguments to a file and keeps the prompt short", async () => {
@@ -720,5 +783,41 @@ describe("runToolAnnotations", () => {
 
   it("leaves annotations unset when the client cannot elicit", () => {
     expect(runToolAnnotations(true, false)).toBeUndefined();
+  });
+});
+
+describe("approvalRequestedSchema", () => {
+  it("is empty for non-Cursor clients (message-only banner)", () => {
+    expect(approvalRequestedSchema(false)).toEqual({
+      type: "object",
+      properties: {},
+    });
+  });
+
+  it("carries a required Approve/Deny field for Cursor's form renderer", () => {
+    const schema = approvalRequestedSchema(true) as any;
+    expect(schema.properties.decision.enum).toEqual(["Approve", "Deny"]);
+    expect(schema.required).toEqual(["decision"]);
+  });
+});
+
+describe("isApproved", () => {
+  it("approves a non-Cursor accept regardless of content", () => {
+    expect(isApproved(false, { action: "accept" })).toBe(true);
+  });
+
+  it("rejects a non-Cursor decline or cancel", () => {
+    expect(isApproved(false, { action: "decline" })).toBe(false);
+    expect(isApproved(false, { action: "cancel" })).toBe(false);
+  });
+
+  it("approves a Cursor accept only when the form decision is Approve", () => {
+    expect(
+      isApproved(true, { action: "accept", content: { decision: "Approve" } }),
+    ).toBe(true);
+    expect(
+      isApproved(true, { action: "accept", content: { decision: "Deny" } }),
+    ).toBe(false);
+    expect(isApproved(true, { action: "accept" })).toBe(false);
   });
 });

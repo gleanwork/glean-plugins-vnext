@@ -205,7 +205,7 @@ async function buildApprovalMessage(
   args: unknown,
 ): Promise<string> {
   if (isCursorClient(mcpServer)) {
-    return `Review the tool and arguments shown above, click on Submit to allow and Cancel to deny.`;
+    return `Review the tool and arguments shown above, then choose Approve to run it or Deny to block it, and submit.`;
   }
 
   const { lines, needsFile } = buildCompactArgs(args);
@@ -229,6 +229,51 @@ async function buildApprovalMessage(
     }
   }
   return message.join("\n");
+}
+
+// The elicitation schema for the approval prompt.
+//
+// Claude Code advertises bare `elicitation: {}` and renders the `message` text
+// with Accept/Decline buttons regardless of the schema, so an empty object is
+// enough there. Cursor advertises a FORM-based variant (`elicitation:
+// {form:{}}`) and builds the banner FROM the schema's `properties` — an empty
+// `properties` renders no fields, so Cursor shows no visible approval banner
+// and the gate is silently skipped. Cursor therefore gets one required
+// Approve/Deny field: it guarantees the form renders and forces an explicit
+// choice. Keep the non-Cursor path empty so Claude Code's working behavior is
+// untouched.
+export function approvalRequestedSchema(
+  isCursor: boolean,
+): Record<string, unknown> {
+  if (!isCursor) {
+    return { type: "object", properties: {} };
+  }
+  return {
+    type: "object",
+    properties: {
+      decision: {
+        type: "string",
+        title: "Approve this action?",
+        description: "Approve to run the tool, or Deny to block it.",
+        enum: ["Approve", "Deny"],
+      },
+    },
+    required: ["decision"],
+  };
+}
+
+// Whether an elicitation result approves the action. Non-Cursor clients gate
+// purely on the action (the Accept button). Cursor submits a form, so a
+// submitted "Deny" comes back as action "accept" with decision "Deny" — that is
+// a rejection, not an approval, so Cursor approval also requires decision
+// "Approve".
+export function isApproved(
+  isCursor: boolean,
+  result: { action: string; content?: Record<string, unknown> },
+): boolean {
+  if (result.action !== "accept") return false;
+  if (!isCursor) return true;
+  return result.content?.decision === "Approve";
 }
 
 // A WeakSet so a short-lived server in tests doesn't leak,
@@ -349,6 +394,7 @@ export async function handleRunTool(
         resolvedArgs,
       );
       const timeout = hitlTimeoutMs();
+      const cursor = isCursorClient(mcpServer);
 
       // Make a dummy empty request to burn JSON-RPC request id 0
       primeElicitationCancellation(mcpServer);
@@ -357,17 +403,17 @@ export async function handleRunTool(
         const result = await mcpServer.elicitInput(
           {
             message,
-            requestedSchema: { type: "object", properties: {} } as any,
+            requestedSchema: approvalRequestedSchema(cursor) as any,
           },
           { timeout },
         );
 
-        if (result.action !== "accept") {
+        if (!isApproved(cursor, result)) {
           return {
             content: [
               {
                 type: "text",
-                text: `Action ${toolName} was ${result.action === "decline" ? "declined" : "cancelled"} by the user.`,
+                text: `Action ${toolName} was ${result.action === "cancel" ? "cancelled" : "declined"} by the user.`,
               },
             ],
           };
