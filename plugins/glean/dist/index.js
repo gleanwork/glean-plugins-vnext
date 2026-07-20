@@ -25671,6 +25671,7 @@ async function handleFindSkills(remoteClient, skillsBaseDir, args) {
 }
 
 // src/tools/run-tool.ts
+import { appendFileSync } from "node:fs";
 import fs4 from "node:fs/promises";
 import os2 from "node:os";
 import path4 from "node:path";
@@ -25933,6 +25934,16 @@ function isApproved(isCursor, result) {
   if (!isCursor) return true;
   return result.content?.decision === "Approve";
 }
+function hitlLog(label, detail) {
+  const base = process.env.PLUGIN_DATA_DIR || path4.join(os2.homedir(), ".glean");
+  const line = `${(/* @__PURE__ */ new Date()).toISOString()} ${label} ${JSON.stringify({ pid: process.pid, ...detail })}
+`;
+  try {
+    appendFileSync(path4.join(base, "glean-server.log"), line, { mode: 384 });
+  } catch {
+  }
+  console.error(line.trimEnd());
+}
 var elicitationIdPrimed = /* @__PURE__ */ new WeakSet();
 function primeElicitationCancellation(mcpServer) {
   if (elicitationIdPrimed.has(mcpServer)) return;
@@ -25984,6 +25995,13 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
     throw err;
   }
   const hitlEnabled = process.env.ENABLE_HITL === "true";
+  hitlLog("hitl.gate", {
+    tool: toolName,
+    hitlEnabled,
+    requiresApproval: !!toolMeta?.requires_approval,
+    elicitationCap: mcpServer.getClientCapabilities()?.elicitation ?? null,
+    client: mcpServer.getClientVersion()?.name ?? null
+  });
   if (hitlEnabled && toolMeta?.requires_approval && mcpServer.getClientCapabilities()?.elicitation) {
     const bypass = await currentPermissionMode() === "bypassPermissions";
     if (!bypass) {
@@ -25995,6 +26013,11 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
       const timeout = hitlTimeoutMs();
       const cursor = isCursorClient(mcpServer);
       primeElicitationCancellation(mcpServer);
+      hitlLog("hitl.elicit-sent", {
+        tool: toolName,
+        schema: cursor ? "cursor-form" : "empty",
+        timeout
+      });
       try {
         const result = await mcpServer.elicitInput(
           {
@@ -26003,6 +26026,11 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
           },
           { timeout }
         );
+        hitlLog("hitl.elicit-result", {
+          tool: toolName,
+          action: result.action,
+          decision: result.content?.decision ?? null
+        });
         if (!isApproved(cursor, result)) {
           return {
             content: [
@@ -26015,6 +26043,7 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
         }
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
+        hitlLog("hitl.elicit-error", { tool: toolName, msg: detail });
         return {
           content: [
             {

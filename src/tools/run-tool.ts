@@ -2,6 +2,7 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { EmptyResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { appendFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -276,6 +277,24 @@ export function isApproved(
   return result.content?.decision === "Approve";
 }
 
+// Structural HITL telemetry appended to the shared server log. Mirrors
+// index.ts's logLine (private to that module) and additionally stamps the
+// pid: multiple plugin instances can share one log file (a marketplace
+// install next to a local checkout), and the pid ties each line to a
+// specific process. Logs tool names and gate decisions only — never
+// argument values, which can carry PII/secrets.
+function hitlLog(label: string, detail: Record<string, unknown>): void {
+  const base =
+    process.env.PLUGIN_DATA_DIR || path.join(os.homedir(), ".glean");
+  const line = `${new Date().toISOString()} ${label} ${JSON.stringify({ pid: process.pid, ...detail })}\n`;
+  try {
+    appendFileSync(path.join(base, "glean-server.log"), line, { mode: 0o600 });
+  } catch {
+    /* best-effort */
+  }
+  console.error(line.trimEnd());
+}
+
 // A WeakSet so a short-lived server in tests doesn't leak,
 // and so the burn happens exactly once per server instance.
 const elicitationIdPrimed = new WeakSet<object>();
@@ -374,6 +393,13 @@ export async function handleRunTool(
   }
 
   const hitlEnabled = process.env.ENABLE_HITL === "true";
+  hitlLog("hitl.gate", {
+    tool: toolName,
+    hitlEnabled,
+    requiresApproval: !!toolMeta?.requires_approval,
+    elicitationCap: mcpServer.getClientCapabilities()?.elicitation ?? null,
+    client: mcpServer.getClientVersion()?.name ?? null,
+  });
   if (
     hitlEnabled &&
     toolMeta?.requires_approval &&
@@ -399,6 +425,12 @@ export async function handleRunTool(
       // Make a dummy empty request to burn JSON-RPC request id 0
       primeElicitationCancellation(mcpServer);
 
+      hitlLog("hitl.elicit-sent", {
+        tool: toolName,
+        schema: cursor ? "cursor-form" : "empty",
+        timeout,
+      });
+
       try {
         const result = await mcpServer.elicitInput(
           {
@@ -407,6 +439,14 @@ export async function handleRunTool(
           },
           { timeout },
         );
+
+        hitlLog("hitl.elicit-result", {
+          tool: toolName,
+          action: result.action,
+          decision:
+            (result.content as Record<string, unknown> | undefined)
+              ?.decision ?? null,
+        });
 
         if (!isApproved(cursor, result)) {
           return {
@@ -423,6 +463,7 @@ export async function handleRunTool(
         // prompt times out or errors defeats its own purpose — and the SDK
         // rejects elicitInput precisely on request timeout.
         const detail = err instanceof Error ? err.message : String(err);
+        hitlLog("hitl.elicit-error", { tool: toolName, msg: detail });
         return {
           content: [
             {
