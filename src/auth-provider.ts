@@ -73,7 +73,9 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   get clientMetadata(): OAuthClientMetadata {
     return {
       redirect_uris: [getCallbackUrl()],
-      client_name: "Glean Claude Code Plugin",
+      client_name: process.env.CODEX_THREAD_ID
+        ? "Glean Codex Plugin"
+        : "Glean Claude Code Plugin",
     };
   }
 

@@ -121,6 +121,16 @@ describe("GleanOAuthClientProvider", () => {
     expect(meta.redirect_uris![0]).toMatch(/127\.0\.0\.1/);
   });
 
+  it("clientMetadata uses Codex client name when CODEX_THREAD_ID is set", () => {
+    process.env.CODEX_THREAD_ID = "thread_abc123";
+    try {
+      const provider = new GleanOAuthClientProvider();
+      expect(provider.clientMetadata.client_name).toBe("Glean Codex Plugin");
+    } finally {
+      delete process.env.CODEX_THREAD_ID;
+    }
+  });
+
   it("redirectToAuthorization records the URL and hands state to the loopback", async () => {
     const provider = new GleanOAuthClientProvider();
     await provider.redirectToAuthorization(
