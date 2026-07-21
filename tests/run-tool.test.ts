@@ -710,15 +710,21 @@ describe("formatArgumentsForFile", () => {
 });
 
 describe("runToolAnnotations", () => {
-  it("marks run_tool read-only when HITL gates an elicitation-capable client", () => {
-    expect(runToolAnnotations(true, true)).toEqual({ readOnlyHint: true });
+  it("marks run_tool read-only when HITL gates an elicitation-capable non-Cursor client", () => {
+    expect(runToolAnnotations(true, true, false)).toEqual({
+      readOnlyHint: true,
+    });
   });
 
   it("leaves annotations unset when HITL is disabled", () => {
-    expect(runToolAnnotations(false, true)).toBeUndefined();
+    expect(runToolAnnotations(false, true, false)).toBeUndefined();
   });
 
   it("leaves annotations unset when the client cannot elicit", () => {
-    expect(runToolAnnotations(true, false)).toBeUndefined();
+    expect(runToolAnnotations(true, false, false)).toBeUndefined();
+  });
+
+  it("does NOT advertise readOnlyHint to Cursor (its elicitation only renders on the attended lane)", () => {
+    expect(runToolAnnotations(true, true, true)).toBeUndefined();
   });
 });

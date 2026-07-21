@@ -190,7 +190,7 @@ async function findToolJson(
 // A stdio server's only client signal is clientInfo.name. Cursor reports
 // "cursor-vscode" and already renders the tool name + arguments in its own
 // expandable UI, so its approval prompt only needs a one-line review ask.
-function isCursorClient(mcpServer: Server): boolean {
+export function isCursorClient(mcpServer: Server): boolean {
   return (mcpServer.getClientVersion()?.name ?? "")
     .toLowerCase()
     .startsWith("cursor");
@@ -423,12 +423,24 @@ export function buildRemoteArgs(
  * the tool `readOnlyHint` to suppress the client's native run-tool confirmation
  * and avoid a double prompt. Without HITL there is no gate of our own, so we
  * leave annotations unset and let the client decide.
+ *
+ * TEMP (Cursor): Cursor 3.12.x only renders a server-initiated elicitation on
+ * its attended tool-call lane; a `run_tool` marked `readOnlyHint` lands on the
+ * auto-run lane where the HITL elicitation is silently dropped (5-minute hang,
+ * then fail-closed timeout) and no approval banner ever shows. Cursor also
+ * ignores the annotation for its own native prompt (it strips tool
+ * `annotations` on ingest), so the hint buys us nothing there anyway. Until the
+ * Cursor-side rendering is fixed, do NOT advertise `readOnlyHint` to Cursor so
+ * the call stays on the interactive lane and the banner renders. Claude Code is
+ * unaffected: it renders elicitation regardless of lane and the hint still
+ * correctly suppresses its native prompt.
  */
 export function runToolAnnotations(
   enableHitl: boolean,
   clientSupportsElicitation: boolean,
+  isCursor: boolean,
 ): Tool["annotations"] {
-  return enableHitl && clientSupportsElicitation
+  return enableHitl && clientSupportsElicitation && !isCursor
     ? { readOnlyHint: true }
     : undefined;
 }
