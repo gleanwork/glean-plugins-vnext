@@ -8,6 +8,14 @@ import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
 import { resolveSessionId } from "../session-id.js";
+import {
+  isToolAlwaysAllowed,
+  setToolAlwaysAllowed,
+} from "../tool-permissions-store.js";
+import {
+  isAllowedInSession,
+  allowInSession,
+} from "../session-allow-store.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 
@@ -231,6 +239,78 @@ async function buildApprovalMessage(
   return message.join("\n");
 }
 
+// The four approval scopes offered in the HITL prompt.
+//   task    – approve just this one call (default; today's plain "accept").
+//   session – approve this tool for the rest of the session (session-allow-store).
+//   always  – approve this tool across sessions (tool-permissions-store).
+//   decline – reject; the action is not executed.
+// enumNames are the human labels the client renders as a selectable list
+// (arrow keys + Enter); the enum value is what comes back in
+// result.content.choice.
+export const APPROVAL_CHOICES = [
+  "task",
+  "session",
+  "always",
+  "decline",
+] as const;
+export type ApprovalChoice = (typeof APPROVAL_CHOICES)[number];
+
+// The elicitation schema for the approval prompt. A single enum field renders
+// as the whole picker. NOTE: it MUST be populated — a bare `{properties:{}}`
+// makes Claude Code fall back to a plain accept/decline prompt with no scope
+// choices. Kept to one field so nothing clips out of view.
+export function approvalRequestedSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      choice: {
+        type: "string",
+        title: "Approve this action?",
+        description:
+          "Allow for this task, this session, across sessions, or decline.",
+        enum: [...APPROVAL_CHOICES],
+        enumNames: [
+          "Allow for this task",
+          "Allow in this session",
+          "Allow across sessions (always)",
+          "Decline",
+        ],
+        default: "task",
+      },
+    },
+    required: ["choice"],
+  };
+}
+
+// Reads the chosen scope from an accepted elicitation result. An accept whose
+// content omits/garbles `choice` (e.g. a client that renders only
+// accept/decline) degrades to a one-time "task" approval — the user did accept.
+// Only an explicit "decline" value (or a non-accept action) blocks execution.
+export function readApprovalChoice(content: unknown): ApprovalChoice {
+  if (content && typeof content === "object") {
+    const c = (content as Record<string, unknown>).choice;
+    if (
+      typeof c === "string" &&
+      (APPROVAL_CHOICES as readonly string[]).includes(c)
+    ) {
+      return c as ApprovalChoice;
+    }
+  }
+  return "task";
+}
+
+function notExecutedResult(toolName: string, action: string): CallToolResult {
+  const verb = action === "cancel" ? "cancelled" : "declined";
+  return {
+    content: [
+      {
+        type: "text",
+        text: `Action ${toolName} was ${verb} by the user.`,
+      },
+    ],
+  };
+}
+
 // A WeakSet so a short-lived server in tests doesn't leak,
 // and so the burn happens exactly once per server instance.
 const elicitationIdPrimed = new WeakSet<object>();
@@ -342,7 +422,13 @@ export async function handleRunTool(
     // call and never leaks across sessions. Any other or unknown mode keeps the
     // gate. Only bypassPermissions is skipped (deliberately narrow).
     const bypass = (await currentPermissionMode()) === "bypassPermissions";
-    if (!bypass) {
+    // Already granted for this tool — either for the whole session ("Allow in
+    // this session") or across sessions ("Allow across sessions"). Both are
+    // keyed by tool name, matching the per-tool gate, and skip the prompt just
+    // like bypassPermissions does.
+    const preApproved =
+      isToolAlwaysAllowed(toolName) || isAllowedInSession(toolName);
+    if (!bypass && !preApproved) {
       const message = await buildApprovalMessage(
         mcpServer,
         toolName,
@@ -357,20 +443,29 @@ export async function handleRunTool(
         const result = await mcpServer.elicitInput(
           {
             message,
-            requestedSchema: { type: "object", properties: {} } as any,
+            requestedSchema: approvalRequestedSchema() as any,
           },
           { timeout },
         );
 
+        // Dismissing the prompt (Esc, or the client's Cancel/Decline action)
+        // is never an approval — fail closed.
         if (result.action !== "accept") {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Action ${toolName} was ${result.action === "decline" ? "declined" : "cancelled"} by the user.`,
-              },
-            ],
-          };
+          return notExecutedResult(toolName, result.action);
+        }
+
+        // On accept, the scope is the chosen enum value. "decline" as a picked
+        // option also blocks; "session"/"always" persist a grant so future
+        // calls to this tool skip the prompt; "task" (and any unrecognized
+        // value) approves just this call.
+        const choice = readApprovalChoice(result.content);
+        if (choice === "decline") {
+          return notExecutedResult(toolName, "decline");
+        }
+        if (choice === "session") {
+          allowInSession(toolName);
+        } else if (choice === "always") {
+          setToolAlwaysAllowed(toolName);
         }
       } catch (err) {
         // Fail CLOSED. An approval gate that executes the action when the
