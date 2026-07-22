@@ -121,6 +121,6 @@ Constraints:
 ## Rules
 
 - Always read tool JSON files before calling `run_tool` - never guess parameters
-- On `find_skills`, the first `queries` entry must always be the user's
-  prompt verbatim; only append atomic sub-task decompositions after it
+- On `find_skills`, break the request into small, task-atomic queries (the core
+  action only, dropping recipients/timing/reasons); don't pass the raw prompt
 - If discovery returns no relevant skills, tell the user what was searched
