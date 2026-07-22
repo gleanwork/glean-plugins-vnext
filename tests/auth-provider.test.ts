@@ -121,6 +121,26 @@ describe("GleanOAuthClientProvider", () => {
     expect(meta.redirect_uris![0]).toMatch(/127\.0\.0\.1/);
   });
 
+  it("clientMetadata uses Codex client name when GLEAN_PLUGIN_HOST is codex", () => {
+    process.env.GLEAN_PLUGIN_HOST = "codex";
+    try {
+      const provider = new GleanOAuthClientProvider();
+      expect(provider.clientMetadata.client_name).toBe("Glean Codex Plugin");
+    } finally {
+      delete process.env.GLEAN_PLUGIN_HOST;
+    }
+  });
+
+  it("clientMetadata uses Cursor client name when GLEAN_PLUGIN_HOST is cursor", () => {
+    process.env.GLEAN_PLUGIN_HOST = "cursor";
+    try {
+      const provider = new GleanOAuthClientProvider();
+      expect(provider.clientMetadata.client_name).toBe("Glean Cursor Plugin");
+    } finally {
+      delete process.env.GLEAN_PLUGIN_HOST;
+    }
+  });
+
   it("redirectToAuthorization records the URL and hands state to the loopback", async () => {
     const provider = new GleanOAuthClientProvider();
     await provider.redirectToAuthorization(

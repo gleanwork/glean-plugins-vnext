@@ -71,9 +71,14 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   }
 
   get clientMetadata(): OAuthClientMetadata {
+    const CLIENT_NAMES: Record<string, string> = {
+      "codex": "Glean Codex Plugin",
+      "cursor": "Glean Cursor Plugin",
+    };
+    const host = process.env.GLEAN_PLUGIN_HOST ?? "";
     return {
       redirect_uris: [getCallbackUrl()],
-      client_name: "Glean Claude Code Plugin",
+      client_name: CLIENT_NAMES[host] ?? "Glean Claude Code Plugin",
     };
   }
 

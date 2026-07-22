@@ -59,10 +59,21 @@ process.env.SKILLS_BASE_DIR = skillsBaseDir;
 // CLAUDE_CODE_SESSION_ID; Codex exposes the conversation id as CODEX_THREAD_ID.
 // Hosts that expose no session id (Cursor) leave it unset, and the plugin falls
 // back to a generated per-process id.
-const sessionId =
-  val(process.env.CLAUDE_CODE_SESSION_ID) ?? val(process.env.CODEX_THREAD_ID);
+const claudeSessionId = val(process.env.CLAUDE_CODE_SESSION_ID);
+const codexThreadId = val(process.env.CODEX_THREAD_ID);
+const sessionId = claudeSessionId ?? codexThreadId;
 if (sessionId !== undefined) {
   process.env.GLEAN_SESSION_ID = sessionId;
+}
+
+// Export the detected host so the plugin can use host-appropriate identifiers
+// (e.g. the OAuth client_name that drives the logo shown on the consent screen).
+if (codexThreadId !== undefined) {
+  process.env.GLEAN_PLUGIN_HOST = "codex";
+} else if (claudeSessionId !== undefined) {
+  process.env.GLEAN_PLUGIN_HOST = "claude-code";
+} else {
+  process.env.GLEAN_PLUGIN_HOST = "cursor";
 }
 
 // Boot the server in-process. Import via a file URL resolved against this
