@@ -51,17 +51,13 @@ context, ask the user what they'd like to do before proceeding.
 
 Call `find_skills` with the task descriptions.
 
-**The first entry in `queries` MUST be the user's prompt verbatim** (the raw,
-unmodified task description as the user phrased it). This ensures end-to-end
-skills that match on the overall intent are discovered before you fragment
-the request into pieces that only match low-level capability skills. After
-the verbatim prompt, you may append additional atomic sub-tasks broken down
-from the request.
+Break the request into small, task-atomic queries — keep only the core action,
+dropping the surrounding context (recipients, timing, reasons, constraints) —
+and pass each as a separate entry in `queries`.
 
 ```
 find_skills({
   queries: [
-    "<user's prompt verbatim>",
     "<atomic sub-task 1>",
     "<atomic sub-task 2>"
   ]
@@ -125,6 +121,4 @@ Constraints:
 ## Rules
 
 - Always read tool JSON files before calling `run_tool` - never guess parameters
-- On `find_skills`, the first `queries` entry must always be the user's
-  prompt verbatim; only append atomic sub-task decompositions after it
 - If discovery returns no relevant skills, tell the user what was searched
