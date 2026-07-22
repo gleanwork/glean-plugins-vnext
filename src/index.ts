@@ -183,7 +183,13 @@ const FIND_SKILLS_TOOL: Tool = {
     "calls, or tools you can already call directly. If none fit, call find_skills " +
     "again with reworded or additional queries. " +
     "If a previously-cached skill file referenced from memory or instructions " +
-    "is missing on disk, call find_skills again to re-fetch it before failing.",
+    "is missing on disk, call find_skills again to re-fetch it before failing. " +
+    "To use a returned skill: (1) pick the most relevant from the returned " +
+    "skills; (2) read its SKILL.md for instructions; (3) read each tool's JSON " +
+    "file (tools/TOOL_NAME.json) for the exact server_id, name, and inputSchema " +
+    "(exact parameter names and types); (4) call run_tool with the server_id, " +
+    "tool_name (from the name field), and arguments matching the inputSchema. " +
+    "Never guess parameter names — read the tool JSON file first.",
   inputSchema: {
     type: "object" as const,
     properties: {
