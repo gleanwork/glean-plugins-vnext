@@ -340,6 +340,25 @@ describe("handleRunTool (HITL)", () => {
     expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
 
+  it("does NOT elicit for Cursor — its native prompt is the gate; executes directly", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn();
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    // Cursor: readOnlyHint is omitted (native prompt shows), so our elicitation
+    // is skipped and the tool runs directly.
+    expect(elicit).not.toHaveBeenCalled();
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
   it("prompts with action name + arguments and forwards on accept", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
@@ -451,25 +470,6 @@ describe("handleRunTool (HITL)", () => {
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain("not approved");
     expect(text).toContain("NOT executed");
-  });
-
-  it("gives Cursor a one-line prompt without an arguments block", async () => {
-    vi.stubEnv("ENABLE_HITL", "true");
-    const remote = makeRemote();
-    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
-    const server = makeServer({
-      elicitation: true,
-      clientName: "cursor-vscode",
-      elicit,
-    });
-    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
-
-    await handleRunTool(remote, server, tmpDir, baseArgs);
-
-    const message = elicit.mock.calls[0][0].message as string;
-    expect(message).toContain("Submit to allow and Cancel to deny");
-    expect(message).not.toContain("Arguments:");
-    expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
 
   it("spills large arguments to a file and keeps the prompt short", async () => {

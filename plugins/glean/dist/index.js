@@ -25962,7 +25962,7 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
     throw err;
   }
   const hitlEnabled = process.env.ENABLE_HITL === "true";
-  if (hitlEnabled && toolMeta?.requires_approval && mcpServer.getClientCapabilities()?.elicitation) {
+  if (hitlEnabled && toolMeta?.requires_approval && !isCursorClient(mcpServer) && mcpServer.getClientCapabilities()?.elicitation) {
     const bypass = await currentPermissionMode() === "bypassPermissions";
     if (!bypass) {
       const message = await buildApprovalMessage(
