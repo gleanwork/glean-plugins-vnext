@@ -165,11 +165,16 @@ const FIND_SKILLS_TOOL: Tool = {
   annotations: { readOnlyHint: true },
   description:
     "Discover available Glean skills and their resolved tool dependencies. " +
+    "This is a search engine over skill blueprints and the tools they expose: " +
+    "match on the core action, not the full request. " +
     "Call this tool FIRST whenever the user's request cannot be fulfilled by your " +
     "current tools — especially for tasks involving enterprise apps (Jira, Slack, " +
     "Google Workspace, Salesforce, etc.) or any action you don't already have a " +
-    "tool for. Before calling, break the user's request into specific, actionable " +
-    "sub-tasks and pass each as a separate entry in the 'queries' array. " +
+    "tool for. Before calling, break the user's request into small, task-atomic " +
+    "queries — keep only the action and drop the surrounding context (recipients, " +
+    "timing, reasons, constraints) — and pass each as a separate entry in the " +
+    "'queries' array. For example, for \"Send an email to X for tomorrow's demo " +
+    "meeting as leadership will be visiting\", the single query is \"send an email\". " +
     "Discovered skills are written to local files and an XML skill " +
     "index with usage instructions is returned. " +
     "If a returned skill lists no tools and its playbook does not let you " +

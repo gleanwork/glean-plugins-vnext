@@ -1,6 +1,6 @@
 {
   "name": "glean-vnext",
-  "version": "0.2.40",
+  "version": "0.2.41",
   "description": "Glean plugin for discovering skills and running tools.",
   "author": {
     "name": "Glean"
