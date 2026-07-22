@@ -26373,6 +26373,7 @@ var FIND_SKILLS_TOOL = {
       queries: {
         type: "array",
         items: { type: "string" },
+        maxItems: 3,
         description: "Atomic sub-task descriptions broken down from the user's request. Each query should describe one specific action (e.g., 'search emails', 'create calendar event')."
       }
     },
