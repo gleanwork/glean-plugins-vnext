@@ -190,7 +190,7 @@ async function findToolJson(
 // A stdio server's only client signal is clientInfo.name. Cursor reports
 // "cursor-vscode" and already renders the tool name + arguments in its own
 // expandable UI, so its approval prompt only needs a one-line review ask.
-function isCursorClient(mcpServer: Server): boolean {
+export function isCursorClient(mcpServer: Server): boolean {
   return (mcpServer.getClientVersion()?.name ?? "")
     .toLowerCase()
     .startsWith("cursor");
@@ -329,9 +329,17 @@ export async function handleRunTool(
   }
 
   const hitlEnabled = process.env.ENABLE_HITL === "true";
+  // Cursor is gated by its OWN native run-tool approval, not our elicitation.
+  // We omit run_tool's readOnlyHint for Cursor (see runToolAnnotations), so
+  // Cursor prompts the user before it executes run_tool. Firing our elicitation
+  // on top would be a redundant second gate — and worse, Cursor 3.12.x silently
+  // drops server-initiated elicitations on the auto-run lane, hanging for the
+  // full HITL timeout. So skip our gate for Cursor and let its native prompt
+  // (already shown before this call) be the single approval.
   if (
     hitlEnabled &&
     toolMeta?.requires_approval &&
+    !isCursorClient(mcpServer) &&
     mcpServer.getClientCapabilities()?.elicitation
   ) {
     // In bypassPermissions mode (`claude --dangerously-skip-permissions`) the
@@ -423,12 +431,22 @@ export function buildRemoteArgs(
  * the tool `readOnlyHint` to suppress the client's native run-tool confirmation
  * and avoid a double prompt. Without HITL there is no gate of our own, so we
  * leave annotations unset and let the client decide.
+ *
+ * TEMP (Cursor): Cursor 3.12.x silently drops the server-initiated elicitation
+ * for a `run_tool` marked `readOnlyHint` (it lands on the auto-run lane), so the
+ * approval banner never shows and the call hangs to the HITL timeout. For Cursor
+ * we therefore flip the whole strategy: do NOT advertise `readOnlyHint` (so
+ * Cursor shows its OWN native run-tool approval before executing), and skip our
+ * elicitation entirely (see handleRunTool) so Cursor's native prompt is the
+ * single gate. Claude Code is unaffected: it keeps `readOnlyHint` (its native
+ * prompt stays suppressed) and our elicitation remains its gate.
  */
 export function runToolAnnotations(
   enableHitl: boolean,
   clientSupportsElicitation: boolean,
+  isCursor: boolean,
 ): Tool["annotations"] {
-  return enableHitl && clientSupportsElicitation
+  return enableHitl && clientSupportsElicitation && !isCursor
     ? { readOnlyHint: true }
     : undefined;
 }

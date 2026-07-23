@@ -25956,7 +25956,7 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
     throw err;
   }
   const hitlEnabled = process.env.ENABLE_HITL === "true";
-  if (hitlEnabled && toolMeta?.requires_approval && mcpServer.getClientCapabilities()?.elicitation) {
+  if (hitlEnabled && toolMeta?.requires_approval && !isCursorClient(mcpServer) && mcpServer.getClientCapabilities()?.elicitation) {
     const bypass = await currentPermissionMode() === "bypassPermissions";
     if (!bypass) {
       const message = await buildApprovalMessage(
@@ -26011,8 +26011,8 @@ function buildRemoteArgs(serverId, toolName, resolvedArgs) {
     arguments: resolvedArgs
   };
 }
-function runToolAnnotations(enableHitl, clientSupportsElicitation) {
-  return enableHitl && clientSupportsElicitation ? { readOnlyHint: true } : void 0;
+function runToolAnnotations(enableHitl, clientSupportsElicitation, isCursor) {
+  return enableHitl && clientSupportsElicitation && !isCursor ? { readOnlyHint: true } : void 0;
 }
 
 // src/url-config-store.ts
@@ -26429,7 +26429,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     ...RUN_TOOL_TOOL,
     annotations: runToolAnnotations(
       process.env.ENABLE_HITL === "true",
-      !!server.getClientCapabilities()?.elicitation
+      !!server.getClientCapabilities()?.elicitation,
+      isCursorClient(server)
     )
   };
   const staticTools = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
