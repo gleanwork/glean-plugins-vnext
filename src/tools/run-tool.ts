@@ -12,10 +12,6 @@ import {
   isToolAlwaysAllowed,
   setToolAlwaysAllowed,
 } from "../tool-permissions-store.js";
-import {
-  isAllowedInSession,
-  allowInSession,
-} from "../session-allow-store.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 
@@ -236,65 +232,54 @@ async function buildApprovalMessage(
       message.push("  (some arguments truncated; full-args file unavailable)");
     }
   }
+  // Clarify what the built-in Accept button does (its label can't be changed),
+  // and how it relates to the two "Remember…" checkboxes rendered below.
+  message.push("");
+  message.push("Accept = allow once. Tick the box to always allow this tool.");
   return message.join("\n");
 }
 
-// The four approval scopes offered in the HITL prompt.
-//   task    – approve just this one call (default; today's plain "accept").
-//   session – approve this tool for the rest of the session (session-allow-store).
-//   always  – approve this tool across sessions (tool-permissions-store).
-//   decline – reject; the action is not executed.
-// enumNames are the human labels the client renders as a selectable list
-// (arrow keys + Enter); the enum value is what comes back in
-// result.content.choice.
-export const APPROVAL_CHOICES = [
-  "task",
-  "session",
-  "always",
-  "decline",
-] as const;
-export type ApprovalChoice = (typeof APPROVAL_CHOICES)[number];
+// The approval scope resolved from the prompt.
+//   task   – approve just this one call (Accept with the box unticked).
+//   always – approve this tool for all future calls (tool-permissions-store).
+// "decline" is the prompt's built-in Decline action, handled by the caller via
+// result.action, not a content field.
+//
+// We deliberately keep only "allow once" (Accept) + "always allow" (the box),
+// mirroring the Glean Assistant approval model. A per-session scope was dropped:
+// it can't be represented on a remote MCP server (no client-local session
+// state), and we don't want the plugin to diverge from Assistant here.
+export type ApprovalScope = "task" | "always";
 
-// The elicitation schema for the approval prompt. A single enum field renders
-// as the whole picker. NOTE: it MUST be populated — a bare `{properties:{}}`
-// makes Claude Code fall back to a plain accept/decline prompt with no scope
-// choices. Kept to one field so nothing clips out of view.
+// The elicitation schema for the approval prompt. A single BOOLEAN field renders
+// as an INLINE checkbox in Claude Code (toggle with Space), shown upfront above
+// the built-in Accept/Decline buttons — unlike a string enum, which Claude Code
+// renders as a collapse/expand ("▶") accordion that hides the choice. So the
+// user sees: [ ] Always allow this tool / Accept / Decline. Accept with the box
+// unticked = allow once; tick it = always allow; Decline = reject.
 export function approvalRequestedSchema(): Record<string, unknown> {
   return {
     type: "object",
     properties: {
-      choice: {
-        type: "string",
-        title: "Approve this action?",
-        description:
-          "Allow for this task, this session, across sessions, or decline.",
-        enum: [...APPROVAL_CHOICES],
-        enumNames: [
-          "Allow for this task",
-          "Allow in this session",
-          "Allow across sessions (always)",
-          "Decline",
-        ],
-        default: "task",
+      always: {
+        type: "boolean",
+        title: "Always allow this tool",
+        default: false,
       },
     },
-    required: ["choice"],
   };
 }
 
-// Reads the chosen scope from an accepted elicitation result. An accept whose
-// content omits/garbles `choice` (e.g. a client that renders only
-// accept/decline) degrades to a one-time "task" approval — the user did accept.
-// Only an explicit "decline" value (or a non-accept action) blocks execution.
-export function readApprovalChoice(content: unknown): ApprovalChoice {
-  if (content && typeof content === "object") {
-    const c = (content as Record<string, unknown>).choice;
-    if (
-      typeof c === "string" &&
-      (APPROVAL_CHOICES as readonly string[]).includes(c)
-    ) {
-      return c as ApprovalChoice;
-    }
+// Maps an ACCEPTED elicitation result's content to a scope: box ticked =
+// "always"; otherwise (unticked, or missing/garbled content) a one-time "task"
+// approval. Decline is a non-accept action, handled upstream.
+export function readApprovalScope(content: unknown): ApprovalScope {
+  if (
+    content &&
+    typeof content === "object" &&
+    (content as Record<string, unknown>).always === true
+  ) {
+    return "always";
   }
   return "task";
 }
@@ -422,12 +407,9 @@ export async function handleRunTool(
     // call and never leaks across sessions. Any other or unknown mode keeps the
     // gate. Only bypassPermissions is skipped (deliberately narrow).
     const bypass = (await currentPermissionMode()) === "bypassPermissions";
-    // Already granted for this tool — either for the whole session ("Allow in
-    // this session") or across sessions ("Allow across sessions"). Both are
-    // keyed by tool name, matching the per-tool gate, and skip the prompt just
-    // like bypassPermissions does.
-    const preApproved =
-      isToolAlwaysAllowed(toolName) || isAllowedInSession(toolName);
+    // Already "always allowed" for this tool (keyed by tool name) — skip the
+    // prompt, just like bypassPermissions does.
+    const preApproved = isToolAlwaysAllowed(toolName);
     if (!bypass && !preApproved) {
       const message = await buildApprovalMessage(
         mcpServer,
@@ -448,23 +430,15 @@ export async function handleRunTool(
           { timeout },
         );
 
-        // Dismissing the prompt (Esc, or the client's Cancel/Decline action)
-        // is never an approval — fail closed.
+        // Dismissing the prompt (Esc, or the built-in Decline button) is never
+        // an approval — fail closed.
         if (result.action !== "accept") {
           return notExecutedResult(toolName, result.action);
         }
 
-        // On accept, the scope is the chosen enum value. "decline" as a picked
-        // option also blocks; "session"/"always" persist a grant so future
-        // calls to this tool skip the prompt; "task" (and any unrecognized
-        // value) approves just this call.
-        const choice = readApprovalChoice(result.content);
-        if (choice === "decline") {
-          return notExecutedResult(toolName, "decline");
-        }
-        if (choice === "session") {
-          allowInSession(toolName);
-        } else if (choice === "always") {
+        // Accept: if the box was ticked, remember this tool so future calls
+        // skip the prompt; otherwise approve just this one call.
+        if (readApprovalScope(result.content) === "always") {
           setToolAlwaysAllowed(toolName);
         }
       } catch (err) {
