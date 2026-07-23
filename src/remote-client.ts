@@ -144,6 +144,7 @@ export async function createRemoteClient(
   serverUrl: string,
   opts: RemoteClientOptions,
   chatSessionId?: string,
+  authRetry = false,
 ): Promise<Client> {
   const authProvider = opts.authProvider;
 
@@ -189,14 +190,37 @@ export async function createRemoteClient(
     { capabilities: {} },
   );
 
+  // Snapshot the access token we're about to connect with. Between now and a
+  // possible 401, a sibling per-session server can rotate the (single-use)
+  // refresh token and persist a newer grant. authProvider.tokens() re-reads the
+  // store when it changed on disk, so on auth failure we can tell whether a
+  // fresher token has since appeared and retry once with it — turning a
+  // cross-process rotation race into a silent reconnect instead of a full
+  // re-auth. Bounded to a single retry via authRetry so it can't spin.
+  const accessTokenAtConnect = authProvider?.tokens()?.access_token;
+
   const transport = buildTransport(serverUrl, opts, chatSessionId);
 
   try {
     await client.connect(transport);
   } catch (error) {
-    if (error instanceof UnauthorizedError && authProvider?.authorizationUrl) {
-      pendingTransport = transport;
-      throw new AuthRequiredError(authProvider.authorizationUrl);
+    if (error instanceof UnauthorizedError && authProvider) {
+      const refreshedAccessToken = authProvider.tokens()?.access_token;
+      if (
+        !authRetry &&
+        refreshedAccessToken &&
+        refreshedAccessToken !== accessTokenAtConnect
+      ) {
+        console.error(
+          "[auth] Auth failed but a newer token is on disk " +
+            "(sibling refresh) — retrying once",
+        );
+        return createRemoteClient(serverUrl, opts, chatSessionId, true);
+      }
+      if (authProvider.authorizationUrl) {
+        pendingTransport = transport;
+        throw new AuthRequiredError(authProvider.authorizationUrl);
+      }
     }
     throw error;
   }

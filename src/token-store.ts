@@ -28,6 +28,22 @@ export function loadCredentials(): StoredCredentials | undefined {
   }
 }
 
+/**
+ * Last-modified time (epoch ms) of the credentials file, or undefined if it
+ * doesn't exist / can't be stat'd. Used as a cheap change-detection probe so a
+ * long-lived provider can notice when a sibling process has rewritten the
+ * shared store (e.g. after a refresh-token rotation) and re-read it, instead of
+ * serving a stale in-memory snapshot. Kept separate from loadCredentials so the
+ * common "nothing changed" path is a single stat, not a full read + parse.
+ */
+export function credentialsMtimeMs(): number | undefined {
+  try {
+    return fs.statSync(credentialsFile()).mtimeMs;
+  } catch {
+    return undefined;
+  }
+}
+
 export function saveCredentials(tokens: unknown, clientInfo: unknown): void {
   try {
     const filePath = credentialsFile();

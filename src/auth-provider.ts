@@ -7,7 +7,12 @@ import type {
 import { execFile, spawn } from "node:child_process";
 import { platform } from "node:os";
 import { getCallbackUrl, setExpectedState } from "./auth-callback-server.js";
-import { clearCredentials, loadCredentials, saveCredentials } from "./token-store.js";
+import {
+  clearCredentials,
+  credentialsMtimeMs,
+  loadCredentials,
+  saveCredentials,
+} from "./token-store.js";
 
 export type InvalidationScope = "all" | "client" | "tokens" | "verifier";
 
@@ -47,6 +52,10 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   // explicitly invalidating. Used to detect when a previous auth URL didn't
   // complete — likely because the server rejected the (stale) client_id.
   private _authUrlPending = false;
+  // mtime (epoch ms) of the credentials file at the point our in-memory
+  // _tokens/_clientInfo snapshot was last taken from disk. Undefined until the
+  // first successful read. Used to detect sibling rewrites — see syncFromDisk.
+  private _credentialsMtimeMs: number | undefined;
 
   authorizationUrl: string | undefined;
 
@@ -63,6 +72,43 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     if (stored) {
       this._tokens = stored.tokens as OAuthTokens | undefined;
       this._clientInfo = stored.clientInfo as OAuthClientInformationMixed | undefined;
+    }
+    this._credentialsMtimeMs = credentialsMtimeMs();
+  }
+
+  // Re-read the credentials file if it has changed on disk since we last read
+  // it. MCP servers are spawned per session, so several of our processes can be
+  // alive at once sharing one credentials file. When one process refreshes an
+  // (Ory-rotated, single-use) refresh token, it persists the new grant and
+  // silently invalidates the old refresh token that every other process still
+  // holds in memory. Without this, the next process to hit a 401 would refresh
+  // with its now-dead token, get invalid_grant, and force a full re-auth
+  // ([SETUP_REQUIRED]). Syncing here — right before the SDK reads tokens() at
+  // the start of its auth flow — lets us pick up the sibling's fresh grant
+  // instead. Guarded by mtime so the steady state is one stat(), not a re-parse.
+  //
+  // Conservative on removal: if the file is gone (undefined mtime) or has no
+  // tokens, we keep our in-memory snapshot rather than logging ourselves out —
+  // a transient stat failure or another process's explicit logout shouldn't
+  // drop a token that still works for us; a genuinely revoked token self-heals
+  // through the normal 401 path.
+  private syncFromDisk(): void {
+    const mtimeMs = credentialsMtimeMs();
+    if (mtimeMs === undefined) return;
+    if (
+      this._credentialsMtimeMs !== undefined &&
+      mtimeMs <= this._credentialsMtimeMs
+    ) {
+      return;
+    }
+    const stored = loadCredentials();
+    this._credentialsMtimeMs = mtimeMs;
+    if (!stored) return;
+    if (stored.tokens) {
+      this._tokens = stored.tokens as OAuthTokens;
+    }
+    if (stored.clientInfo) {
+      this._clientInfo = stored.clientInfo as OAuthClientInformationMixed;
     }
   }
 
@@ -84,9 +130,11 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   saveClientInformation(info: OAuthClientInformationMixed): void {
     this._clientInfo = info;
     saveCredentials(this._tokens, this._clientInfo);
+    this._credentialsMtimeMs = credentialsMtimeMs();
   }
 
   tokens(): OAuthTokens | undefined {
+    this.syncFromDisk();
     return this._tokens;
   }
 
@@ -94,6 +142,9 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     this._tokens = tokens;
     this._authUrlPending = false;
     saveCredentials(this._tokens, this._clientInfo);
+    // Record the mtime of the file we just wrote so our own write doesn't look
+    // like a sibling change on the next syncFromDisk.
+    this._credentialsMtimeMs = credentialsMtimeMs();
     this.onTokensChanged?.(tokens);
   }
 

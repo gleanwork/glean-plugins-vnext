@@ -25216,7 +25216,7 @@ function buildTransport(serverUrl, opts, chatSessionId) {
   }
   return new StreamableHTTPClientTransport(parsedUrl, transportOpts);
 }
-async function createRemoteClient(serverUrl, opts, chatSessionId) {
+async function createRemoteClient(serverUrl, opts, chatSessionId, authRetry = false) {
   const authProvider = opts.authProvider;
   if (authProvider?.pendingAuthCode) {
     const transportForAuth = pendingTransport ?? buildTransport(serverUrl, opts, chatSessionId);
@@ -25244,13 +25244,23 @@ async function createRemoteClient(serverUrl, opts, chatSessionId) {
     { name: "glean", version: "1.0.0" },
     { capabilities: {} }
   );
+  const accessTokenAtConnect = authProvider?.tokens()?.access_token;
   const transport = buildTransport(serverUrl, opts, chatSessionId);
   try {
     await client.connect(transport);
   } catch (error2) {
-    if (error2 instanceof UnauthorizedError && authProvider?.authorizationUrl) {
-      pendingTransport = transport;
-      throw new AuthRequiredError(authProvider.authorizationUrl);
+    if (error2 instanceof UnauthorizedError && authProvider) {
+      const refreshedAccessToken = authProvider.tokens()?.access_token;
+      if (!authRetry && refreshedAccessToken && refreshedAccessToken !== accessTokenAtConnect) {
+        console.error(
+          "[auth] Auth failed but a newer token is on disk (sibling refresh) \u2014 retrying once"
+        );
+        return createRemoteClient(serverUrl, opts, chatSessionId, true);
+      }
+      if (authProvider.authorizationUrl) {
+        pendingTransport = transport;
+        throw new AuthRequiredError(authProvider.authorizationUrl);
+      }
     }
     throw error2;
   }
@@ -25371,6 +25381,13 @@ function loadCredentials() {
     return void 0;
   }
 }
+function credentialsMtimeMs() {
+  try {
+    return fs.statSync(credentialsFile()).mtimeMs;
+  } catch {
+    return void 0;
+  }
+}
 function saveCredentials(tokens, clientInfo) {
   try {
     const filePath = credentialsFile();
@@ -25419,6 +25436,10 @@ var GleanOAuthClientProvider = class {
   // explicitly invalidating. Used to detect when a previous auth URL didn't
   // complete — likely because the server rejected the (stale) client_id.
   _authUrlPending = false;
+  // mtime (epoch ms) of the credentials file at the point our in-memory
+  // _tokens/_clientInfo snapshot was last taken from disk. Undefined until the
+  // first successful read. Used to detect sibling rewrites — see syncFromDisk.
+  _credentialsMtimeMs;
   authorizationUrl;
   /**
    * Optional hook invoked whenever the in-memory token state changes —
@@ -25431,6 +25452,39 @@ var GleanOAuthClientProvider = class {
     const stored = loadCredentials();
     if (stored) {
       this._tokens = stored.tokens;
+      this._clientInfo = stored.clientInfo;
+    }
+    this._credentialsMtimeMs = credentialsMtimeMs();
+  }
+  // Re-read the credentials file if it has changed on disk since we last read
+  // it. MCP servers are spawned per session, so several of our processes can be
+  // alive at once sharing one credentials file. When one process refreshes an
+  // (Ory-rotated, single-use) refresh token, it persists the new grant and
+  // silently invalidates the old refresh token that every other process still
+  // holds in memory. Without this, the next process to hit a 401 would refresh
+  // with its now-dead token, get invalid_grant, and force a full re-auth
+  // ([SETUP_REQUIRED]). Syncing here — right before the SDK reads tokens() at
+  // the start of its auth flow — lets us pick up the sibling's fresh grant
+  // instead. Guarded by mtime so the steady state is one stat(), not a re-parse.
+  //
+  // Conservative on removal: if the file is gone (undefined mtime) or has no
+  // tokens, we keep our in-memory snapshot rather than logging ourselves out —
+  // a transient stat failure or another process's explicit logout shouldn't
+  // drop a token that still works for us; a genuinely revoked token self-heals
+  // through the normal 401 path.
+  syncFromDisk() {
+    const mtimeMs = credentialsMtimeMs();
+    if (mtimeMs === void 0) return;
+    if (this._credentialsMtimeMs !== void 0 && mtimeMs <= this._credentialsMtimeMs) {
+      return;
+    }
+    const stored = loadCredentials();
+    this._credentialsMtimeMs = mtimeMs;
+    if (!stored) return;
+    if (stored.tokens) {
+      this._tokens = stored.tokens;
+    }
+    if (stored.clientInfo) {
       this._clientInfo = stored.clientInfo;
     }
   }
@@ -25449,14 +25503,17 @@ var GleanOAuthClientProvider = class {
   saveClientInformation(info) {
     this._clientInfo = info;
     saveCredentials(this._tokens, this._clientInfo);
+    this._credentialsMtimeMs = credentialsMtimeMs();
   }
   tokens() {
+    this.syncFromDisk();
     return this._tokens;
   }
   saveTokens(tokens) {
     this._tokens = tokens;
     this._authUrlPending = false;
     saveCredentials(this._tokens, this._clientInfo);
+    this._credentialsMtimeMs = credentialsMtimeMs();
     this.onTokensChanged?.(tokens);
   }
   async invalidateCredentials(scope) {
