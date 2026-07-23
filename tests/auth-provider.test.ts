@@ -74,6 +74,71 @@ describe("GleanOAuthClientProvider", () => {
     expect(raw.tokens.access_token).toBe("new_tok");
   });
 
+  // --- Cross-process sync: a per-session sibling server may rotate the
+  // refresh token and rewrite the shared store; tokens() must pick that up
+  // instead of serving the stale startup snapshot. ---
+
+  const credFile = path.join(gleanDir, "mcp-credentials.json");
+
+  function writeCredFileNewer(tokens: unknown, clientInfo?: unknown): void {
+    fs.mkdirSync(gleanDir, { recursive: true });
+    fs.writeFileSync(credFile, JSON.stringify({ tokens, clientInfo }));
+    // Guarantee a strictly-newer mtime than any prior read, independent of
+    // filesystem timestamp resolution.
+    const future = new Date(Date.now() + 10_000);
+    fs.utimesSync(credFile, future, future);
+  }
+
+  it("tokens() adopts a newer token written by another process", () => {
+    fs.mkdirSync(gleanDir, { recursive: true });
+    fs.writeFileSync(
+      credFile,
+      JSON.stringify({
+        tokens: { access_token: "T0", refresh_token: "R0" },
+        clientInfo: { client_id: "cid" },
+      }),
+    );
+    const provider = new GleanOAuthClientProvider();
+    expect(provider.tokens()?.access_token).toBe("T0");
+
+    // Sibling refreshes: new access + rotated refresh token on disk.
+    writeCredFileNewer(
+      { access_token: "T1", refresh_token: "R1" },
+      { client_id: "cid" },
+    );
+
+    expect(provider.tokens()?.access_token).toBe("T1");
+    expect(provider.tokens()?.refresh_token).toBe("R1");
+  });
+
+  it("tokens() keeps the in-memory token when the file is deleted", () => {
+    fs.mkdirSync(gleanDir, { recursive: true });
+    fs.writeFileSync(
+      credFile,
+      JSON.stringify({ tokens: { access_token: "T0" }, clientInfo: {} }),
+    );
+    const provider = new GleanOAuthClientProvider();
+    expect(provider.tokens()?.access_token).toBe("T0");
+
+    // Transient disappearance / another process mid-write — don't self-evict.
+    fs.rmSync(credFile, { force: true });
+    expect(provider.tokens()?.access_token).toBe("T0");
+  });
+
+  it("tokens() does not adopt a rewrite that carries no tokens", () => {
+    fs.mkdirSync(gleanDir, { recursive: true });
+    fs.writeFileSync(
+      credFile,
+      JSON.stringify({ tokens: { access_token: "T0" }, clientInfo: {} }),
+    );
+    const provider = new GleanOAuthClientProvider();
+    expect(provider.tokens()?.access_token).toBe("T0");
+
+    // A client-only rewrite (tokens dropped) must not log us out in-memory.
+    writeCredFileNewer(undefined, { client_id: "cid" });
+    expect(provider.tokens()?.access_token).toBe("T0");
+  });
+
   it("saveClientInformation persists to disk", () => {
     const provider = new GleanOAuthClientProvider();
     const info = { client_id: "cid", client_secret: "sec" } as any;
