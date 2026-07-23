@@ -25966,8 +25966,6 @@ async function buildApprovalMessage(mcpServer, toolName, args) {
       message.push("  (some arguments truncated; full-args file unavailable)");
     }
   }
-  message.push("");
-  message.push("Accept = allow once. Tick the box to always allow this tool.");
   return message.join("\n");
 }
 function approvalRequestedSchema() {

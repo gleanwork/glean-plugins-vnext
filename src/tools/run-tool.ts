@@ -232,10 +232,6 @@ async function buildApprovalMessage(
       message.push("  (some arguments truncated; full-args file unavailable)");
     }
   }
-  // Clarify what the built-in Accept button does (its label can't be changed),
-  // and how it relates to the two "Remember…" checkboxes rendered below.
-  message.push("");
-  message.push("Accept = allow once. Tick the box to always allow this tool.");
   return message.join("\n");
 }
 
