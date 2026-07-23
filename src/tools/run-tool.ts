@@ -8,6 +8,10 @@ import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
 import { resolveSessionId } from "../session-id.js";
+import {
+  isToolAlwaysAllowed,
+  setToolAlwaysAllowed,
+} from "../tool-permissions-store.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 
@@ -231,6 +235,63 @@ async function buildApprovalMessage(
   return message.join("\n");
 }
 
+// The approval scope resolved from the prompt.
+//   task   – approve just this one call (Accept with the box unticked).
+//   always – approve this tool for all future calls (tool-permissions-store).
+// "decline" is the prompt's built-in Decline action, handled by the caller via
+// result.action, not a content field.
+//
+// We deliberately keep only "allow once" (Accept) + "always allow" (the box),
+// mirroring the Glean Assistant approval model. A per-session scope was dropped:
+// it can't be represented on a remote MCP server (no client-local session
+// state), and we don't want the plugin to diverge from Assistant here.
+export type ApprovalScope = "task" | "always";
+
+// The elicitation schema for the approval prompt. A single BOOLEAN field renders
+// as an INLINE checkbox in Claude Code (toggle with Space), shown upfront above
+// the built-in Accept/Decline buttons — unlike a string enum, which Claude Code
+// renders as a collapse/expand ("▶") accordion that hides the choice. So the
+// user sees: [ ] Always allow this tool / Accept / Decline. Accept with the box
+// unticked = allow once; tick it = always allow; Decline = reject.
+export function approvalRequestedSchema(): Record<string, unknown> {
+  return {
+    type: "object",
+    properties: {
+      always: {
+        type: "boolean",
+        title: "Always allow this tool",
+        default: false,
+      },
+    },
+  };
+}
+
+// Maps an ACCEPTED elicitation result's content to a scope: box ticked =
+// "always"; otherwise (unticked, or missing/garbled content) a one-time "task"
+// approval. Decline is a non-accept action, handled upstream.
+export function readApprovalScope(content: unknown): ApprovalScope {
+  if (
+    content &&
+    typeof content === "object" &&
+    (content as Record<string, unknown>).always === true
+  ) {
+    return "always";
+  }
+  return "task";
+}
+
+function notExecutedResult(toolName: string, action: string): CallToolResult {
+  const verb = action === "cancel" ? "cancelled" : "declined";
+  return {
+    content: [
+      {
+        type: "text",
+        text: `Action ${toolName} was ${verb} by the user.`,
+      },
+    ],
+  };
+}
+
 // A WeakSet so a short-lived server in tests doesn't leak,
 // and so the burn happens exactly once per server instance.
 const elicitationIdPrimed = new WeakSet<object>();
@@ -350,7 +411,10 @@ export async function handleRunTool(
     // call and never leaks across sessions. Any other or unknown mode keeps the
     // gate. Only bypassPermissions is skipped (deliberately narrow).
     const bypass = (await currentPermissionMode()) === "bypassPermissions";
-    if (!bypass) {
+    // Already "always allowed" for this tool (keyed by tool name) — skip the
+    // prompt, just like bypassPermissions does.
+    const preApproved = await isToolAlwaysAllowed(toolName);
+    if (!bypass && !preApproved) {
       const message = await buildApprovalMessage(
         mcpServer,
         toolName,
@@ -365,20 +429,21 @@ export async function handleRunTool(
         const result = await mcpServer.elicitInput(
           {
             message,
-            requestedSchema: { type: "object", properties: {} } as any,
+            requestedSchema: approvalRequestedSchema() as any,
           },
           { timeout },
         );
 
+        // Dismissing the prompt (Esc, or the built-in Decline button) is never
+        // an approval — fail closed.
         if (result.action !== "accept") {
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Action ${toolName} was ${result.action === "decline" ? "declined" : "cancelled"} by the user.`,
-              },
-            ],
-          };
+          return notExecutedResult(toolName, result.action);
+        }
+
+        // Accept: if the box was ticked, remember this tool so future calls
+        // skip the prompt; otherwise approve just this one call.
+        if (readApprovalScope(result.content) === "always") {
+          await setToolAlwaysAllowed(toolName);
         }
       } catch (err) {
         // Fail CLOSED. An approval gate that executes the action when the

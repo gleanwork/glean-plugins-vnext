@@ -112,6 +112,7 @@ HITL ones — or in your shell:
 | `HITL_TIMEOUT_MS` | Timeout in milliseconds for a HITL confirmation prompt. Positive integer. | `300000` (5 min), set in `.mcp.json` |
 | `GLEAN_REMOTE_TOOL_TIMEOUT_MS` | Timeout in milliseconds for a downstream tool call made via `run_tool` (overrides the MCP SDK's 60s default). Positive integer. | `300000` (5 min), bundle default |
 | `GLEAN_FILE_ARG_MAX_BYTES` | Maximum size in bytes of each file read via `run_tool`'s `file_args`. Positive integer. | `1048576` (1 MiB), bundle default |
+| `GLEAN_REMOTE_TOOL_APPROVALS` | When exactly `true`, persist "always allow this tool" grants to Glean's per-user settings (`saveusersettings`/`listusersettings`, key `pluginToolApprovals.<tool>`) in addition to the local file, and prefer the remote value on read (falling back to the local file when the remote call fails). **Requires the `internal:web_api` OAuth scope**, which a dynamically-registered MCP client does not hold today — so the call will 401/403 until that scope (or an MCP-gateway settings surface) is available. Ships **off**; the local file remains the source of truth when unset. | unset (local only) |
 | `USE_CLAUDE_PROJECT_DIR` | Set to `1` to route the skills cache under the launch project's `.claude/tmp/`, so the `glean_run` skill's `Read` glob can match cache files. | unset |
 
 Empty values and un-interpolated `${VAR}` placeholders are ignored, falling back

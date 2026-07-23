@@ -8,11 +8,18 @@ import {
   FileArgsError,
   handleRunTool,
   runToolAnnotations,
+  approvalRequestedSchema,
+  readApprovalScope,
 } from "../src/tools/run-tool.js";
 import {
   buildCompactArgs,
   formatArgumentsForFile,
 } from "../src/tools/approval-args.js";
+import {
+  isToolAlwaysAllowed,
+  setToolAlwaysAllowed,
+  clearToolPermissions,
+} from "../src/tool-permissions-store.js";
 
 describe("resolveFileArgs", () => {
   let tmpDir: string;
@@ -309,6 +316,9 @@ describe("handleRunTool (HITL)", () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "run-tool-hitl-test-"));
+    // Isolate the session/always approval stores to this test's tmp dir so they
+    // never read or pollute the real ~/.glean.
+    vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
   });
 
   afterEach(async () => {
@@ -568,6 +578,103 @@ describe("handleRunTool (HITL)", () => {
     expect(result.isError).toBe(true);
     expect(elicit).not.toHaveBeenCalled(); // no prompt for unreadable input
     expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  it("approvalRequestedSchema exposes a single 'always' boolean checkbox", () => {
+    const schema = approvalRequestedSchema() as any;
+    expect(schema.properties.always.type).toBe("boolean");
+    // No string enum (which CC renders as a collapsed accordion) and no session
+    // field (dropped — can't work on a remote MCP server).
+    expect(schema.properties.session).toBeUndefined();
+    expect(schema.properties.choice).toBeUndefined();
+  });
+
+  it("readApprovalScope: box ticked = always; unticked/missing = task", () => {
+    expect(readApprovalScope({ always: true })).toBe("always");
+    expect(readApprovalScope({ always: false })).toBe("task");
+    expect(readApprovalScope({})).toBe("task");
+    expect(readApprovalScope(undefined)).toBe("task");
+  });
+
+  it("prompts with a single 'always' checkbox field", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept", content: {} });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    const schema = elicit.mock.calls[0][0].requestedSchema;
+    expect(schema.properties.always.type).toBe("boolean");
+    expect(schema.properties.session).toBeUndefined();
+  });
+
+  it("Accept with the box unticked executes once and persists nothing", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept", content: {} });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+    expect(await isToolAlwaysAllowed("jirasearch")).toBe(false);
+  });
+
+  it("ticking 'Always allow' persists and then skips the prompt for that tool", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi
+      .fn()
+      .mockResolvedValue({ action: "accept", content: { always: true } });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+    expect(await isToolAlwaysAllowed("jirasearch")).toBe(true);
+
+    // Second call to the same tool is pre-approved → no prompt.
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+    expect(elicit).toHaveBeenCalledTimes(1);
+    expect(remote.callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats an accept with no content (accept/decline-only client) as a one-time approval", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+    expect(await isToolAlwaysAllowed("jirasearch")).toBe(false);
+  });
+
+  it("skips the prompt when the tool is already always-allowed", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    await setToolAlwaysAllowed("jirasearch");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect(elicit).not.toHaveBeenCalled();
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("clearToolPermissions removes an always grant", async () => {
+    await setToolAlwaysAllowed("jirasearch");
+    expect(await isToolAlwaysAllowed("jirasearch")).toBe(true);
+
+    await clearToolPermissions();
+
+    expect(await isToolAlwaysAllowed("jirasearch")).toBe(false);
   });
 
   it("skips the elicitation gate and executes directly in bypassPermissions mode", async () => {
