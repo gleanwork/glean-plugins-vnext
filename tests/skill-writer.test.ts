@@ -283,7 +283,7 @@ describe("evictStaleSkills", () => {
 });
 
 describe("formatAvailableSkillsPrompt", () => {
-  it("formats skills with instructions and file references", () => {
+  it("formats skills with file references (no instructions block)", () => {
     const index: SkillIndex[] = [
       {
         name: "search-jira",
@@ -305,8 +305,8 @@ describe("formatAvailableSkillsPrompt", () => {
     const result = formatAvailableSkillsPrompt(index);
 
     expect(result).toContain("<available_skills>");
-    expect(result).toContain("<instructions>");
-    expect(result).toContain("Browse the skills below");
+    expect(result).not.toContain("<instructions>");
+    expect(result).not.toContain("Browse the skills below");
     expect(result).toContain('name="search-jira"');
     expect(result).toContain('description="Search Jira issues"');
     expect(result).toContain('path="/tmp/skills/search-jira/SKILL.md"');

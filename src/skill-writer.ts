@@ -138,21 +138,10 @@ export function formatAvailableSkillsPrompt(index: SkillIndex[]): string {
     ].join("\n");
   });
 
-  const instructions = [
-    "<instructions>",
-    "To use a skill: (1) Browse the skills below and select the one most relevant " +
-      "to the user's request. (2) Read its SKILL.md for instructions. " +
-      "(3) Read each tool's JSON file (e.g. tools/TOOL_NAME.json) to get the exact " +
-      "server_id, name, and inputSchema with exact parameter names and types. " +
-      "(4) Call run_tool with the server_id, tool_name (from the name field), " +
-      "and arguments matching the inputSchema. " +
-      "Do NOT guess parameter names — always read the tool JSON file first.",
-    "</instructions>",
-  ].join("\n");
-
+  // Usage instructions live in the find_skills tool description (advertised
+  // once at tools/list) rather than being re-emitted in every response.
   return [
     "<available_skills>",
-    instructions,
     ...skillEntries,
     "</available_skills>",
   ].join("\n");
