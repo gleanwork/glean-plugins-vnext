@@ -25671,9 +25671,9 @@ async function handleFindSkills(remoteClient, skillsBaseDir, args) {
 }
 
 // src/tools/run-tool.ts
-import fs5 from "node:fs/promises";
+import fs6 from "node:fs/promises";
 import os2 from "node:os";
-import path5 from "node:path";
+import path6 from "node:path";
 
 // src/tools/approval-args.ts
 import fs3 from "node:fs/promises";
@@ -25776,26 +25776,135 @@ async function writeApprovalArgsFile(toolName, args) {
 }
 
 // src/tool-permissions-store.ts
-import fs4 from "node:fs";
-import path4 from "node:path";
-import { homedir as homedir2 } from "node:os";
-var PERMISSIONS_FILENAME = "mcp-tool-permissions.json";
+import fs5 from "node:fs";
+import path5 from "node:path";
+import { homedir as homedir3 } from "node:os";
+
+// src/approval-keys.ts
 var KEY_PREFIX = "pluginToolApprovals.";
 var GRANTED = "true";
-var DIR_MODE2 = 448;
-var FILE_MODE2 = 384;
-function resolveDir() {
-  return process.env.PLUGIN_DATA_DIR || path4.join(homedir2(), ".glean");
-}
-function permissionsFile() {
-  return path4.join(resolveDir(), PERMISSIONS_FILENAME);
-}
 function settingKey(toolName) {
   return `${KEY_PREFIX}${toolName}`;
 }
+
+// src/url-config-store.ts
+import fs4 from "node:fs";
+import path4 from "node:path";
+import { homedir as homedir2 } from "node:os";
+var CONFIG_FILENAME = "mcp-server-url.json";
+var DIR_MODE2 = 448;
+var FILE_MODE2 = 384;
+function resolveConfigDir() {
+  return process.env.PLUGIN_DATA_DIR || path4.join(homedir2(), ".glean");
+}
+function configFile() {
+  return path4.join(resolveConfigDir(), CONFIG_FILENAME);
+}
+function loadServerUrl() {
+  try {
+    const raw = fs4.readFileSync(configFile(), "utf-8");
+    const data = JSON.parse(raw);
+    if (typeof data.serverUrl !== "string" || !data.serverUrl) return void 0;
+    return data.serverUrl;
+  } catch {
+    return void 0;
+  }
+}
+function saveServerUrl(url2) {
+  const filePath = configFile();
+  const dir = path4.dirname(filePath);
+  fs4.mkdirSync(dir, { recursive: true, mode: DIR_MODE2 });
+  fs4.chmodSync(dir, DIR_MODE2);
+  const data = { serverUrl: url2 };
+  fs4.writeFileSync(filePath, JSON.stringify(data, null, 2), {
+    encoding: "utf-8",
+    mode: FILE_MODE2
+  });
+  fs4.chmodSync(filePath, FILE_MODE2);
+}
+function clearServerUrl() {
+  try {
+    fs4.rmSync(configFile(), { force: true });
+  } catch {
+  }
+}
+
+// src/remote-approvals.ts
+function settingsBaseUrl() {
+  const raw = process.env.GLEAN_MCP_SERVER_URL || loadServerUrl();
+  if (!raw) return void 0;
+  try {
+    return `${new URL(raw).origin}/api/v1`;
+  } catch {
+    return void 0;
+  }
+}
+function bearerToken() {
+  const tokens = loadCredentials()?.tokens;
+  const token = tokens?.access_token;
+  return typeof token === "string" && token.length > 0 ? token : void 0;
+}
+function authedHeaders(token) {
+  return {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    Accept: "application/json"
+  };
+}
+async function remoteIsToolApproved(toolName, fetchImpl = fetch) {
+  const base = settingsBaseUrl();
+  const token = bearerToken();
+  if (!base || !token) return null;
+  try {
+    const resp = await fetchImpl(`${base}/listusersettings`, {
+      method: "POST",
+      headers: authedHeaders(token),
+      body: "{}"
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const settings = Array.isArray(data?.settings) ? data.settings : [];
+    const want = settingKey(toolName);
+    return settings.some((s) => s?.key === want && s?.value === GRANTED);
+  } catch {
+    return null;
+  }
+}
+async function remoteSetToolApproved(toolName, fetchImpl = fetch) {
+  const base = settingsBaseUrl();
+  const token = bearerToken();
+  if (!base || !token) return false;
+  try {
+    const resp = await fetchImpl(`${base}/saveusersettings`, {
+      method: "POST",
+      headers: authedHeaders(token),
+      body: JSON.stringify({
+        settings: [{ key: settingKey(toolName), value: GRANTED }]
+      })
+    });
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
+// src/tool-permissions-store.ts
+var PERMISSIONS_FILENAME = "mcp-tool-permissions.json";
+var DIR_MODE3 = 448;
+var FILE_MODE3 = 384;
+function remoteApprovalsEnabled() {
+  return process.env.GLEAN_REMOTE_TOOL_APPROVALS === "true";
+}
+var remoteCache = /* @__PURE__ */ new Map();
+function resolveDir() {
+  return process.env.PLUGIN_DATA_DIR || path5.join(homedir3(), ".glean");
+}
+function permissionsFile() {
+  return path5.join(resolveDir(), PERMISSIONS_FILENAME);
+}
 function readSettings() {
   try {
-    const raw = fs4.readFileSync(permissionsFile(), "utf-8");
+    const raw = fs5.readFileSync(permissionsFile(), "utf-8");
     const data = JSON.parse(raw);
     if (!data || typeof data.settings !== "object" || data.settings === null) {
       return {};
@@ -25805,29 +25914,52 @@ function readSettings() {
     return {};
   }
 }
+function localIsAllowed(toolName) {
+  return readSettings()[settingKey(toolName)] === GRANTED;
+}
 function writeSetting(key, value) {
   const settings = readSettings();
   if (settings[key] === value) return;
   settings[key] = value;
   const filePath = permissionsFile();
-  const dir = path4.dirname(filePath);
-  fs4.mkdirSync(dir, { recursive: true, mode: DIR_MODE2 });
-  fs4.chmodSync(dir, DIR_MODE2);
-  fs4.writeFileSync(filePath, JSON.stringify({ settings }, null, 2), {
+  const dir = path5.dirname(filePath);
+  fs5.mkdirSync(dir, { recursive: true, mode: DIR_MODE3 });
+  fs5.chmodSync(dir, DIR_MODE3);
+  fs5.writeFileSync(filePath, JSON.stringify({ settings }, null, 2), {
     encoding: "utf-8",
-    mode: FILE_MODE2
+    mode: FILE_MODE3
   });
-  fs4.chmodSync(filePath, FILE_MODE2);
+  fs5.chmodSync(filePath, FILE_MODE3);
 }
-function isToolAlwaysAllowed(toolName) {
-  return readSettings()[settingKey(toolName)] === GRANTED;
+async function isToolAlwaysAllowed(toolName) {
+  if (remoteApprovalsEnabled()) {
+    const cached2 = remoteCache.get(toolName);
+    if (cached2 !== void 0) return cached2;
+    const remote = await remoteIsToolApproved(toolName);
+    if (remote !== null) {
+      remoteCache.set(toolName, remote);
+      return remote;
+    }
+    return localIsAllowed(toolName);
+  }
+  return localIsAllowed(toolName);
 }
-function setToolAlwaysAllowed(toolName) {
+async function setToolAlwaysAllowed(toolName) {
   writeSetting(settingKey(toolName), GRANTED);
+  if (remoteApprovalsEnabled()) {
+    remoteCache.set(toolName, true);
+    const ok = await remoteSetToolApproved(toolName);
+    if (!ok) {
+      console.error(
+        `[remote-approvals] failed to upsert "${toolName}" to Glean; kept local grant`
+      );
+    }
+  }
 }
-function clearToolPermissions() {
+async function clearToolPermissions() {
+  remoteCache.clear();
   try {
-    fs4.rmSync(permissionsFile(), { force: true });
+    fs5.rmSync(permissionsFile(), { force: true });
   } catch {
   }
 }
@@ -25878,7 +26010,7 @@ async function resolveFileArgs(fileArgs, baseArgs, inputSchema) {
         `file_args.${argName} must be a non-empty string path`
       );
     }
-    if (!path5.isAbsolute(filePathRaw)) {
+    if (!path6.isAbsolute(filePathRaw)) {
       throw new FileArgsError(
         `file_args.${argName} must be an absolute path; got "${filePathRaw}"`
       );
@@ -25890,7 +26022,7 @@ async function resolveFileArgs(fileArgs, baseArgs, inputSchema) {
     }
     let stat;
     try {
-      stat = await fs5.stat(filePathRaw);
+      stat = await fs6.stat(filePathRaw);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new FileArgsError(
@@ -25907,7 +26039,7 @@ async function resolveFileArgs(fileArgs, baseArgs, inputSchema) {
         `file_args.${argName}: "${filePathRaw}" is ${stat.size} bytes, exceeds ${maxBytes} byte limit (set GLEAN_FILE_ARG_MAX_BYTES to override)`
       );
     }
-    const content = await fs5.readFile(filePathRaw, "utf-8");
+    const content = await fs6.readFile(filePathRaw, "utf-8");
     const types = declaredParamTypes(inputSchema, argName);
     if (types.has("object") || types.has("array")) {
       try {
@@ -25930,12 +26062,12 @@ async function resolveFileArgs(fileArgs, baseArgs, inputSchema) {
 }
 async function findToolJson(skillsBaseDir, toolName) {
   try {
-    const skillDirs = await fs5.readdir(skillsBaseDir, { withFileTypes: true });
+    const skillDirs = await fs6.readdir(skillsBaseDir, { withFileTypes: true });
     for (const dir of skillDirs) {
       if (!dir.isDirectory()) continue;
-      const toolPath = path5.join(skillsBaseDir, dir.name, "tools", `${toolName}.json`);
+      const toolPath = path6.join(skillsBaseDir, dir.name, "tools", `${toolName}.json`);
       try {
-        const content = await fs5.readFile(toolPath, "utf-8");
+        const content = await fs6.readFile(toolPath, "utf-8");
         return JSON.parse(content);
       } catch {
         continue;
@@ -26005,13 +26137,13 @@ function primeElicitationCancellation(mcpServer) {
   });
 }
 function permissionModeMarkerPath() {
-  const base = process.env.CLAUDE_PLUGIN_DATA || path5.join(os2.homedir(), ".glean");
+  const base = process.env.CLAUDE_PLUGIN_DATA || path6.join(os2.homedir(), ".glean");
   const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
-  return path5.join(base, "glean-hitl-mode", `${sessionId}.json`);
+  return path6.join(base, "glean-hitl-mode", `${sessionId}.json`);
 }
 async function currentPermissionMode() {
   try {
-    const raw = await fs5.readFile(permissionModeMarkerPath(), "utf-8");
+    const raw = await fs6.readFile(permissionModeMarkerPath(), "utf-8");
     const parsed = JSON.parse(raw);
     return typeof parsed.permission_mode === "string" ? parsed.permission_mode : null;
   } catch {
@@ -26050,7 +26182,7 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
   const hitlEnabled = process.env.ENABLE_HITL === "true";
   if (hitlEnabled && toolMeta?.requires_approval && mcpServer.getClientCapabilities()?.elicitation) {
     const bypass = await currentPermissionMode() === "bypassPermissions";
-    const preApproved = isToolAlwaysAllowed(toolName);
+    const preApproved = await isToolAlwaysAllowed(toolName);
     if (!bypass && !preApproved) {
       const message = await buildApprovalMessage(
         mcpServer,
@@ -26071,7 +26203,7 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
           return notExecutedResult(toolName, result.action);
         }
         if (readApprovalScope(result.content) === "always") {
-          setToolAlwaysAllowed(toolName);
+          await setToolAlwaysAllowed(toolName);
         }
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
@@ -26102,48 +26234,6 @@ function buildRemoteArgs(serverId, toolName, resolvedArgs) {
 }
 function runToolAnnotations(enableHitl, clientSupportsElicitation) {
   return enableHitl && clientSupportsElicitation ? { readOnlyHint: true } : void 0;
-}
-
-// src/url-config-store.ts
-import fs6 from "node:fs";
-import path6 from "node:path";
-import { homedir as homedir3 } from "node:os";
-var CONFIG_FILENAME = "mcp-server-url.json";
-var DIR_MODE3 = 448;
-var FILE_MODE3 = 384;
-function resolveConfigDir() {
-  return process.env.PLUGIN_DATA_DIR || path6.join(homedir3(), ".glean");
-}
-function configFile() {
-  return path6.join(resolveConfigDir(), CONFIG_FILENAME);
-}
-function loadServerUrl() {
-  try {
-    const raw = fs6.readFileSync(configFile(), "utf-8");
-    const data = JSON.parse(raw);
-    if (typeof data.serverUrl !== "string" || !data.serverUrl) return void 0;
-    return data.serverUrl;
-  } catch {
-    return void 0;
-  }
-}
-function saveServerUrl(url2) {
-  const filePath = configFile();
-  const dir = path6.dirname(filePath);
-  fs6.mkdirSync(dir, { recursive: true, mode: DIR_MODE3 });
-  fs6.chmodSync(dir, DIR_MODE3);
-  const data = { serverUrl: url2 };
-  fs6.writeFileSync(filePath, JSON.stringify(data, null, 2), {
-    encoding: "utf-8",
-    mode: FILE_MODE3
-  });
-  fs6.chmodSync(filePath, FILE_MODE3);
-}
-function clearServerUrl() {
-  try {
-    fs6.rmSync(configFile(), { force: true });
-  } catch {
-  }
 }
 
 // src/remote-tools-cache-store.ts
@@ -26869,7 +26959,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clearServerUrl();
         clearCredentials();
         clearRemoteTools();
-        clearToolPermissions();
+        await clearToolPermissions();
         oauthProvider = void 0;
         cachedRemoteTools = [];
         logLine("setup.reset");

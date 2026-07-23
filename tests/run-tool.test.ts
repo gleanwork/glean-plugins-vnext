@@ -620,7 +620,7 @@ describe("handleRunTool (HITL)", () => {
     await handleRunTool(remote, server, tmpDir, baseArgs);
 
     expect(remote.callTool).toHaveBeenCalledTimes(1);
-    expect(isToolAlwaysAllowed("jirasearch")).toBe(false);
+    expect(await isToolAlwaysAllowed("jirasearch")).toBe(false);
   });
 
   it("ticking 'Always allow' persists and then skips the prompt for that tool", async () => {
@@ -633,7 +633,7 @@ describe("handleRunTool (HITL)", () => {
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
     await handleRunTool(remote, server, tmpDir, baseArgs);
-    expect(isToolAlwaysAllowed("jirasearch")).toBe(true);
+    expect(await isToolAlwaysAllowed("jirasearch")).toBe(true);
 
     // Second call to the same tool is pre-approved → no prompt.
     await handleRunTool(remote, server, tmpDir, baseArgs);
@@ -651,12 +651,12 @@ describe("handleRunTool (HITL)", () => {
     await handleRunTool(remote, server, tmpDir, baseArgs);
 
     expect(remote.callTool).toHaveBeenCalledTimes(1);
-    expect(isToolAlwaysAllowed("jirasearch")).toBe(false);
+    expect(await isToolAlwaysAllowed("jirasearch")).toBe(false);
   });
 
   it("skips the prompt when the tool is already always-allowed", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
-    setToolAlwaysAllowed("jirasearch");
+    await setToolAlwaysAllowed("jirasearch");
     const remote = makeRemote();
     const elicit = vi.fn().mockResolvedValue({ action: "accept" });
     const server = makeServer({ elicitation: true, elicit });
@@ -669,12 +669,12 @@ describe("handleRunTool (HITL)", () => {
   });
 
   it("clearToolPermissions removes an always grant", async () => {
-    setToolAlwaysAllowed("jirasearch");
-    expect(isToolAlwaysAllowed("jirasearch")).toBe(true);
+    await setToolAlwaysAllowed("jirasearch");
+    expect(await isToolAlwaysAllowed("jirasearch")).toBe(true);
 
-    clearToolPermissions();
+    await clearToolPermissions();
 
-    expect(isToolAlwaysAllowed("jirasearch")).toBe(false);
+    expect(await isToolAlwaysAllowed("jirasearch")).toBe(false);
   });
 
   it("skips the elicitation gate and executes directly in bypassPermissions mode", async () => {

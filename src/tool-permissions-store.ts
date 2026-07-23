@@ -1,33 +1,38 @@
 import fs from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
+import { GRANTED, settingKey } from "./approval-keys.js";
+import {
+  remoteIsToolApproved,
+  remoteSetToolApproved,
+} from "./remote-approvals.js";
 
-// Persistent "Allow across sessions (always)" store for HITL tool approvals.
+// "Always allow this tool" store for HITL approvals.
 //
-// SHAPE — deliberately mirrors Glean's per-user settings store (a flat
-// settingKey -> settingValue string map, as in the backend `UserSettings`
-// table). Each approved tool is one key:
+// Persistence has two modes, chosen by GLEAN_REMOTE_TOOL_APPROVALS (default
+// off):
+//   off → LOCAL only: a flat settingKey -> settingValue JSON file (shape in
+//         approval-keys.ts) under PLUGIN_DATA_DIR || ~/.glean.
+//   on  → REMOTE (Glean UserSettings) + LOCAL fallback: writes go to BOTH Glean
+//         and the local file; reads prefer Glean and fall back to the local
+//         file when the remote call fails (unscoped / offline). Transport +
+//         scope caveat live in remote-approvals.ts.
 //
-//     pluginToolApprovals.<toolName> = "true"
-//
-// Values are strings (not booleans) so the serialized shape is byte-identical
-// to what Glean's `POST /api/v1/saveusersettings` would persist. That keeps the
-// eventual move server-side to a single-file change.
-//
-// WHY LOCAL FOR NOW — the plugin authenticates via dynamic MCP client
-// registration and only holds the `MCP` OAuth scope; the user-settings REST
-// endpoints require `internal:web_api`, which is not grantable to a dynamically
-// registered client. Until an MCP-reachable settings read/write exists, we
-// persist to a local file. TO MOVE SERVER-SIDE, replace the bodies of
-// `readSettings`/`writeSetting` below with calls to that settings surface; the
-// key namespace and the exported functions stay the same, so run-tool.ts is
-// untouched.
+// All three exported functions are async because the remote path awaits fetch;
+// the local reads/writes underneath remain synchronous.
 
 const PERMISSIONS_FILENAME = "mcp-tool-permissions.json";
-const KEY_PREFIX = "pluginToolApprovals.";
-const GRANTED = "true";
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
+
+function remoteApprovalsEnabled(): boolean {
+  return process.env.GLEAN_REMOTE_TOOL_APPROVALS === "true";
+}
+
+// In-process cache of remote approval lookups (toolName -> approved) so we don't
+// POST listusersettings before every gated tool call. Only consulted when the
+// remote flag is on; updated on write, cleared on reset.
+const remoteCache = new Map<string, boolean>();
 
 function resolveDir(): string {
   return process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
@@ -35,10 +40,6 @@ function resolveDir(): string {
 
 function permissionsFile(): string {
   return path.join(resolveDir(), PERMISSIONS_FILENAME);
-}
-
-function settingKey(toolName: string): string {
-  return `${KEY_PREFIX}${toolName}`;
 }
 
 // A flat settingKey -> settingValue map, matching the Glean UserSettings store.
@@ -61,6 +62,10 @@ function readSettings(): Record<string, string> {
   }
 }
 
+function localIsAllowed(toolName: string): boolean {
+  return readSettings()[settingKey(toolName)] === GRANTED;
+}
+
 function writeSetting(key: string, value: string): void {
   const settings = readSettings();
   if (settings[key] === value) return;
@@ -76,18 +81,45 @@ function writeSetting(key: string, value: string): void {
   fs.chmodSync(filePath, FILE_MODE);
 }
 
-export function isToolAlwaysAllowed(toolName: string): boolean {
-  return readSettings()[settingKey(toolName)] === GRANTED;
+export async function isToolAlwaysAllowed(toolName: string): Promise<boolean> {
+  if (remoteApprovalsEnabled()) {
+    const cached = remoteCache.get(toolName);
+    if (cached !== undefined) return cached;
+    const remote = await remoteIsToolApproved(toolName);
+    if (remote !== null) {
+      remoteCache.set(toolName, remote);
+      return remote;
+    }
+    // Remote unavailable (unscoped / offline) -> fall back to the local file.
+    return localIsAllowed(toolName);
+  }
+  return localIsAllowed(toolName);
 }
 
-export function setToolAlwaysAllowed(toolName: string): void {
+export async function setToolAlwaysAllowed(toolName: string): Promise<void> {
+  // Always persist locally so the grant survives even if the remote write fails
+  // (and so it's readable as the fallback).
   writeSetting(settingKey(toolName), GRANTED);
+  if (remoteApprovalsEnabled()) {
+    remoteCache.set(toolName, true);
+    const ok = await remoteSetToolApproved(toolName);
+    if (!ok) {
+      // Best-effort: the local grant already succeeded, so never fail the tool
+      // call — just surface it on stderr (mirrors token-store's save logging).
+      console.error(
+        `[remote-approvals] failed to upsert "${toolName}" to Glean; kept local grant`,
+      );
+    }
+  }
 }
 
-export function clearToolPermissions(): void {
+export async function clearToolPermissions(): Promise<void> {
+  remoteCache.clear();
   try {
     fs.rmSync(permissionsFile(), { force: true });
   } catch {
     /* best-effort */
   }
+  // Note: remote bulk-clear is unsupported (no delete endpoint); with the flag
+  // on, server-side grants persist until overwritten.
 }

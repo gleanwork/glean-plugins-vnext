@@ -717,7 +717,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clearServerUrl();
         clearCredentials();
         clearRemoteTools();
-        clearToolPermissions();
+        await clearToolPermissions();
         oauthProvider = undefined;
         cachedRemoteTools = [];
         logLine("setup.reset");

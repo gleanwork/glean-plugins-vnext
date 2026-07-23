@@ -405,7 +405,7 @@ export async function handleRunTool(
     const bypass = (await currentPermissionMode()) === "bypassPermissions";
     // Already "always allowed" for this tool (keyed by tool name) — skip the
     // prompt, just like bypassPermissions does.
-    const preApproved = isToolAlwaysAllowed(toolName);
+    const preApproved = await isToolAlwaysAllowed(toolName);
     if (!bypass && !preApproved) {
       const message = await buildApprovalMessage(
         mcpServer,
@@ -435,7 +435,7 @@ export async function handleRunTool(
         // Accept: if the box was ticked, remember this tool so future calls
         // skip the prompt; otherwise approve just this one call.
         if (readApprovalScope(result.content) === "always") {
-          setToolAlwaysAllowed(toolName);
+          await setToolAlwaysAllowed(toolName);
         }
       } catch (err) {
         // Fail CLOSED. An approval gate that executes the action when the
