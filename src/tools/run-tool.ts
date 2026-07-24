@@ -8,12 +8,19 @@ import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
 import { resolveSessionId } from "../session-id.js";
-import {
-  isToolAlwaysAllowed,
-  setToolAlwaysAllowed,
-} from "../tool-permissions-store.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
+
+// Tools the user chose "always allow" for during THIS process. The durable
+// grant is persisted server-side (Glean ToolPreferences, via the
+// set_tool_approval gateway meta-tool) and flows back as find_skills'
+// `requires_approval:false`; this in-process set makes the grant take effect
+// immediately, before the next find_skills refresh. Keyed by server_id +
+// tool_name.
+const sessionApproved = new Set<string>();
+function approvalKey(serverId: string, toolName: string): string {
+  return JSON.stringify([serverId, toolName]);
+}
 
 // How long a user has to respond to an approval prompt. The MCP SDK's own
 // request timeout is 60s and, on expiry, elicitInput REJECTS — so unless we
@@ -237,7 +244,8 @@ async function buildApprovalMessage(
 
 // The approval scope resolved from the prompt.
 //   task   – approve just this one call (Accept with the box unticked).
-//   always – approve this tool for all future calls (tool-permissions-store).
+//   always – approve this tool for all future calls (persisted to Glean's
+//            ToolPreferences via the set_tool_approval gateway meta-tool).
 // "decline" is the prompt's built-in Decline action, handled by the caller via
 // result.action, not a content field.
 //
@@ -403,9 +411,11 @@ export async function handleRunTool(
     // call and never leaks across sessions. Any other or unknown mode keeps the
     // gate. Only bypassPermissions is skipped (deliberately narrow).
     const bypass = (await currentPermissionMode()) === "bypassPermissions";
-    // Already "always allowed" for this tool (keyed by tool name) — skip the
-    // prompt, just like bypassPermissions does.
-    const preApproved = await isToolAlwaysAllowed(toolName);
+    // Already "always allowed" earlier in this process — skip the prompt, just
+    // like bypassPermissions does. (A server-side "always allow" arrives
+    // instead as requires_approval:false from find_skills, which skips the whole
+    // gate above — so no plugin storage is needed for that.)
+    const preApproved = sessionApproved.has(approvalKey(serverId, toolName));
     if (!bypass && !preApproved) {
       const message = await buildApprovalMessage(
         mcpServer,
@@ -432,10 +442,26 @@ export async function handleRunTool(
           return notExecutedResult(toolName, result.action);
         }
 
-        // Accept: if the box was ticked, remember this tool so future calls
-        // skip the prompt; otherwise approve just this one call.
+        // Accept: if the box was ticked, persist an "always allow" to Glean's
+        // shared ToolPreferences via the set_tool_approval gateway meta-tool
+        // (the same store Glean Assistant uses). Best-effort — a failed persist
+        // must never break execution. The session set makes it take effect
+        // immediately; the durable value returns via find_skills'
+        // requires_approval on the next refresh.
         if (readApprovalScope(result.content) === "always") {
-          await setToolAlwaysAllowed(toolName);
+          sessionApproved.add(approvalKey(serverId, toolName));
+          try {
+            await callRemoteTool(remoteClient, "set_tool_approval", {
+              server_id: serverId,
+              tool_name: toolName,
+              value: "ALWAYS_ALLOWED",
+            });
+          } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err);
+            console.error(
+              `[set_tool_approval] failed to persist "${toolName}" to Glean: ${detail}`,
+            );
+          }
         }
       } catch (err) {
         // Fail CLOSED. An approval gate that executes the action when the

@@ -15,11 +15,6 @@ import {
   buildCompactArgs,
   formatArgumentsForFile,
 } from "../src/tools/approval-args.js";
-import {
-  isToolAlwaysAllowed,
-  setToolAlwaysAllowed,
-  clearToolPermissions,
-} from "../src/tool-permissions-store.js";
 
 describe("resolveFileArgs", () => {
   let tmpDir: string;
@@ -610,7 +605,7 @@ describe("handleRunTool (HITL)", () => {
     expect(schema.properties.session).toBeUndefined();
   });
 
-  it("Accept with the box unticked executes once and persists nothing", async () => {
+  it("Accept with the box unticked executes once and does not persist", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
     const elicit = vi.fn().mockResolvedValue({ action: "accept", content: {} });
@@ -619,26 +614,69 @@ describe("handleRunTool (HITL)", () => {
 
     await handleRunTool(remote, server, tmpDir, baseArgs);
 
-    expect(remote.callTool).toHaveBeenCalledTimes(1);
-    expect(await isToolAlwaysAllowed("jirasearch")).toBe(false);
+    const names = remote.callTool.mock.calls.map((c: any) => c[0].name);
+    expect(names).toContain("run_tool");
+    expect(names).not.toContain("set_tool_approval");
   });
 
-  it("ticking 'Always allow' persists and then skips the prompt for that tool", async () => {
+  it("ticking 'Always allow' calls set_tool_approval and then skips the prompt for that tool", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
     const elicit = vi
       .fn()
       .mockResolvedValue({ action: "accept", content: { always: true } });
     const server = makeServer({ elicitation: true, elicit });
-    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+    // Unique tool name: sessionApproved is process-level, so a shared name would
+    // leak this grant into other tests.
+    const args = {
+      server_id: "composio/jira-pack",
+      tool_name: "always_tool",
+      arguments: {},
+    };
+    await writeToolJson(tmpDir, "always_tool", { requires_approval: true });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
-    expect(await isToolAlwaysAllowed("jirasearch")).toBe(true);
+    await handleRunTool(remote, server, tmpDir, args);
 
-    // Second call to the same tool is pre-approved → no prompt.
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    const setCall = remote.callTool.mock.calls.find(
+      (c: any) => c[0].name === "set_tool_approval",
+    );
+    expect(setCall).toBeDefined();
+    expect(setCall![0].arguments).toEqual({
+      server_id: "composio/jira-pack",
+      tool_name: "always_tool",
+      value: "ALWAYS_ALLOWED",
+    });
+
+    // Second call to the same tool is pre-approved this session → no prompt.
+    await handleRunTool(remote, server, tmpDir, args);
     expect(elicit).toHaveBeenCalledTimes(1);
-    expect(remote.callTool).toHaveBeenCalledTimes(2);
+  });
+
+  it("a failed set_tool_approval persist does not break execution", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const remote = makeRemote();
+    remote.callTool.mockImplementation(async (req: any) => {
+      if (req.name === "set_tool_approval") throw new Error("403 no scope");
+      return { content: [{ type: "text", text: "ok" }] };
+    });
+    const elicit = vi
+      .fn()
+      .mockResolvedValue({ action: "accept", content: { always: true } });
+    const server = makeServer({ elicitation: true, elicit });
+    const args = {
+      server_id: "s",
+      tool_name: "always_fail_tool",
+      arguments: {},
+    };
+    await writeToolJson(tmpDir, "always_fail_tool", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, args);
+
+    expect(result.isError).toBeFalsy();
+    const names = remote.callTool.mock.calls.map((c: any) => c[0].name);
+    expect(names).toContain("run_tool"); // executed despite the failed persist
+    errSpy.mockRestore();
   });
 
   it("treats an accept with no content (accept/decline-only client) as a one-time approval", async () => {
@@ -650,31 +688,9 @@ describe("handleRunTool (HITL)", () => {
 
     await handleRunTool(remote, server, tmpDir, baseArgs);
 
-    expect(remote.callTool).toHaveBeenCalledTimes(1);
-    expect(await isToolAlwaysAllowed("jirasearch")).toBe(false);
-  });
-
-  it("skips the prompt when the tool is already always-allowed", async () => {
-    vi.stubEnv("ENABLE_HITL", "true");
-    await setToolAlwaysAllowed("jirasearch");
-    const remote = makeRemote();
-    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
-    const server = makeServer({ elicitation: true, elicit });
-    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
-
-    await handleRunTool(remote, server, tmpDir, baseArgs);
-
-    expect(elicit).not.toHaveBeenCalled();
-    expect(remote.callTool).toHaveBeenCalledTimes(1);
-  });
-
-  it("clearToolPermissions removes an always grant", async () => {
-    await setToolAlwaysAllowed("jirasearch");
-    expect(await isToolAlwaysAllowed("jirasearch")).toBe(true);
-
-    await clearToolPermissions();
-
-    expect(await isToolAlwaysAllowed("jirasearch")).toBe(false);
+    const names = remote.callTool.mock.calls.map((c: any) => c[0].name);
+    expect(names).toContain("run_tool");
+    expect(names).not.toContain("set_tool_approval");
   });
 
   it("skips the elicitation gate and executes directly in bypassPermissions mode", async () => {
