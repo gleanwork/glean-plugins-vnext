@@ -112,6 +112,46 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     }
   }
 
+  // On a refresh failure the SDK calls invalidateCredentials("tokens"), which
+  // would clear our tokens AND overwrite the shared store with an empty set.
+  // But invalid_grant is exactly what a sibling's refresh-token rotation looks
+  // like: the sibling already minted a fresh grant and wrote it to disk, and we
+  // only failed because we refreshed with the now-revoked old token. In that
+  // case, blindly wiping would (a) force a needless re-auth and (b) poison the
+  // fresh token other sessions depend on. So: if disk holds a token newer than
+  // the one we just failed with, adopt it and return true — the caller keeps it
+  // on disk instead of clearing, and the SDK's post-invalidation retry refreshes
+  // with the fresh token and succeeds. Returns false when there's genuinely
+  // nothing newer to adopt (real invalidation → clear as normal).
+  private adoptNewerTokenFromDisk(): boolean {
+    const diskMtime = credentialsMtimeMs();
+    if (
+      diskMtime === undefined ||
+      this._credentialsMtimeMs === undefined ||
+      diskMtime <= this._credentialsMtimeMs
+    ) {
+      return false;
+    }
+    const stored = loadCredentials();
+    const diskTokens = stored?.tokens as OAuthTokens | undefined;
+    if (
+      !diskTokens?.access_token ||
+      diskTokens.access_token === this._tokens?.access_token
+    ) {
+      return false;
+    }
+    this._tokens = diskTokens;
+    this._credentialsMtimeMs = diskMtime;
+    if (stored?.clientInfo) {
+      this._clientInfo = stored.clientInfo as OAuthClientInformationMixed;
+    }
+    console.error(
+      "[auth] invalid_grant, but a newer token is on disk " +
+        "(sibling refresh) — adopting it instead of clearing",
+    );
+    return true;
+  }
+
   get redirectUrl(): string {
     return getCallbackUrl();
   }
@@ -164,6 +204,9 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
         saveCredentials(this._tokens, undefined);
         break;
       case "tokens":
+        // A refresh failure is usually a sibling's rotation, not a dead session
+        // — adopt any newer on-disk token instead of wiping the shared store.
+        if (this.adoptNewerTokenFromDisk()) return;
         this._tokens = undefined;
         saveCredentials(undefined, this._clientInfo);
         break;

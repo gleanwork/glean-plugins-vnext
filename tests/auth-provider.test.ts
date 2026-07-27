@@ -139,6 +139,47 @@ describe("GleanOAuthClientProvider", () => {
     expect(provider.tokens()?.access_token).toBe("T0");
   });
 
+  it("invalidateCredentials('tokens') adopts a sibling's newer token instead of wiping the store", async () => {
+    fs.mkdirSync(gleanDir, { recursive: true });
+    fs.writeFileSync(
+      credFile,
+      JSON.stringify({
+        tokens: { access_token: "T0", refresh_token: "R0" },
+        clientInfo: { client_id: "cid" },
+      }),
+    );
+    const provider = new GleanOAuthClientProvider();
+    expect(provider.tokens()?.access_token).toBe("T0");
+
+    // A sibling refreshed + rotated: fresh grant now on disk with a newer mtime.
+    writeCredFileNewer(
+      { access_token: "T1", refresh_token: "R1" },
+      { client_id: "cid" },
+    );
+
+    // The SDK calls this on invalid_grant. It must NOT clear — the failure was
+    // just our stale token; adopt the sibling's fresh one and leave it on disk.
+    await provider.invalidateCredentials("tokens");
+
+    expect(provider.tokens()?.access_token).toBe("T1");
+    expect(provider.tokens()?.refresh_token).toBe("R1");
+    const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
+    expect(raw.tokens.access_token).toBe("T1"); // not clobbered with undefined
+  });
+
+  it("invalidateCredentials('tokens') clears when there is no newer token on disk", async () => {
+    const provider = new GleanOAuthClientProvider();
+    provider.saveTokens({ access_token: "T0", refresh_token: "R0" } as any);
+    expect(provider.tokens()?.access_token).toBe("T0");
+
+    // No sibling write since our snapshot → a genuine invalidation → clear.
+    await provider.invalidateCredentials("tokens");
+
+    expect(provider.tokens()).toBeUndefined();
+    const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
+    expect(raw.tokens).toBeUndefined();
+  });
+
   it("saveClientInformation persists to disk", () => {
     const provider = new GleanOAuthClientProvider();
     const info = { client_id: "cid", client_secret: "sec" } as any;
