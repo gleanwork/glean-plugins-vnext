@@ -52,9 +52,8 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   // explicitly invalidating. Used to detect when a previous auth URL didn't
   // complete — likely because the server rejected the (stale) client_id.
   private _authUrlPending = false;
-  // mtime (epoch ms) of the credentials file at the point our in-memory
-  // _tokens/_clientInfo snapshot was last taken from disk. Undefined until the
-  // first successful read. Used to detect sibling rewrites — see syncFromDisk.
+  // mtime of the creds file when we last read it — lets us spot a sibling
+  // process rewriting the shared store. See syncFromDisk.
   private _credentialsMtimeMs: number | undefined;
 
   authorizationUrl: string | undefined;
@@ -76,22 +75,12 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     this._credentialsMtimeMs = credentialsMtimeMs();
   }
 
-  // Re-read the credentials file if it has changed on disk since we last read
-  // it. MCP servers are spawned per session, so several of our processes can be
-  // alive at once sharing one credentials file. When one process refreshes an
-  // (Ory-rotated, single-use) refresh token, it persists the new grant and
-  // silently invalidates the old refresh token that every other process still
-  // holds in memory. Without this, the next process to hit a 401 would refresh
-  // with its now-dead token, get invalid_grant, and force a full re-auth
-  // ([SETUP_REQUIRED]). Syncing here — right before the SDK reads tokens() at
-  // the start of its auth flow — lets us pick up the sibling's fresh grant
-  // instead. Guarded by mtime so the steady state is one stat(), not a re-parse.
-  //
-  // Conservative on removal: if the file is gone (undefined mtime) or has no
-  // tokens, we keep our in-memory snapshot rather than logging ourselves out —
-  // a transient stat failure or another process's explicit logout shouldn't
-  // drop a token that still works for us; a genuinely revoked token self-heals
-  // through the normal 401 path.
+  // Per-session sibling processes share one creds file. When one refreshes, the
+  // rotated single-use refresh token it persists kills the copy every other
+  // process holds in memory. Re-read before the SDK reads tokens() so we use the
+  // sibling's fresh grant, not a dead token that would force re-auth. Stay
+  // conservative on a missing/token-less file — don't evict a token that still
+  // works for us.
   private syncFromDisk(): void {
     const mtimeMs = credentialsMtimeMs();
     if (mtimeMs === undefined) return;
@@ -112,17 +101,11 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     }
   }
 
-  // On a refresh failure the SDK calls invalidateCredentials("tokens"), which
-  // would clear our tokens AND overwrite the shared store with an empty set.
-  // But invalid_grant is exactly what a sibling's refresh-token rotation looks
-  // like: the sibling already minted a fresh grant and wrote it to disk, and we
-  // only failed because we refreshed with the now-revoked old token. In that
-  // case, blindly wiping would (a) force a needless re-auth and (b) poison the
-  // fresh token other sessions depend on. So: if disk holds a token newer than
-  // the one we just failed with, adopt it and return true — the caller keeps it
-  // on disk instead of clearing, and the SDK's post-invalidation retry refreshes
-  // with the fresh token and succeeds. Returns false when there's genuinely
-  // nothing newer to adopt (real invalidation → clear as normal).
+  // invalid_grant is what a sibling's rotation looks like: it already wrote a
+  // fresh grant to disk and we only failed because we used the revoked old
+  // token. Wiping would force a needless re-auth and poison the shared token
+  // other sessions depend on, so adopt a newer on-disk token instead. Returns
+  // false when nothing newer exists (a real invalidation → clear as normal).
   private adoptNewerTokenFromDisk(): boolean {
     const diskMtime = credentialsMtimeMs();
     if (
@@ -204,8 +187,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
         saveCredentials(this._tokens, undefined);
         break;
       case "tokens":
-        // A refresh failure is usually a sibling's rotation, not a dead session
-        // — adopt any newer on-disk token instead of wiping the shared store.
+        // Usually a sibling's rotation, not a dead session — see helper.
         if (this.adoptNewerTokenFromDisk()) return;
         this._tokens = undefined;
         saveCredentials(undefined, this._clientInfo);
