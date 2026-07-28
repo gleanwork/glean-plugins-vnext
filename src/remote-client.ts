@@ -190,13 +190,10 @@ export async function createRemoteClient(
     { capabilities: {} },
   );
 
-  // Snapshot the access token we're about to connect with. Between now and a
-  // possible 401, a sibling per-session server can rotate the (single-use)
-  // refresh token and persist a newer grant. authProvider.tokens() re-reads the
-  // store when it changed on disk, so on auth failure we can tell whether a
-  // fresher token has since appeared and retry once with it — turning a
-  // cross-process rotation race into a silent reconnect instead of a full
-  // re-auth. Bounded to a single retry via authRetry so it can't spin.
+  // Snapshot the token we connect with. A sibling may rotate and persist a newer
+  // grant before we hit a 401; comparing against this on failure lets us retry
+  // once with the fresh token (silent reconnect) instead of forcing re-auth.
+  // authRetry bounds it to one retry.
   const accessTokenAtConnect = authProvider?.tokens()?.access_token;
 
   const transport = buildTransport(serverUrl, opts, chatSessionId);
