@@ -73,7 +73,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   // complete — likely because the server rejected the (stale) client_id.
   private _authUrlPending = false;
   // mtime of the creds file when we last read it — lets us spot a sibling
-  // process rewriting the shared store. See syncFromDisk.
+  // process rewriting the shared store. See syncTokensFromDisk.
   private _credentialsMtimeMs: number | undefined;
 
   authorizationUrl: string | undefined;
@@ -101,7 +101,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   // sibling's fresh grant, not a dead token that would force re-auth. Stay
   // conservative on a missing/token-less file — don't evict a token that still
   // works for us.
-  private syncFromDisk(): void {
+  private syncTokensFromDisk(): void {
     const mtimeMs = credentialsMtimeMs();
     if (mtimeMs === undefined) return;
     if (
@@ -212,7 +212,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   }
 
   tokens(): OAuthTokens | undefined {
-    this.syncFromDisk();
+    this.syncTokensFromDisk();
     return this._tokens;
   }
 
@@ -221,7 +221,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     this._authUrlPending = false;
     saveCredentials(this._tokens, this._clientInfo);
     // Record the mtime of the file we just wrote so our own write doesn't look
-    // like a sibling change on the next syncFromDisk.
+    // like a sibling change on the next syncTokensFromDisk.
     this._credentialsMtimeMs = credentialsMtimeMs();
     this.onTokensChanged?.(tokens);
   }

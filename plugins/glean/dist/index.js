@@ -25461,7 +25461,7 @@ var GleanOAuthClientProvider = class {
   // complete — likely because the server rejected the (stale) client_id.
   _authUrlPending = false;
   // mtime of the creds file when we last read it — lets us spot a sibling
-  // process rewriting the shared store. See syncFromDisk.
+  // process rewriting the shared store. See syncTokensFromDisk.
   _credentialsMtimeMs;
   authorizationUrl;
   /**
@@ -25485,7 +25485,7 @@ var GleanOAuthClientProvider = class {
   // sibling's fresh grant, not a dead token that would force re-auth. Stay
   // conservative on a missing/token-less file — don't evict a token that still
   // works for us.
-  syncFromDisk() {
+  syncTokensFromDisk() {
     const mtimeMs = credentialsMtimeMs();
     if (mtimeMs === void 0) return;
     if (this._credentialsMtimeMs !== void 0 && mtimeMs <= this._credentialsMtimeMs) {
@@ -25575,7 +25575,7 @@ var GleanOAuthClientProvider = class {
     this._credentialsMtimeMs = credentialsMtimeMs();
   }
   tokens() {
-    this.syncFromDisk();
+    this.syncTokensFromDisk();
     return this._tokens;
   }
   saveTokens(tokens) {
