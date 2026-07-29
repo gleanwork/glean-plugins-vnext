@@ -16,6 +16,26 @@ import {
 
 export type InvalidationScope = "all" | "client" | "tokens" | "verifier";
 
+// How long to wait for a sibling's in-flight refresh to land on disk before
+// treating invalid_grant as a real invalidation. The losing side of a
+// rotation race usually sees invalid_grant milliseconds before the winner's
+// write arrives; clearing immediately would poison the shared store.
+const ROTATION_GRACE_MS_DEFAULT = 2000;
+const ROTATION_POLL_MS = 100;
+
+function rotationGraceMs(): number {
+  const raw = process.env.GLEAN_ROTATION_GRACE_MS;
+  if (raw !== undefined) {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return ROTATION_GRACE_MS_DEFAULT;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Open `url` in the user's default browser. Used for the self-open sign-in
  * path when the client does not support URL-mode elicitation (where the client
@@ -135,6 +155,41 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     return true;
   }
 
+  // The losing side of a refresh race often sees invalid_grant milliseconds
+  // BEFORE the winner's write lands on disk. Poll briefly for it instead of
+  // clearing right away — the clear writes {tokens: undefined} to the shared
+  // store, which would poison the winner's fresh grant for every session.
+  // Skipped when we held no refresh token: no refresh was possible, so
+  // there's no race to wait out.
+  private async adoptNewerTokenWithGrace(): Promise<boolean> {
+    if (this.adoptNewerTokenFromDisk()) return true;
+    if (!this._tokens?.refresh_token) return false;
+    const deadline = Date.now() + rotationGraceMs();
+    while (Date.now() < deadline) {
+      await sleep(ROTATION_POLL_MS);
+      if (this.adoptNewerTokenFromDisk()) return true;
+    }
+    return false;
+  }
+
+  // Grace-bounded wait for a sibling's refresh to land on disk. Covers the
+  // collision shapes the SDK does NOT route through invalidateCredentials —
+  // observed live: two concurrent refreshes of the same grant make fosite
+  // return invalid_request (not invalid_grant) to the loser, which surfaces
+  // as a raw connect error. Returns true once a token differing from
+  // `previousAccessToken` is available to retry with.
+  async waitForSiblingRefresh(
+    previousAccessToken: string | undefined,
+  ): Promise<boolean> {
+    const deadline = Date.now() + rotationGraceMs();
+    for (;;) {
+      const current = this.tokens()?.access_token;
+      if (current && current !== previousAccessToken) return true;
+      if (Date.now() >= deadline) return false;
+      await sleep(ROTATION_POLL_MS);
+    }
+  }
+
   get redirectUrl(): string {
     return getCallbackUrl();
   }
@@ -187,8 +242,10 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
         saveCredentials(this._tokens, undefined);
         break;
       case "tokens":
-        // Usually a sibling's rotation, not a dead session — see helper.
-        if (this.adoptNewerTokenFromDisk()) return;
+        // Usually a sibling's rotation, not a dead session — see helpers.
+        // Waits out an in-flight sibling refresh before the destructive
+        // clear.
+        if (await this.adoptNewerTokenWithGrace()) return;
         this._tokens = undefined;
         saveCredentials(undefined, this._clientInfo);
         break;

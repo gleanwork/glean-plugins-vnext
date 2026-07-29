@@ -28,11 +28,15 @@ describe("GleanOAuthClientProvider", () => {
 
   beforeEach(() => {
     delete process.env.PLUGIN_DATA_DIR;
+    // Skip the rotation grace window by default so invalidation tests don't
+    // wait out the real 2s poll; the grace test overrides this explicitly.
+    process.env.GLEAN_ROTATION_GRACE_MS = "0";
     fs.rmSync(gleanDir, { recursive: true, force: true });
     vi.clearAllMocks();
   });
 
   afterEach(() => {
+    delete process.env.GLEAN_ROTATION_GRACE_MS;
     fs.rmSync(gleanDir, { recursive: true, force: true });
   });
 
@@ -178,6 +182,41 @@ describe("GleanOAuthClientProvider", () => {
     expect(provider.tokens()).toBeUndefined();
     const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
     expect(raw.tokens).toBeUndefined();
+  });
+
+  it("invalidateCredentials('tokens') adopts a token that lands during the grace window", async () => {
+    // The losing side of a rotation race sees invalid_grant milliseconds
+    // BEFORE the winner writes its fresh grant — the grace poll must catch
+    // the late write instead of clearing the shared store.
+    process.env.GLEAN_ROTATION_GRACE_MS = "2000";
+    const provider = new GleanOAuthClientProvider();
+    provider.saveTokens({ access_token: "T0", refresh_token: "R0" } as any);
+
+    const invalidation = provider.invalidateCredentials("tokens");
+    // Sibling's write lands mid-window.
+    setTimeout(() => {
+      writeCredFileNewer(
+        { access_token: "T1", refresh_token: "R1" },
+        { client_id: "cid" },
+      );
+    }, 150);
+    await invalidation;
+
+    expect(provider.tokens()?.access_token).toBe("T1");
+    const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
+    expect(raw.tokens.access_token).toBe("T1"); // not clobbered with undefined
+  });
+
+  it("skips the grace window when no refresh token was held (no race possible)", async () => {
+    process.env.GLEAN_ROTATION_GRACE_MS = "5000";
+    const provider = new GleanOAuthClientProvider();
+    provider.saveTokens({ access_token: "T0" } as any); // no refresh_token
+
+    const start = Date.now();
+    await provider.invalidateCredentials("tokens");
+
+    expect(Date.now() - start).toBeLessThan(1000); // no 5s poll
+    expect(provider.tokens()).toBeUndefined();
   });
 
   it("saveClientInformation persists to disk", () => {

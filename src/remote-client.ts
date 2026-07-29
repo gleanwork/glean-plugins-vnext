@@ -219,10 +219,34 @@ export async function createRemoteClient(
         throw new AuthRequiredError(authProvider.authorizationUrl);
       }
     }
+    // Concurrent refreshes of the same grant: fosite fails the loser with
+    // invalid_request (observed live), which the SDK rethrows as a raw error
+    // without touching invalidateCredentials. If a sibling's fresh grant
+    // lands on disk within the grace window, retry with it instead of
+    // surfacing the error.
+    if (
+      authProvider &&
+      !authRetry &&
+      isLikelyRefreshFailure(error) &&
+      (await authProvider.waitForSiblingRefresh(accessTokenAtConnect))
+    ) {
+      console.error(
+        "[auth] Refresh failed but a sibling refreshed — retrying with its token",
+      );
+      return createRemoteClient(serverUrl, opts, chatSessionId, true);
+    }
     throw error;
   }
 
   return client;
+}
+
+// Token-refresh failures reach us as OAuth protocol errors whose shapes vary
+// by server and race timing — match broadly; the disk re-check in the caller
+// is what actually gates the retry.
+function isLikelyRefreshFailure(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /refresh|invalid_grant|invalid_request|oauth/i.test(msg);
 }
 
 export async function callRemoteTool(
