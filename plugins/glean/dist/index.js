@@ -25262,9 +25262,19 @@ async function createRemoteClient(serverUrl, opts, chatSessionId, authRetry = fa
         throw new AuthRequiredError(authProvider.authorizationUrl);
       }
     }
+    if (authProvider && !authRetry && isLikelyRefreshFailure(error2) && await authProvider.waitForSiblingRefresh(accessTokenAtConnect)) {
+      console.error(
+        "[auth] Refresh failed but a sibling refreshed \u2014 retrying with its token"
+      );
+      return createRemoteClient(serverUrl, opts, chatSessionId, true);
+    }
     throw error2;
   }
   return client;
+}
+function isLikelyRefreshFailure(error2) {
+  const msg = error2 instanceof Error ? error2.message : String(error2);
+  return /refresh|invalid_grant|invalid_request|oauth/i.test(msg);
 }
 async function callRemoteTool(client, name, args) {
   const result = await client.callTool({ name, arguments: args }, void 0, {
@@ -25395,11 +25405,12 @@ function saveCredentials(tokens, clientInfo) {
     fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
     fs.chmodSync(dir, DIR_MODE);
     const data = { tokens, clientInfo };
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), {
+    const tmpPath = `${filePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), {
       encoding: "utf-8",
       mode: FILE_MODE
     });
-    fs.chmodSync(filePath, FILE_MODE);
+    fs.renameSync(tmpPath, filePath);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[auth] Failed to persist credentials: ${msg}`);
@@ -25415,6 +25426,19 @@ function clearCredentials() {
 }
 
 // src/auth-provider.ts
+var ROTATION_GRACE_MS_DEFAULT = 2e3;
+var ROTATION_POLL_MS = 100;
+function rotationGraceMs() {
+  const raw = process.env.GLEAN_ROTATION_GRACE_MS;
+  if (raw !== void 0) {
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
+  }
+  return ROTATION_GRACE_MS_DEFAULT;
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 function openBrowser(url2) {
   if (platform() === "win32") {
     spawn("cmd", ["/c", "start", '""', "/b", url2.replace(/&/g, "^&")], {
@@ -25502,6 +25526,37 @@ var GleanOAuthClientProvider = class {
     );
     return true;
   }
+  // The losing side of a refresh race often sees invalid_grant milliseconds
+  // BEFORE the winner's write lands on disk. Poll briefly for it instead of
+  // clearing right away — the clear writes {tokens: undefined} to the shared
+  // store, which would poison the winner's fresh grant for every session.
+  // Skipped when we held no refresh token: no refresh was possible, so
+  // there's no race to wait out.
+  async adoptNewerTokenWithGrace() {
+    if (this.adoptNewerTokenFromDisk()) return true;
+    if (!this._tokens?.refresh_token) return false;
+    const deadline = Date.now() + rotationGraceMs();
+    while (Date.now() < deadline) {
+      await sleep(ROTATION_POLL_MS);
+      if (this.adoptNewerTokenFromDisk()) return true;
+    }
+    return false;
+  }
+  // Grace-bounded wait for a sibling's refresh to land on disk. Covers the
+  // collision shapes the SDK does NOT route through invalidateCredentials —
+  // observed live: two concurrent refreshes of the same grant make fosite
+  // return invalid_request (not invalid_grant) to the loser, which surfaces
+  // as a raw connect error. Returns true once a token differing from
+  // `previousAccessToken` is available to retry with.
+  async waitForSiblingRefresh(previousAccessToken) {
+    const deadline = Date.now() + rotationGraceMs();
+    for (; ; ) {
+      const current = this.tokens()?.access_token;
+      if (current && current !== previousAccessToken) return true;
+      if (Date.now() >= deadline) return false;
+      await sleep(ROTATION_POLL_MS);
+    }
+  }
   get redirectUrl() {
     return getCallbackUrl();
   }
@@ -25546,7 +25601,7 @@ var GleanOAuthClientProvider = class {
         saveCredentials(this._tokens, void 0);
         break;
       case "tokens":
-        if (this.adoptNewerTokenFromDisk()) return;
+        if (await this.adoptNewerTokenWithGrace()) return;
         this._tokens = void 0;
         saveCredentials(void 0, this._clientInfo);
         break;

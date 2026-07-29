@@ -51,11 +51,16 @@ export function saveCredentials(tokens: unknown, clientInfo: unknown): void {
     fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
     fs.chmodSync(dir, DIR_MODE);
     const data: StoredCredentials = { tokens, clientInfo };
-    fs.writeFileSync(filePath, JSON.stringify(data, null, 2), {
+    // Write-temp-then-rename: the store is shared by concurrent sibling
+    // processes, and an in-place write could be read half-written — a parse
+    // failure that masquerades as a wiped store. Rename is atomic, so readers
+    // only ever see a complete old or complete new file.
+    const tmpPath = `${filePath}.${process.pid}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), {
       encoding: "utf-8",
       mode: FILE_MODE,
     });
-    fs.chmodSync(filePath, FILE_MODE);
+    fs.renameSync(tmpPath, filePath);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[auth] Failed to persist credentials: ${msg}`);
