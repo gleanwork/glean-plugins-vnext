@@ -90,6 +90,51 @@ describe("createRemoteClient sibling-refresh retry", () => {
   });
 });
 
+describe("createRemoteClient abandoned sign-in client reuse", () => {
+  beforeEach(() => {
+    connectMock.mockReset();
+  });
+
+  function makeAbandonedProvider(budgetLeft: boolean) {
+    return {
+      tokens: () => ({ access_token: "T0" }),
+      authorizationUrl: undefined,
+      pendingAuthCode: undefined,
+      needsFreshClient: () => true,
+      abandonPendingSignIn: vi.fn(() => budgetLeft),
+      invalidateCredentials: vi.fn(),
+    } as any;
+  }
+
+  it("reuses the existing client on the first abandoned sign-in", async () => {
+    connectMock.mockResolvedValueOnce(undefined);
+    const provider = makeAbandonedProvider(true);
+
+    await createRemoteClient(
+      "https://acme-be.glean.com/mcp/gateway/proxy",
+      { authProvider: provider },
+      "sess-3",
+    );
+
+    expect(provider.abandonPendingSignIn).toHaveBeenCalledTimes(1);
+    // The registration survives — no wipe, no fresh DCR.
+    expect(provider.invalidateCredentials).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a fresh DCR once the retry budget is exhausted", async () => {
+    connectMock.mockResolvedValueOnce(undefined);
+    const provider = makeAbandonedProvider(false);
+
+    await createRemoteClient(
+      "https://acme-be.glean.com/mcp/gateway/proxy",
+      { authProvider: provider },
+      "sess-4",
+    );
+
+    expect(provider.invalidateCredentials).toHaveBeenCalledWith("all");
+  });
+});
+
 describe("createRemoteClient refresh-collision retry", () => {
   beforeEach(() => {
     connectMock.mockReset();

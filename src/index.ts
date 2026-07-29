@@ -795,6 +795,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
+        const previousUrl = loadServerUrl();
         try {
           saveServerUrl(normalized);
         } catch (err) {
@@ -807,14 +808,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        // New instance — clear stale auth state. The on-disk remote-tool
-        // cache for the previous URL is left intact (so switching back is
-        // instant); we just rehydrate from whatever cache exists for the
-        // newly configured URL — empty for a first-time server.
-        clearCredentials();
-        oauthProvider = undefined;
+        // Only wipe auth state when actually switching instances — a same-URL
+        // re-setup must keep the DCR client. Old URL's tool cache is kept.
+        const urlChanged = previousUrl !== normalized;
+        if (urlChanged) {
+          clearCredentials();
+          oauthProvider = undefined;
+        }
         cachedRemoteTools = loadRemoteTools(normalized);
-        logLine("setup.configured", { serverUrl: normalized });
+        logLine("setup.configured", { serverUrl: normalized, urlChanged });
         // Fall through to advanceSetup, which will now find URL ✓ and try
         // to drive auth + tool fetch in the same call.
       }

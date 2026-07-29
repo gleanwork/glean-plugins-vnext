@@ -25230,15 +25230,24 @@ async function createRemoteClient(serverUrl, opts, chatSessionId, authRetry = fa
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[auth] Code exchange failed: ${msg} \u2014 discarding stale auth state`);
-      authProvider.clearPendingAuth();
       pendingTransport = void 0;
-      await authProvider.invalidateCredentials("all");
+      if (!authProvider.abandonPendingSignIn()) {
+        await authProvider.invalidateCredentials("all");
+      }
       return createRemoteClient(serverUrl, opts, chatSessionId);
     }
   }
   if (authProvider?.needsFreshClient()) {
-    console.error("[auth] Previous auth URL didn't complete \u2014 forcing fresh DCR");
-    await authProvider.invalidateCredentials("all");
+    if (authProvider.abandonPendingSignIn()) {
+      console.error(
+        "[auth] Previous sign-in didn't complete \u2014 retrying with the existing client"
+      );
+    } else {
+      console.error(
+        "[auth] Sign-in failed twice with this client \u2014 forcing fresh DCR"
+      );
+      await authProvider.invalidateCredentials("all");
+    }
   }
   const client = new Client(
     { name: "glean", version: "1.0.0" },
@@ -25462,6 +25471,8 @@ var GleanOAuthClientProvider = class {
   _authUrlPending = false;
   // mtime at last read; detects sibling rewrites of the shared store.
   _credentialsMtimeMs;
+  // Consecutive abandoned sign-ins with the current client.
+  _abandonedSignIns = 0;
   authorizationUrl;
   /**
    * Optional hook invoked whenever the in-memory token state changes —
@@ -25551,9 +25562,11 @@ var GleanOAuthClientProvider = class {
     };
   }
   clientInformation() {
+    this.syncTokensFromDisk();
     return this._clientInfo;
   }
   saveClientInformation(info) {
+    console.error(`[auth] Registered OAuth client: ${info.client_id}`);
     this._clientInfo = info;
     saveCredentials(this._tokens, this._clientInfo);
     this._credentialsMtimeMs = credentialsMtimeMs();
@@ -25565,6 +25578,7 @@ var GleanOAuthClientProvider = class {
   saveTokens(tokens) {
     this._tokens = tokens;
     this._authUrlPending = false;
+    this._abandonedSignIns = 0;
     saveCredentials(this._tokens, this._clientInfo);
     this._credentialsMtimeMs = credentialsMtimeMs();
     this.onTokensChanged?.(tokens);
@@ -25578,6 +25592,7 @@ var GleanOAuthClientProvider = class {
         this._clientInfo = void 0;
         this._codeVerifier = "";
         this._authUrlPending = false;
+        this._abandonedSignIns = 0;
         clearCredentials();
         break;
       case "client":
@@ -25601,6 +25616,16 @@ var GleanOAuthClientProvider = class {
   // implying the URL was likely rejected by the server (e.g. stale client_id).
   needsFreshClient() {
     return this._authUrlPending && !this._tokens?.access_token && this._pendingAuthCode === void 0;
+  }
+  // Abandoned sign-in: keep the client and clear the pending flow. Returns
+  // false after two consecutive failures (client likely dead → re-register).
+  abandonPendingSignIn() {
+    this._abandonedSignIns += 1;
+    this._codeVerifier = "";
+    this._pendingAuthCode = void 0;
+    this.authorizationUrl = void 0;
+    this._authUrlPending = false;
+    return this._abandonedSignIns < 2;
   }
   get pendingAuthCode() {
     return this._pendingAuthCode;
@@ -26943,6 +26968,7 @@ ${EMAIL_RESOLVE_FAILED_TEXT}`
             isError: true
           };
         }
+        const previousUrl = loadServerUrl();
         try {
           saveServerUrl(normalized);
         } catch (err) {
@@ -26954,10 +26980,13 @@ ${EMAIL_RESOLVE_FAILED_TEXT}`
             isError: true
           };
         }
-        clearCredentials();
-        oauthProvider = void 0;
+        const urlChanged = previousUrl !== normalized;
+        if (urlChanged) {
+          clearCredentials();
+          oauthProvider = void 0;
+        }
         cachedRemoteTools = loadRemoteTools(normalized);
-        logLine("setup.configured", { serverUrl: normalized });
+        logLine("setup.configured", { serverUrl: normalized, urlChanged });
       }
       return await advanceSetup();
     }

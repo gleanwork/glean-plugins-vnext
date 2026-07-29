@@ -71,6 +71,8 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   private _authUrlPending = false;
   // mtime at last read; detects sibling rewrites of the shared store.
   private _credentialsMtimeMs: number | undefined;
+  // Consecutive abandoned sign-ins with the current client.
+  private _abandonedSignIns = 0;
 
   authorizationUrl: string | undefined;
 
@@ -183,10 +185,13 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   }
 
   clientInformation(): OAuthClientInformationMixed | undefined {
+    // Pick up a sibling's registration; the SDK registers whenever this is undefined.
+    this.syncTokensFromDisk();
     return this._clientInfo;
   }
 
   saveClientInformation(info: OAuthClientInformationMixed): void {
+    console.error(`[auth] Registered OAuth client: ${info.client_id}`);
     this._clientInfo = info;
     saveCredentials(this._tokens, this._clientInfo);
     this._credentialsMtimeMs = credentialsMtimeMs();
@@ -200,6 +205,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   saveTokens(tokens: OAuthTokens): void {
     this._tokens = tokens;
     this._authUrlPending = false;
+    this._abandonedSignIns = 0;
     saveCredentials(this._tokens, this._clientInfo);
     // Own write must not look like a sibling change.
     this._credentialsMtimeMs = credentialsMtimeMs();
@@ -215,6 +221,8 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
         this._clientInfo = undefined;
         this._codeVerifier = "";
         this._authUrlPending = false;
+        // Fresh client → fresh retry budget.
+        this._abandonedSignIns = 0;
         clearCredentials();
         break;
       case "client":
@@ -247,6 +255,17 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
       !this._tokens?.access_token &&
       this._pendingAuthCode === undefined
     );
+  }
+
+  // Abandoned sign-in: keep the client and clear the pending flow. Returns
+  // false after two consecutive failures (client likely dead → re-register).
+  abandonPendingSignIn(): boolean {
+    this._abandonedSignIns += 1;
+    this._codeVerifier = "";
+    this._pendingAuthCode = undefined;
+    this.authorizationUrl = undefined;
+    this._authUrlPending = false;
+    return this._abandonedSignIns < 2;
   }
 
   get pendingAuthCode(): string | undefined {

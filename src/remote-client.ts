@@ -169,20 +169,29 @@ export async function createRemoteClient(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[auth] Code exchange failed: ${msg} — discarding stale auth state`);
-      authProvider.clearPendingAuth();
       pendingTransport = undefined;
-      await authProvider.invalidateCredentials("all");
+      // Exchange failures are about the code/verifier, not the client — keep
+      // the registration; repeat failure escalates to a fresh DCR.
+      if (!authProvider.abandonPendingSignIn()) {
+        await authProvider.invalidateCredentials("all");
+      }
       return createRemoteClient(serverUrl, opts, chatSessionId);
     }
   }
 
-  // DCR recovery: we previously issued an authorize URL but never received
-  // tokens. The URL was likely rejected by the server (most commonly: the
-  // cached DCR client was deleted server-side). Force a fresh DCR so the next
-  // URL we generate uses a valid, server-known client_id.
+  // Unfinished sign-in: reuse the existing registration first; fresh DCR is
+  // the escalation path.
   if (authProvider?.needsFreshClient()) {
-    console.error("[auth] Previous auth URL didn't complete — forcing fresh DCR");
-    await authProvider.invalidateCredentials("all");
+    if (authProvider.abandonPendingSignIn()) {
+      console.error(
+        "[auth] Previous sign-in didn't complete — retrying with the existing client",
+      );
+    } else {
+      console.error(
+        "[auth] Sign-in failed twice with this client — forcing fresh DCR",
+      );
+      await authProvider.invalidateCredentials("all");
+    }
   }
 
   const client = new Client(
