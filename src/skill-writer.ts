@@ -126,7 +126,11 @@ export function formatAvailableSkillsPrompt(index: SkillIndex[]): string {
   }
 
   const skillEntries = index.map((entry) => {
-    const skillMd = entry.files.find((f) => f.endsWith("/SKILL.md"));
+    // Match SKILL.md under either path separator: writeSkillsToDisk stores
+    // paths with the OS separator, so a hardcoded "/" drops the reference on
+    // Windows (where stored paths use "\"), leaving the model without a pointer
+    // to the skill's instructions.
+    const skillMd = entry.files.find((f) => /(?:^|[\\/])SKILL\.md$/.test(f));
     const fileLines = skillMd
       ? `\n      <file path="${escapeXml(skillMd)}" />\n    `
       : "";

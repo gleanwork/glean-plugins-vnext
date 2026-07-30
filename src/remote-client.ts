@@ -112,6 +112,28 @@ export class AuthRequiredError extends Error {
 
 let pendingTransport: StreamableHTTPClientTransport | undefined;
 
+// Serialize the SDK operations that can drive an OAuth token refresh
+// (client.connect and finishAuth). getOAuthProvider() is a process-wide
+// singleton reused by every handler (tools/list, find_skills, run_tool), and
+// the stdio server does not serialize handlers. Two concurrent connects with an
+// expired-but-present access token would each invoke the SDK refresh with the
+// same refresh_token; if the auth server rotates refresh tokens, the first
+// succeeds and persists new tokens while the second presents the now-consumed
+// token, gets invalid_grant, and the SDK calls invalidateCredentials("tokens")
+// — wiping the freshly saved tokens and forcing re-auth. A single in-flight
+// lock means the second connect runs only after the first has saved fresh
+// tokens, so it reads valid tokens and skips the refresh.
+let connectLock: Promise<unknown> = Promise.resolve();
+function withConnectLock<T>(fn: () => Promise<T>): Promise<T> {
+  const result = connectLock.then(fn, fn);
+  // Keep the chain alive regardless of outcome without leaking rejections.
+  connectLock = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
 function buildTransport(
   serverUrl: string,
   opts: RemoteClientOptions,
@@ -160,7 +182,9 @@ export async function createRemoteClient(
       pendingTransport ?? buildTransport(serverUrl, opts, chatSessionId);
     console.error("[auth] Auth code received, exchanging for tokens...");
     try {
-      await transportForAuth.finishAuth(authProvider.pendingAuthCode);
+      await withConnectLock(() =>
+        transportForAuth.finishAuth(authProvider.pendingAuthCode!),
+      );
       authProvider.clearPendingAuth();
       pendingTransport = undefined;
       console.error("[auth] Token exchange complete, reconnecting...");
@@ -192,7 +216,7 @@ export async function createRemoteClient(
   const transport = buildTransport(serverUrl, opts, chatSessionId);
 
   try {
-    await client.connect(transport);
+    await withConnectLock(() => client.connect(transport));
   } catch (error) {
     if (error instanceof UnauthorizedError && authProvider?.authorizationUrl) {
       pendingTransport = transport;

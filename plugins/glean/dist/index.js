@@ -25197,6 +25197,15 @@ var AuthRequiredError = class extends Error {
   authUrl;
 };
 var pendingTransport;
+var connectLock = Promise.resolve();
+function withConnectLock(fn) {
+  const result = connectLock.then(fn, fn);
+  connectLock = result.then(
+    () => void 0,
+    () => void 0
+  );
+  return result;
+}
 function buildTransport(serverUrl, opts, chatSessionId) {
   const parsedUrl = new URL(serverUrl);
   const headers = {
@@ -25222,7 +25231,9 @@ async function createRemoteClient(serverUrl, opts, chatSessionId) {
     const transportForAuth = pendingTransport ?? buildTransport(serverUrl, opts, chatSessionId);
     console.error("[auth] Auth code received, exchanging for tokens...");
     try {
-      await transportForAuth.finishAuth(authProvider.pendingAuthCode);
+      await withConnectLock(
+        () => transportForAuth.finishAuth(authProvider.pendingAuthCode)
+      );
       authProvider.clearPendingAuth();
       pendingTransport = void 0;
       console.error("[auth] Token exchange complete, reconnecting...");
@@ -25246,7 +25257,7 @@ async function createRemoteClient(serverUrl, opts, chatSessionId) {
   );
   const transport = buildTransport(serverUrl, opts, chatSessionId);
   try {
-    await client.connect(transport);
+    await withConnectLock(() => client.connect(transport));
   } catch (error2) {
     if (error2 instanceof UnauthorizedError && authProvider?.authorizationUrl) {
       pendingTransport = transport;
@@ -25268,6 +25279,7 @@ async function callRemoteTool(client, name, args) {
 
 // src/auth-provider.ts
 import { execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { platform } from "node:os";
 
 // src/auth-callback-server.ts
@@ -25508,6 +25520,9 @@ var GleanOAuthClientProvider = class {
   // propagates out as AuthRequiredError) and hand the loopback server the
   // `state` value to validate the redirect against.
   async redirectToAuthorization(authorizationUrl) {
+    if (!authorizationUrl.searchParams.get("state")) {
+      authorizationUrl.searchParams.set("state", randomUUID());
+    }
     this.authorizationUrl = authorizationUrl.toString();
     this._authUrlPending = true;
     setExpectedState(authorizationUrl.searchParams.get("state") ?? void 0);
@@ -25617,7 +25632,7 @@ function formatAvailableSkillsPrompt(index) {
     return "<available_skills />";
   }
   const skillEntries = index.map((entry) => {
-    const skillMd = entry.files.find((f) => f.endsWith("/SKILL.md"));
+    const skillMd = entry.files.find((f) => /(?:^|[\\/])SKILL\.md$/.test(f));
     const fileLines = skillMd ? `
       <file path="${escapeXml(skillMd)}" />
     ` : "";
@@ -25675,7 +25690,7 @@ import path3 from "node:path";
 import os from "node:os";
 
 // src/session-id.ts
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 var fallbackSessionId;
 function resolveSessionId() {
   const fromHost = process.env.GLEAN_SESSION_ID?.trim();
@@ -25683,7 +25698,7 @@ function resolveSessionId() {
     return fromHost;
   }
   if (!fallbackSessionId) {
-    fallbackSessionId = randomUUID();
+    fallbackSessionId = randomUUID2();
   }
   return fallbackSessionId;
 }
@@ -25721,7 +25736,8 @@ function compactArgLine(key, value) {
   } else {
     rendered = String(value);
   }
-  return { line: `${key.toUpperCase()}: ${rendered}`, truncated };
+  const safeKey = key.replace(/\s+/g, " ").trim().toUpperCase();
+  return { line: `${safeKey}: ${rendered}`, truncated };
 }
 function buildCompactArgs(args) {
   if (isEmptyArgs(args)) {
@@ -25734,9 +25750,18 @@ function buildCompactArgs(args) {
   const entries = Object.entries(args);
   const rendered = entries.map(([key, value]) => compactArgLine(key, value));
   const anyTruncated = rendered.some((r) => r.truncated);
-  const needsFile = entries.length > maxArgSectionLines || anyTruncated;
-  const inlineCount = needsFile ? maxArgSectionLines - 1 : maxArgSectionLines;
+  const fileReserve = entries.length > maxArgSectionLines || anyTruncated ? 1 : 0;
+  const capacity = maxArgSectionLines - fileReserve;
+  const willOmit = entries.length > capacity;
+  const inlineCount = willOmit ? capacity - 1 : capacity;
   const lines = rendered.slice(0, inlineCount).map((r) => r.line);
+  const omitted = entries.length - lines.length;
+  if (omitted > 0) {
+    lines.push(
+      `(+${omitted} more argument${omitted === 1 ? "" : "s"} \u2014 see full arguments file)`
+    );
+  }
+  const needsFile = omitted > 0 || anyTruncated;
   return { lines, needsFile };
 }
 function formatArgumentsForFile(toolName, args) {
@@ -25956,7 +25981,8 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
     throw err;
   }
   const hitlEnabled = process.env.ENABLE_HITL === "true";
-  if (hitlEnabled && toolMeta?.requires_approval && !isCursorClient(mcpServer) && mcpServer.getClientCapabilities()?.elicitation) {
+  const requiresApproval = typeof toolMeta?.requires_approval === "boolean" ? toolMeta.requires_approval : true;
+  if (hitlEnabled && requiresApproval && !isCursorClient(mcpServer) && mcpServer.getClientCapabilities()?.elicitation) {
     const bypass = await currentPermissionMode() === "bypassPermissions";
     if (!bypass) {
       const message = await buildApprovalMessage(
