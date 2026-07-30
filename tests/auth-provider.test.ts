@@ -78,9 +78,7 @@ describe("GleanOAuthClientProvider", () => {
     expect(raw.tokens.access_token).toBe("new_tok");
   });
 
-  // --- Cross-process sync: a per-session sibling server may rotate the
-  // refresh token and rewrite the shared store; tokens() must pick that up
-  // instead of serving the stale startup snapshot. ---
+  // --- Cross-process sync: tokens() must pick up a sibling's rewrite. ---
 
   const credFile = path.join(gleanDir, "mcp-credentials.json");
 
@@ -185,9 +183,7 @@ describe("GleanOAuthClientProvider", () => {
   });
 
   it("invalidateCredentials('tokens') adopts a token that lands during the grace window", async () => {
-    // The losing side of a rotation race sees invalid_grant milliseconds
-    // BEFORE the winner writes its fresh grant — the grace poll must catch
-    // the late write instead of clearing the shared store.
+    // The winner's write lands just after the loser's invalid_grant.
     process.env.GLEAN_ROTATION_GRACE_MS = "2000";
     const provider = new GleanOAuthClientProvider();
     provider.saveTokens({ access_token: "T0", refresh_token: "R0" } as any);

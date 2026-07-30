@@ -190,10 +190,7 @@ export async function createRemoteClient(
     { capabilities: {} },
   );
 
-  // Snapshot the token we connect with. A sibling may rotate and persist a newer
-  // grant before we hit a 401; comparing against this on failure lets us retry
-  // once with the fresh token (silent reconnect) instead of forcing re-auth.
-  // authRetry bounds it to one retry.
+  // Snapshot to detect a sibling's refresh between connect and failure.
   const accessTokenAtConnect = authProvider?.tokens()?.access_token;
 
   const transport = buildTransport(serverUrl, opts, chatSessionId);
@@ -219,11 +216,8 @@ export async function createRemoteClient(
         throw new AuthRequiredError(authProvider.authorizationUrl);
       }
     }
-    // Concurrent refreshes of the same grant: fosite fails the loser with
-    // invalid_request (observed live), which the SDK rethrows as a raw error
-    // without touching invalidateCredentials. If a sibling's fresh grant
-    // lands on disk within the grace window, retry with it instead of
-    // surfacing the error.
+    // Concurrent-refresh losers get errors the SDK rethrows raw (e.g. fosite
+    // invalid_request); retry once if a sibling's grant lands in the grace window.
     if (
       authProvider &&
       !authRetry &&
@@ -241,9 +235,7 @@ export async function createRemoteClient(
   return client;
 }
 
-// Token-refresh failures reach us as OAuth protocol errors whose shapes vary
-// by server and race timing — match broadly; the disk re-check in the caller
-// is what actually gates the retry.
+// Match broadly; the caller's disk re-check gates the actual retry.
 function isLikelyRefreshFailure(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
   return /refresh|invalid_grant|invalid_request|oauth/i.test(msg);

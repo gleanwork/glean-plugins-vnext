@@ -16,10 +16,7 @@ import {
 
 export type InvalidationScope = "all" | "client" | "tokens" | "verifier";
 
-// How long to wait for a sibling's in-flight refresh to land on disk before
-// treating invalid_grant as a real invalidation. The losing side of a
-// rotation race usually sees invalid_grant milliseconds before the winner's
-// write arrives; clearing immediately would poison the shared store.
+// Grace window for a sibling's in-flight refresh to land on disk.
 const ROTATION_GRACE_MS_DEFAULT = 2000;
 const ROTATION_POLL_MS = 100;
 
@@ -72,8 +69,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   // explicitly invalidating. Used to detect when a previous auth URL didn't
   // complete — likely because the server rejected the (stale) client_id.
   private _authUrlPending = false;
-  // mtime of the creds file when we last read it — lets us spot a sibling
-  // process rewriting the shared store. See syncTokensFromDisk.
+  // mtime at last read; detects sibling rewrites of the shared store.
   private _credentialsMtimeMs: number | undefined;
 
   authorizationUrl: string | undefined;
@@ -95,12 +91,8 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     this._credentialsMtimeMs = credentialsMtimeMs();
   }
 
-  // Per-session sibling processes share one creds file. When one refreshes, the
-  // rotated single-use refresh token it persists kills the copy every other
-  // process holds in memory. Re-read before the SDK reads tokens() so we use the
-  // sibling's fresh grant, not a dead token that would force re-auth. Stay
-  // conservative on a missing/token-less file — don't evict a token that still
-  // works for us.
+  // Re-read the shared store after a sibling process rewrites it, so we use
+  // the rotated grant instead of a stale in-memory copy.
   private syncTokensFromDisk(): void {
     const mtimeMs = credentialsMtimeMs();
     if (mtimeMs === undefined) return;
@@ -121,11 +113,8 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     }
   }
 
-  // invalid_grant is what a sibling's rotation looks like: it already wrote a
-  // fresh grant to disk and we only failed because we used the revoked old
-  // token. Wiping would force a needless re-auth and poison the shared token
-  // other sessions depend on, so adopt a newer on-disk token instead. Returns
-  // false when nothing newer exists (a real invalidation → clear as normal).
+  // On invalid_grant, adopt a sibling's newer on-disk token instead of
+  // clearing. Returns false when nothing newer exists.
   private adoptNewerTokenFromDisk(): boolean {
     const diskMtime = credentialsMtimeMs();
     if (
@@ -155,12 +144,8 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     return true;
   }
 
-  // The losing side of a refresh race often sees invalid_grant milliseconds
-  // BEFORE the winner's write lands on disk. Poll briefly for it instead of
-  // clearing right away — the clear writes {tokens: undefined} to the shared
-  // store, which would poison the winner's fresh grant for every session.
-  // Skipped when we held no refresh token: no refresh was possible, so
-  // there's no race to wait out.
+  // Poll briefly for the race winner's write before clearing. Skipped when
+  // no refresh token was held (no race possible).
   private async adoptNewerTokenWithGrace(): Promise<boolean> {
     if (this.adoptNewerTokenFromDisk()) return true;
     if (!this._tokens?.refresh_token) return false;
@@ -172,12 +157,8 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     return false;
   }
 
-  // Grace-bounded wait for a sibling's refresh to land on disk. Covers the
-  // collision shapes the SDK does NOT route through invalidateCredentials —
-  // observed live: two concurrent refreshes of the same grant make fosite
-  // return invalid_request (not invalid_grant) to the loser, which surfaces
-  // as a raw connect error. Returns true once a token differing from
-  // `previousAccessToken` is available to retry with.
+  // Grace-bounded wait for a sibling's refresh; covers failures the SDK does
+  // not route through invalidateCredentials (e.g. invalid_request collisions).
   async waitForSiblingRefresh(
     previousAccessToken: string | undefined,
   ): Promise<boolean> {
@@ -220,8 +201,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     this._tokens = tokens;
     this._authUrlPending = false;
     saveCredentials(this._tokens, this._clientInfo);
-    // Record the mtime of the file we just wrote so our own write doesn't look
-    // like a sibling change on the next syncTokensFromDisk.
+    // Own write must not look like a sibling change.
     this._credentialsMtimeMs = credentialsMtimeMs();
     this.onTokensChanged?.(tokens);
   }
@@ -242,9 +222,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
         saveCredentials(this._tokens, undefined);
         break;
       case "tokens":
-        // Usually a sibling's rotation, not a dead session — see helpers.
-        // Waits out an in-flight sibling refresh before the destructive
-        // clear.
+        // Usually a sibling's rotation — try adopting before clearing.
         if (await this.adoptNewerTokenWithGrace()) return;
         this._tokens = undefined;
         saveCredentials(undefined, this._clientInfo);
