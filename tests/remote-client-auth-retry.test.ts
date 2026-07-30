@@ -95,9 +95,7 @@ describe("createRemoteClient refresh-collision retry", () => {
     connectMock.mockReset();
   });
 
-  // The tight race: fosite fails the losing refresh with invalid_request,
-  // which the SDK rethrows as a raw error (never touching
-  // invalidateCredentials). Verified live on prod /oauth (2026-07-29).
+  // Fosite fails concurrent-refresh losers with invalid_request (SDK rethrows raw).
   const collisionError = new Error(
     "The request is missing a required parameter, includes an invalid " +
       "parameter value, includes a parameter more than once, or is " +
