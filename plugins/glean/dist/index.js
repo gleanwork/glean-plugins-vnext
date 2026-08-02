@@ -26770,6 +26770,15 @@ function sameOrigin(a, b) {
   }
 }
 
+// src/server-url.ts
+var MCP_GATEWAY_PATH = "/mcp/gateway/proxy";
+function normalizeServerUrl(raw) {
+  const parsed = new URL(raw);
+  const pathname = parsed.pathname.replace(/\/+$/, "");
+  const prefix = pathname.endsWith(MCP_GATEWAY_PATH) ? pathname.slice(0, -MCP_GATEWAY_PATH.length) : pathname === "/" ? "" : pathname;
+  return `${parsed.origin}${prefix}${MCP_GATEWAY_PATH}${parsed.search}`;
+}
+
 // src/index.ts
 function readEnv(...keys) {
   for (const key of keys) {
@@ -26784,10 +26793,6 @@ function resolveServerUrl() {
   const fromEnv = readEnv("GLEAN_MCP_SERVER_URL");
   if (fromEnv) return fromEnv;
   return loadServerUrl();
-}
-function normalizeServerUrl(raw) {
-  const parsed = new URL(raw);
-  return `${parsed.origin}/mcp/gateway/proxy`;
 }
 var SETUP_REQUIRED_TEXT = `[SETUP_REQUIRED]
 

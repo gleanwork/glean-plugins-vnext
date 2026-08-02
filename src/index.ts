@@ -54,6 +54,7 @@ import {
 import { resolveSessionId } from "./session-id.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
 import { resolveDataDir } from "./data-dir.js";
+import { normalizeServerUrl } from "./server-url.js";
 
 function readEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -69,11 +70,6 @@ function resolveServerUrl(): string | undefined {
   const fromEnv = readEnv("GLEAN_MCP_SERVER_URL");
   if (fromEnv) return fromEnv;
   return loadServerUrl();
-}
-
-function normalizeServerUrl(raw: string): string {
-  const parsed = new URL(raw);
-  return `${parsed.origin}/mcp/gateway/proxy`;
 }
 
 const SETUP_REQUIRED_TEXT =
