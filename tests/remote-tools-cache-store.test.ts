@@ -8,7 +8,7 @@ const tmpDir = fs.mkdtempSync(
   path.join(os.tmpdir(), "remote-tools-cache-store-test-"),
 );
 
-vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
+vi.stubEnv("GLEAN_AUTH_DATA_DIR", tmpDir);
 
 const { loadRemoteTools, saveRemoteTools, clearRemoteTools } = await import(
   "../src/remote-tools-cache-store.js"

@@ -135,6 +135,60 @@ describe("createRemoteClient abandoned sign-in client reuse", () => {
   });
 });
 
+describe("createRemoteClient same-process registration gate", () => {
+  beforeEach(() => {
+    connectMock.mockReset();
+  });
+
+  it("allows only one concurrent first-time DCR registration", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let registrationCount = 0;
+    const provider: any = {
+      clientInfo: undefined,
+      tokens: () => ({ access_token: "T0" }),
+      authorizationUrl: undefined,
+      pendingAuthCode: undefined,
+      needsFreshClient: () => false,
+      clientInformation() {
+        return this.clientInfo;
+      },
+      saveClientInformation(info: unknown) {
+        this.clientInfo = info;
+        registrationCount += 1;
+      },
+    };
+
+    connectMock.mockImplementation(async () => {
+      if (registrationCount === 0) {
+        await gate;
+        provider.saveClientInformation({ client_id: "cid" });
+      }
+    });
+
+    const first = createRemoteClient(
+      "https://acme-be.glean.com/mcp/gateway/proxy",
+      { authProvider: provider },
+      "same-process-1",
+    );
+    // Let the first call enter its async connect and publish the pending gate.
+    await Promise.resolve();
+    const second = createRemoteClient(
+      "https://acme-be.glean.com/mcp/gateway/proxy",
+      { authProvider: provider },
+      "same-process-2",
+    );
+    await Promise.resolve();
+    release();
+
+    await Promise.all([first, second]);
+    expect(registrationCount).toBe(1);
+    expect(connectMock).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("createRemoteClient refresh-collision retry", () => {
   beforeEach(() => {
     connectMock.mockReset();

@@ -3236,8 +3236,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path8) {
-      let input = path8;
+    function removeDotSegments(path9) {
+      let input = path9;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3489,8 +3489,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path8, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path8 && path8 !== "/" ? path8 : void 0;
+        const [path9, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path9 && path9 !== "/" ? path9 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -6883,12 +6883,12 @@ var require_dist = __commonJS({
         throw new Error(`Unknown format "${name}"`);
       return f;
     };
-    function addFormats(ajv, list, fs8, exportName) {
+    function addFormats(ajv, list, fs9, exportName) {
       var _a3;
       var _b;
       (_a3 = (_b = ajv.opts.code).formats) !== null && _a3 !== void 0 ? _a3 : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
-        ajv.addFormat(f, fs8[f]);
+        ajv.addFormat(f, fs9[f]);
     }
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
@@ -6973,17 +6973,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path8) {
-      const ctrl = callVisitor(key, node, visitor, path8);
+    function visit_(key, node, visitor, path9) {
+      const ctrl = callVisitor(key, node, visitor, path9);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path8, ctrl);
-        return visit_(key, ctrl, visitor, path8);
+        replaceNode(key, path9, ctrl);
+        return visit_(key, ctrl, visitor, path9);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path8 = Object.freeze(path8.concat(node));
+          path9 = Object.freeze(path9.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path8);
+            const ci = visit_(i, node.items[i], visitor, path9);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -6994,13 +6994,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path8 = Object.freeze(path8.concat(node));
-          const ck = visit_("key", node.key, visitor, path8);
+          path9 = Object.freeze(path9.concat(node));
+          const ck = visit_("key", node.key, visitor, path9);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path8);
+          const cv = visit_("value", node.value, visitor, path9);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -7021,17 +7021,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path8) {
-      const ctrl = await callVisitor(key, node, visitor, path8);
+    async function visitAsync_(key, node, visitor, path9) {
+      const ctrl = await callVisitor(key, node, visitor, path9);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path8, ctrl);
-        return visitAsync_(key, ctrl, visitor, path8);
+        replaceNode(key, path9, ctrl);
+        return visitAsync_(key, ctrl, visitor, path9);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path8 = Object.freeze(path8.concat(node));
+          path9 = Object.freeze(path9.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path8);
+            const ci = await visitAsync_(i, node.items[i], visitor, path9);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -7042,13 +7042,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path8 = Object.freeze(path8.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path8);
+          path9 = Object.freeze(path9.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path9);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path8);
+          const cv = await visitAsync_("value", node.value, visitor, path9);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -7075,23 +7075,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path8) {
+    function callVisitor(key, node, visitor, path9) {
       if (typeof visitor === "function")
-        return visitor(key, node, path8);
+        return visitor(key, node, path9);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path8);
+        return visitor.Map?.(key, node, path9);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path8);
+        return visitor.Seq?.(key, node, path9);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path8);
+        return visitor.Pair?.(key, node, path9);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path8);
+        return visitor.Scalar?.(key, node, path9);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path8);
+        return visitor.Alias?.(key, node, path9);
       return void 0;
     }
-    function replaceNode(key, path8, node) {
-      const parent = path8[path8.length - 1];
+    function replaceNode(key, path9, node) {
+      const parent = path9[path9.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -7701,10 +7701,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path8, value) {
+    function collectionFromPath(schema, path9, value) {
       let v = value;
-      for (let i = path8.length - 1; i >= 0; --i) {
-        const k = path8[i];
+      for (let i = path9.length - 1; i >= 0; --i) {
+        const k = path9[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -7723,7 +7723,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path8) => path8 == null || typeof path8 === "object" && !!path8[Symbol.iterator]().next().done;
+    var isEmptyPath = (path9) => path9 == null || typeof path9 === "object" && !!path9[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -7753,11 +7753,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path8, value) {
-        if (isEmptyPath(path8))
+      addIn(path9, value) {
+        if (isEmptyPath(path9))
           this.add(value);
         else {
-          const [key, ...rest] = path8;
+          const [key, ...rest] = path9;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -7771,8 +7771,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path8) {
-        const [key, ...rest] = path8;
+      deleteIn(path9) {
+        const [key, ...rest] = path9;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -7786,8 +7786,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path8, keepScalar) {
-        const [key, ...rest] = path8;
+      getIn(path9, keepScalar) {
+        const [key, ...rest] = path9;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -7805,8 +7805,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path8) {
-        const [key, ...rest] = path8;
+      hasIn(path9) {
+        const [key, ...rest] = path9;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -7816,8 +7816,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path8, value) {
-        const [key, ...rest] = path8;
+      setIn(path9, value) {
+        const [key, ...rest] = path9;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -10332,9 +10332,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path8, value) {
+      addIn(path9, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path8, value);
+          this.contents.addIn(path9, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -10409,14 +10409,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path8) {
-        if (Collection.isEmptyPath(path8)) {
+      deleteIn(path9) {
+        if (Collection.isEmptyPath(path9)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path8) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path9) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -10431,10 +10431,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path8, keepScalar) {
-        if (Collection.isEmptyPath(path8))
+      getIn(path9, keepScalar) {
+        if (Collection.isEmptyPath(path9))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path8, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path9, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -10445,10 +10445,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path8) {
-        if (Collection.isEmptyPath(path8))
+      hasIn(path9) {
+        if (Collection.isEmptyPath(path9))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path8) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path9) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -10465,13 +10465,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path8, value) {
-        if (Collection.isEmptyPath(path8)) {
+      setIn(path9, value) {
+        if (Collection.isEmptyPath(path9)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path8), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path9), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path8, value);
+          this.contents.setIn(path9, value);
         }
       }
       /**
@@ -12431,9 +12431,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path8) => {
+    visit.itemAtPath = (cst, path9) => {
       let item = cst;
-      for (const [field, index] of path8) {
+      for (const [field, index] of path9) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -12442,23 +12442,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path8) => {
-      const parent = visit.itemAtPath(cst, path8.slice(0, -1));
-      const field = path8[path8.length - 1][0];
+    visit.parentCollection = (cst, path9) => {
+      const parent = visit.itemAtPath(cst, path9.slice(0, -1));
+      const field = path9[path9.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path8, item, visitor) {
-      let ctrl = visitor(item, path8);
+    function _visit(path9, item, visitor) {
+      let ctrl = visitor(item, path9);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path8.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path9.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -12469,10 +12469,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path8);
+            ctrl = ctrl(item, path9);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path8) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path9) : ctrl;
     }
     exports.visit = visit;
   }
@@ -13774,14 +13774,14 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs8 = this.flowScalar(this.type);
+              const fs9 = this.flowScalar(this.type);
               if (atNextItem || it.value) {
-                map.items.push({ start, key: fs8, sep: [] });
+                map.items.push({ start, key: fs9, sep: [] });
                 this.onKeyLine = true;
               } else if (it.sep) {
-                this.stack.push(fs8);
+                this.stack.push(fs9);
               } else {
-                Object.assign(it, { key: fs8, sep: [] });
+                Object.assign(it, { key: fs9, sep: [] });
                 this.onKeyLine = true;
               }
               return;
@@ -13909,13 +13909,13 @@ var require_parser = __commonJS({
             case "scalar":
             case "single-quoted-scalar":
             case "double-quoted-scalar": {
-              const fs8 = this.flowScalar(this.type);
+              const fs9 = this.flowScalar(this.type);
               if (!it || it.value)
-                fc.items.push({ start: [], key: fs8, sep: [] });
+                fc.items.push({ start: [], key: fs9, sep: [] });
               else if (it.sep)
-                this.stack.push(fs8);
+                this.stack.push(fs9);
               else
-                Object.assign(it, { key: fs8, sep: [] });
+                Object.assign(it, { key: fs9, sep: [] });
               return;
             }
             case "flow-map-end":
@@ -14466,10 +14466,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path8) {
-  if (!path8)
+function getElementAtPath(obj, path9) {
+  if (!path9)
     return obj;
-  return path8.reduce((acc, key) => acc?.[key], obj);
+  return path9.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -14878,11 +14878,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path8, issues) {
+function prefixIssues(path9, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path8);
+    iss.path.unshift(path9);
     return iss;
   });
 }
@@ -15029,16 +15029,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path8 = []) => {
+  const processError = (error3, path9 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path8, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path9, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path8, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path9, ...issue2.path]);
       } else {
-        const fullpath = [...path8, ...issue2.path];
+        const fullpath = [...path9, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -22982,9 +22982,9 @@ var StdioServerTransport = class {
 };
 
 // src/index.ts
-import path7 from "node:path";
-import fs7 from "node:fs";
-import { homedir as homedir4, tmpdir } from "node:os";
+import path8 from "node:path";
+import fs8 from "node:fs";
+import { tmpdir } from "node:os";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/client.js
 var ExperimentalClientTasks = class {
@@ -25197,6 +25197,7 @@ var AuthRequiredError = class extends Error {
   authUrl;
 };
 var pendingTransport;
+var pendingRegistrations = /* @__PURE__ */ new WeakMap();
 function buildTransport(serverUrl, opts, chatSessionId) {
   const parsedUrl = new URL(serverUrl);
   const headers = {
@@ -25231,7 +25232,7 @@ async function createRemoteClient(serverUrl, opts, chatSessionId, authRetry = fa
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[auth] Code exchange failed: ${msg} \u2014 discarding stale auth state`);
       pendingTransport = void 0;
-      if (!authProvider.abandonPendingSignIn()) {
+      if (!authProvider.abandonPendingSignIn(isInvalidClientError(err))) {
         await authProvider.invalidateCredentials("all");
       }
       return createRemoteClient(serverUrl, opts, chatSessionId);
@@ -25249,15 +25250,39 @@ async function createRemoteClient(serverUrl, opts, chatSessionId, authRetry = fa
       await authProvider.invalidateCredentials("all");
     }
   }
+  let registrationNeeded = false;
+  if (authProvider?.clientInformation) {
+    registrationNeeded = !authProvider.clientInformation();
+    if (registrationNeeded) {
+      const pending = pendingRegistrations.get(authProvider);
+      if (pending) {
+        await pending;
+        registrationNeeded = !authProvider.clientInformation();
+      }
+    }
+  }
   const client = new Client(
     { name: "glean", version: "1.0.0" },
     { capabilities: {} }
   );
   const accessTokenAtConnect = authProvider?.tokens()?.access_token;
   const transport = buildTransport(serverUrl, opts, chatSessionId);
+  let trackedRegistration;
+  let connectPromise;
+  if (registrationNeeded && authProvider) {
+    connectPromise = client.connect(transport);
+    trackedRegistration = connectPromise.then(
+      () => void 0,
+      () => void 0
+    );
+    pendingRegistrations.set(authProvider, trackedRegistration);
+  } else {
+    connectPromise = client.connect(transport);
+  }
   try {
-    await client.connect(transport);
+    await connectPromise;
   } catch (error2) {
+    authProvider?.releaseClientRegistrationLock?.();
     if (error2 instanceof UnauthorizedError && authProvider) {
       const refreshedAccessToken = authProvider.tokens()?.access_token;
       if (!authRetry && refreshedAccessToken && refreshedAccessToken !== accessTokenAtConnect) {
@@ -25278,8 +25303,16 @@ async function createRemoteClient(serverUrl, opts, chatSessionId, authRetry = fa
       return createRemoteClient(serverUrl, opts, chatSessionId, true);
     }
     throw error2;
+  } finally {
+    if (trackedRegistration && authProvider && pendingRegistrations.get(authProvider) === trackedRegistration) {
+      pendingRegistrations.delete(authProvider);
+    }
   }
   return client;
+}
+function isInvalidClientError(error2) {
+  const msg = error2 instanceof Error ? error2.message : String(error2);
+  return /invalid[_ -]?client|unknown client|client authentication failed/i.test(msg);
 }
 function isLikelyRefreshFailure(error2) {
   const msg = error2 instanceof Error ? error2.message : String(error2);
@@ -25379,47 +25412,247 @@ function closeCallbackServer() {
   expectedState = void 0;
 }
 
-// src/token-store.ts
+// src/data-dir.ts
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-var CREDENTIALS_FILENAME = "mcp-credentials.json";
 var DIR_MODE = 448;
 var FILE_MODE = 384;
-function resolveCredentialsDir() {
-  return process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
+var MIGRATION_MARKER = ".legacy-store-migrated-v1";
+var MIGRATION_LOCK = ".legacy-store-migration.lock";
+var MIGRATED_FILES = [
+  "mcp-credentials.json",
+  "mcp-server-url.json",
+  "remote-tools-cache.json",
+  "glean-server.log"
+];
+function envValue(name) {
+  const value = process.env[name]?.trim();
+  if (!value || value.startsWith("${")) return void 0;
+  return value;
 }
-function credentialsFile() {
-  return path.join(resolveCredentialsDir(), CREDENTIALS_FILENAME);
+function resolveDataDir() {
+  return envValue("GLEAN_AUTH_DATA_DIR") ?? path.join(homedir() || process.env.TMPDIR || "/tmp", ".glean");
 }
-function loadCredentials() {
+function legacyDataDirs() {
+  const canonical = path.resolve(resolveDataDir());
+  const candidates = [envValue("PLUGIN_DATA_DIR"), envValue("CLAUDE_PLUGIN_DATA")];
+  return [...new Set(candidates.filter((dir) => !!dir))].map((dir) => path.resolve(dir)).filter((dir) => dir !== canonical);
+}
+function sleepSync(ms) {
+  const signal = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(signal, 0, 0, ms);
+}
+function lockPath(name) {
+  return path.join(resolveDataDir(), `.${name}.lock`);
+}
+function isStale(lockFile, staleMs) {
   try {
-    const raw = fs.readFileSync(credentialsFile(), "utf-8");
+    return Date.now() - fs.statSync(lockFile).mtimeMs > staleMs;
+  } catch {
+    return false;
+  }
+}
+function acquireDataFileLockSync(name, options = {}) {
+  const waitMs = options.waitMs ?? 3e4;
+  const staleMs = options.staleMs ?? 12e4;
+  const filePath = lockPath(name);
+  const dir = path.dirname(filePath);
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+    fs.chmodSync(dir, DIR_MODE);
+  } catch {
+    return void 0;
+  }
+  const deadline = Date.now() + Math.max(0, waitMs);
+  do {
+    try {
+      const token = randomUUID();
+      const fd = fs.openSync(filePath, "wx", FILE_MODE);
+      try {
+        fs.writeFileSync(
+          fd,
+          JSON.stringify({
+            pid: process.pid,
+            token,
+            createdAt: (/* @__PURE__ */ new Date()).toISOString()
+          }),
+          { encoding: "utf-8" }
+        );
+      } finally {
+        fs.closeSync(fd);
+      }
+      return { path: filePath, token };
+    } catch (err) {
+      const code = err && typeof err === "object" && "code" in err ? err.code : void 0;
+      if (code !== "EEXIST") return void 0;
+      if (isStale(filePath, staleMs)) {
+        try {
+          fs.rmSync(filePath, { force: true });
+        } catch {
+        }
+        continue;
+      }
+      if (Date.now() >= deadline) return void 0;
+      sleepSync(Math.min(25, Math.max(1, deadline - Date.now())));
+    }
+  } while (Date.now() <= deadline);
+  return void 0;
+}
+function releaseDataFileLock(lock) {
+  if (!lock) return;
+  try {
+    const contents = JSON.parse(fs.readFileSync(lock.path, "utf-8"));
+    if (contents.token !== lock.token) return;
+    fs.rmSync(lock.path, { force: true });
+  } catch {
+  }
+}
+function copyFileAtomically(source, target) {
+  const dir = path.dirname(target);
+  fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  fs.chmodSync(dir, DIR_MODE);
+  const tmp = `${target}.${process.pid}.migration.tmp`;
+  try {
+    fs.copyFileSync(source, tmp);
+    fs.chmodSync(tmp, FILE_MODE);
+    fs.renameSync(tmp, target);
+    fs.chmodSync(target, FILE_MODE);
+  } finally {
+    try {
+      fs.rmSync(tmp, { force: true });
+    } catch {
+    }
+  }
+}
+function migrateLegacyData() {
+  const canonical = resolveDataDir();
+  const sources = legacyDataDirs();
+  if (sources.length === 0) return;
+  const marker = path.join(canonical, MIGRATION_MARKER);
+  try {
+    if (fs.existsSync(marker)) return;
+  } catch {
+    return;
+  }
+  const lock = acquireDataFileLockSync(
+    MIGRATION_LOCK.slice(1),
+    { waitMs: 5e3, staleMs: 6e4 }
+  );
+  if (!lock) return;
+  try {
+    if (fs.existsSync(marker)) return;
+    fs.mkdirSync(canonical, { recursive: true, mode: DIR_MODE });
+    fs.chmodSync(canonical, DIR_MODE);
+    for (const filename of MIGRATED_FILES) {
+      const candidates = sources.map((dir) => path.join(dir, filename)).filter((file) => {
+        try {
+          return fs.statSync(file).isFile();
+        } catch {
+          return false;
+        }
+      }).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+      if (candidates.length === 0) continue;
+      const target = path.join(canonical, filename);
+      const newestSource = candidates[0];
+      let targetIsOlder = true;
+      try {
+        targetIsOlder = fs.statSync(target).mtimeMs < fs.statSync(newestSource).mtimeMs;
+      } catch {
+      }
+      if (!fs.existsSync(target) || targetIsOlder) {
+        copyFileAtomically(newestSource, target);
+        console.error(`[auth] Migrated legacy data: ${filename}`);
+      }
+    }
+    fs.writeFileSync(
+      marker,
+      JSON.stringify({ migratedAt: (/* @__PURE__ */ new Date()).toISOString(), sources }),
+      { encoding: "utf-8", mode: FILE_MODE }
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[auth] Failed to migrate legacy data: ${msg}`);
+  } finally {
+    releaseDataFileLock(lock);
+  }
+}
+function ensureDataDir() {
+  const dir = resolveDataDir();
+  fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  fs.chmodSync(dir, DIR_MODE);
+  return dir;
+}
+
+// src/token-store.ts
+import fs2 from "node:fs";
+import path2 from "node:path";
+var CREDENTIALS_FILENAME = "mcp-credentials.json";
+var DIR_MODE2 = 448;
+var FILE_MODE2 = 384;
+var CLIENT_REGISTRATION_LOCK = "mcp-client-registration";
+function credentialsFile() {
+  return path2.join(resolveDataDir(), CREDENTIALS_FILENAME);
+}
+function readCredentialsFile(filePath) {
+  try {
+    const raw = fs2.readFileSync(filePath, "utf-8");
     return JSON.parse(raw);
   } catch {
     return void 0;
   }
 }
+function loadCredentials() {
+  migrateLegacyData();
+  return readCredentialsFile(credentialsFile());
+}
 function credentialsMtimeMs() {
+  migrateLegacyData();
   try {
-    return fs.statSync(credentialsFile()).mtimeMs;
+    return fs2.statSync(credentialsFile()).mtimeMs;
   } catch {
     return void 0;
   }
 }
-function saveCredentials(tokens, clientInfo) {
+function acquireClientRegistrationLock() {
+  return acquireDataFileLockSync(CLIENT_REGISTRATION_LOCK, {
+    waitMs: 3e4,
+    staleMs: 12e4
+  });
+}
+function releaseClientRegistrationLock(lock) {
+  releaseDataFileLock(lock);
+}
+function saveCredentials(tokens, clientInfo, metadata = {}, options = {}) {
   try {
+    migrateLegacyData();
     const filePath = credentialsFile();
-    const dir = path.dirname(filePath);
-    fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
-    fs.chmodSync(dir, DIR_MODE);
-    const data = { tokens, clientInfo };
+    const dir = ensureDataDir();
+    const existing = readCredentialsFile(filePath);
+    const incomingTokenTime = metadata.tokenUpdatedAt ?? void 0;
+    const existingTokenTime = existing?.tokenUpdatedAt ?? void 0;
+    const existingTokenIsNewer = !options.forceTokenUpdate && existing?.tokens !== void 0 && (tokens === void 0 || existingTokenTime !== void 0 && (incomingTokenTime === void 0 || existingTokenTime > incomingTokenTime));
+    const effectiveTokens = existingTokenIsNewer ? existing?.tokens : tokens;
+    const effectiveTokenTime = existingTokenIsNewer ? existingTokenTime : metadata.tokenUpdatedAt !== void 0 ? metadata.tokenUpdatedAt : existing?.tokenUpdatedAt;
+    const effectiveClientInfo = !options.forceClientUpdate && clientInfo === void 0 ? existing?.clientInfo : clientInfo;
+    const data = {
+      tokens: effectiveTokens,
+      clientInfo: effectiveClientInfo,
+      // Omitted metadata means preserve it; null explicitly clears it.
+      accountEmail: metadata.accountEmail !== void 0 ? metadata.accountEmail : existing?.accountEmail,
+      clientServerUrl: metadata.clientServerUrl !== void 0 ? metadata.clientServerUrl : existing?.clientServerUrl,
+      abandonedSignIns: metadata.abandonedSignIns !== void 0 ? metadata.abandonedSignIns : existing?.abandonedSignIns,
+      tokenUpdatedAt: effectiveTokenTime
+    };
     const tmpPath = `${filePath}.${process.pid}.tmp`;
-    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), {
+    fs2.writeFileSync(tmpPath, JSON.stringify(data, null, 2), {
       encoding: "utf-8",
-      mode: FILE_MODE
+      mode: FILE_MODE2
     });
-    fs.renameSync(tmpPath, filePath);
+    fs2.renameSync(tmpPath, filePath);
+    fs2.chmodSync(dir, DIR_MODE2);
+    fs2.chmodSync(filePath, FILE_MODE2);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[auth] Failed to persist credentials: ${msg}`);
@@ -25427,7 +25660,8 @@ function saveCredentials(tokens, clientInfo) {
 }
 function clearCredentials() {
   try {
-    fs.rmSync(credentialsFile(), { force: true });
+    migrateLegacyData();
+    fs2.rmSync(credentialsFile(), { force: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[auth] Failed to clear credentials: ${msg}`);
@@ -25447,6 +25681,10 @@ function rotationGraceMs() {
 }
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function normalizeAccountEmail(email2) {
+  const normalized = email2?.trim().toLowerCase();
+  return normalized || void 0;
 }
 function openBrowser(url2) {
   if (platform() === "win32") {
@@ -25473,6 +25711,12 @@ var GleanOAuthClientProvider = class {
   _credentialsMtimeMs;
   // Consecutive abandoned sign-ins with the current client.
   _abandonedSignIns = 0;
+  // Held from clientInformation() returning undefined until the SDK either
+  // persists the registration or the connection attempt fails.
+  _clientRegistrationLock;
+  _accountEmail;
+  _clientServerUrl;
+  _tokenUpdatedAt;
   authorizationUrl;
   /**
    * Optional hook invoked whenever the in-memory token state changes —
@@ -25484,8 +25728,12 @@ var GleanOAuthClientProvider = class {
   constructor() {
     const stored = loadCredentials();
     if (stored) {
-      this._tokens = stored.tokens;
-      this._clientInfo = stored.clientInfo;
+      this._tokens = stored.tokens ?? void 0;
+      this._clientInfo = stored.clientInfo ?? void 0;
+      this._accountEmail = stored.accountEmail ?? void 0;
+      this._clientServerUrl = stored.clientServerUrl ?? void 0;
+      this._abandonedSignIns = stored.abandonedSignIns ?? 0;
+      this._tokenUpdatedAt = stored.tokenUpdatedAt ?? void 0;
     }
     this._credentialsMtimeMs = credentialsMtimeMs();
   }
@@ -25502,9 +25750,27 @@ var GleanOAuthClientProvider = class {
     if (!stored) return;
     if (stored.tokens) {
       this._tokens = stored.tokens;
+    } else if (stored.tokenUpdatedAt !== void 0 && stored.tokenUpdatedAt !== null && (this._tokenUpdatedAt === void 0 || stored.tokenUpdatedAt > this._tokenUpdatedAt)) {
+      this._tokens = void 0;
     }
     if (stored.clientInfo) {
       this._clientInfo = stored.clientInfo;
+      if (this._clientRegistrationLock) {
+        releaseClientRegistrationLock(this._clientRegistrationLock);
+        this._clientRegistrationLock = void 0;
+      }
+    }
+    if (stored.accountEmail !== void 0) {
+      this._accountEmail = stored.accountEmail ?? void 0;
+    }
+    if (stored.clientServerUrl !== void 0) {
+      this._clientServerUrl = stored.clientServerUrl ?? void 0;
+    }
+    if (stored.abandonedSignIns !== void 0) {
+      this._abandonedSignIns = stored.abandonedSignIns ?? 0;
+    }
+    if (stored.tokenUpdatedAt !== void 0) {
+      this._tokenUpdatedAt = stored.tokenUpdatedAt ?? void 0;
     }
   }
   // On invalid_grant, adopt a sibling's newer on-disk token instead of
@@ -25520,6 +25786,7 @@ var GleanOAuthClientProvider = class {
       return false;
     }
     this._tokens = diskTokens;
+    this._tokenUpdatedAt = stored?.tokenUpdatedAt ?? Date.now();
     this._credentialsMtimeMs = diskMtime;
     if (stored?.clientInfo) {
       this._clientInfo = stored.clientInfo;
@@ -25563,13 +25830,25 @@ var GleanOAuthClientProvider = class {
   }
   clientInformation() {
     this.syncTokensFromDisk();
+    if (this._clientInfo) return this._clientInfo;
+    if (!this._clientRegistrationLock) {
+      this._clientRegistrationLock = acquireClientRegistrationLock();
+      this._credentialsMtimeMs = void 0;
+      this.syncTokensFromDisk();
+      if (this._clientInfo) {
+        releaseClientRegistrationLock(this._clientRegistrationLock);
+        this._clientRegistrationLock = void 0;
+      }
+    }
     return this._clientInfo;
   }
   saveClientInformation(info) {
     console.error(`[auth] Registered OAuth client: ${info.client_id}`);
     this._clientInfo = info;
-    saveCredentials(this._tokens, this._clientInfo);
+    saveCredentials(this._tokens, this._clientInfo, this.credentialMetadata());
     this._credentialsMtimeMs = credentialsMtimeMs();
+    releaseClientRegistrationLock(this._clientRegistrationLock);
+    this._clientRegistrationLock = void 0;
   }
   tokens() {
     this.syncTokensFromDisk();
@@ -25577,32 +25856,88 @@ var GleanOAuthClientProvider = class {
   }
   saveTokens(tokens) {
     this._tokens = tokens;
+    this._tokenUpdatedAt = Date.now();
     this._authUrlPending = false;
     this._abandonedSignIns = 0;
-    saveCredentials(this._tokens, this._clientInfo);
+    saveCredentials(this._tokens, this._clientInfo, this.credentialMetadata());
     this._credentialsMtimeMs = credentialsMtimeMs();
     this.onTokensChanged?.(tokens);
+  }
+  /** Persist the account/server context without changing the grant. */
+  setAccountContext(accountEmail, serverUrl) {
+    this._accountEmail = normalizeAccountEmail(accountEmail);
+    this._clientServerUrl = serverUrl;
+    saveCredentials(this._tokens, this._clientInfo, this.credentialMetadata());
+    this._credentialsMtimeMs = credentialsMtimeMs();
+  }
+  /** The account associated with the currently cached grant, if known. */
+  accountEmail() {
+    return this._accountEmail;
+  }
+  /** The server for which the cached DCR client was registered, if known. */
+  clientServerUrl() {
+    return this._clientServerUrl;
+  }
+  /**
+   * Force a new user sign-in while retaining a client registered for the same
+   * server. This is used for account switching and normal reset. A fresh DCR
+   * is only required when the server changes or the caller explicitly asks
+   * for a fresh client.
+   */
+  resetAuthentication(accountEmail, serverUrl) {
+    const hadTokens = this._tokens !== void 0;
+    this._tokens = void 0;
+    this._tokenUpdatedAt = Date.now();
+    this._accountEmail = normalizeAccountEmail(accountEmail);
+    this._clientServerUrl = serverUrl;
+    this._codeVerifier = "";
+    this._pendingAuthCode = void 0;
+    this.authorizationUrl = void 0;
+    this._authUrlPending = false;
+    this._abandonedSignIns = 0;
+    saveCredentials(void 0, this._clientInfo, this.credentialMetadata(), {
+      forceTokenUpdate: true
+    });
+    this._credentialsMtimeMs = credentialsMtimeMs();
+    if (hadTokens) this.onTokensChanged?.(void 0);
+  }
+  credentialMetadata() {
+    return {
+      accountEmail: this._accountEmail ?? null,
+      clientServerUrl: this._clientServerUrl ?? null,
+      abandonedSignIns: this._abandonedSignIns,
+      tokenUpdatedAt: this._tokenUpdatedAt ?? null
+    };
   }
   async invalidateCredentials(scope) {
     console.error(`[auth] Invalidating credentials: scope=${scope}`);
     const tokensClearedBefore = this._tokens === void 0;
     switch (scope) {
       case "all":
+        this.releaseClientRegistrationLock();
         this._tokens = void 0;
         this._clientInfo = void 0;
+        this._accountEmail = void 0;
+        this._clientServerUrl = void 0;
         this._codeVerifier = "";
         this._authUrlPending = false;
         this._abandonedSignIns = 0;
         clearCredentials();
         break;
       case "client":
+        this.releaseClientRegistrationLock();
         this._clientInfo = void 0;
-        saveCredentials(this._tokens, void 0);
+        saveCredentials(this._tokens, void 0, this.credentialMetadata(), {
+          forceClientUpdate: true
+        });
         break;
       case "tokens":
         if (await this.adoptNewerTokenWithGrace()) return;
         this._tokens = void 0;
-        saveCredentials(void 0, this._clientInfo);
+        this._tokenUpdatedAt = Date.now();
+        saveCredentials(void 0, this._clientInfo, this.credentialMetadata(), {
+          forceTokenUpdate: true
+        });
         break;
       case "verifier":
         this._codeVerifier = "";
@@ -25612,6 +25947,10 @@ var GleanOAuthClientProvider = class {
       this.onTokensChanged?.(void 0);
     }
   }
+  releaseClientRegistrationLock() {
+    releaseClientRegistrationLock(this._clientRegistrationLock);
+    this._clientRegistrationLock = void 0;
+  }
   // True if we previously issued an authorize URL but never received tokens —
   // implying the URL was likely rejected by the server (e.g. stale client_id).
   needsFreshClient() {
@@ -25619,13 +25958,24 @@ var GleanOAuthClientProvider = class {
   }
   // Abandoned sign-in: keep the client and clear the pending flow. Returns
   // false after two consecutive failures (client likely dead → re-register).
-  abandonPendingSignIn() {
-    this._abandonedSignIns += 1;
-    this._codeVerifier = "";
-    this._pendingAuthCode = void 0;
-    this.authorizationUrl = void 0;
-    this._authUrlPending = false;
-    return this._abandonedSignIns < 2;
+  abandonPendingSignIn(clientRejected = false) {
+    const lock = acquireDataFileLockSync("mcp-auth-recovery", {
+      waitMs: 5e3,
+      staleMs: 3e4
+    });
+    try {
+      this.syncTokensFromDisk();
+      this._abandonedSignIns = clientRejected ? 2 : this._abandonedSignIns + 1;
+      this._codeVerifier = "";
+      this._pendingAuthCode = void 0;
+      this.authorizationUrl = void 0;
+      this._authUrlPending = false;
+      saveCredentials(this._tokens, this._clientInfo, this.credentialMetadata());
+      this._credentialsMtimeMs = credentialsMtimeMs();
+      return !clientRejected && this._abandonedSignIns < 2;
+    } finally {
+      releaseDataFileLock(lock);
+    }
   }
   get pendingAuthCode() {
     return this._pendingAuthCode;
@@ -25664,11 +26014,11 @@ var GleanOAuthClientProvider = class {
 
 // src/skill-writer.ts
 var import_yaml = __toESM(require_dist2(), 1);
-import fs2 from "node:fs/promises";
-import path2 from "node:path";
+import fs3 from "node:fs/promises";
+import path3 from "node:path";
 function isInsideDir(filePath, dir) {
-  const resolved = path2.resolve(filePath);
-  return resolved.startsWith(path2.resolve(dir) + path2.sep);
+  const resolved = path3.resolve(filePath);
+  return resolved.startsWith(path3.resolve(dir) + path3.sep);
 }
 function parseFrontmatter(content) {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -25693,7 +26043,7 @@ function parseFrontmatter(content) {
 async function evictStaleSkills(baseDir, maxAgeMs, log, now = Date.now()) {
   let entries;
   try {
-    entries = await fs2.readdir(baseDir, { withFileTypes: true });
+    entries = await fs3.readdir(baseDir, { withFileTypes: true });
   } catch {
     return;
   }
@@ -25701,12 +26051,12 @@ async function evictStaleSkills(baseDir, maxAgeMs, log, now = Date.now()) {
   await Promise.all(
     entries.map(async (entry) => {
       if (!entry.isDirectory()) return;
-      const skillDir = path2.resolve(baseDir, entry.name);
+      const skillDir = path3.resolve(baseDir, entry.name);
       if (!isInsideDir(skillDir, baseDir)) return;
       try {
-        const stat = await fs2.stat(skillDir);
+        const stat = await fs3.stat(skillDir);
         if (stat.mtimeMs < cutoff) {
-          await fs2.rm(skillDir, { recursive: true, force: true });
+          await fs3.rm(skillDir, { recursive: true, force: true });
           log?.("evict-stale-skill", { skill: entry.name });
         }
       } catch (err) {
@@ -25719,21 +26069,21 @@ async function evictStaleSkills(baseDir, maxAgeMs, log, now = Date.now()) {
 async function writeSkillsToDisk(skills, baseDir) {
   const index = [];
   for (const [skillName, fileMap] of Object.entries(skills)) {
-    const skillDir = path2.resolve(baseDir, skillName);
+    const skillDir = path3.resolve(baseDir, skillName);
     if (!isInsideDir(skillDir, baseDir)) {
       continue;
     }
-    await fs2.rm(skillDir, { recursive: true, force: true });
-    await fs2.mkdir(skillDir, { recursive: true });
+    await fs3.rm(skillDir, { recursive: true, force: true });
+    await fs3.mkdir(skillDir, { recursive: true });
     const writtenFiles = [];
     for (const [filePath, content] of Object.entries(fileMap)) {
-      const fullPath = path2.resolve(skillDir, filePath);
+      const fullPath = path3.resolve(skillDir, filePath);
       if (!isInsideDir(fullPath, skillDir)) {
         continue;
       }
-      await fs2.mkdir(path2.dirname(fullPath), { recursive: true });
+      await fs3.mkdir(path3.dirname(fullPath), { recursive: true });
       const text = typeof content === "string" ? content : JSON.stringify(content);
-      await fs2.writeFile(fullPath, text, "utf-8");
+      await fs3.writeFile(fullPath, text, "utf-8");
       writtenFiles.push(fullPath);
     }
     const rawSkillMd = fileMap["SKILL.md"] ?? "";
@@ -25801,17 +26151,17 @@ async function handleFindSkills(remoteClient, skillsBaseDir, args) {
 }
 
 // src/tools/run-tool.ts
-import fs4 from "node:fs/promises";
+import fs5 from "node:fs/promises";
 import os2 from "node:os";
-import path4 from "node:path";
+import path5 from "node:path";
 
 // src/tools/approval-args.ts
-import fs3 from "node:fs/promises";
-import path3 from "node:path";
+import fs4 from "node:fs/promises";
+import path4 from "node:path";
 import os from "node:os";
 
 // src/session-id.ts
-import { randomUUID } from "node:crypto";
+import { randomUUID as randomUUID2 } from "node:crypto";
 var fallbackSessionId;
 function resolveSessionId() {
   const fromHost = process.env.GLEAN_SESSION_ID?.trim();
@@ -25819,7 +26169,7 @@ function resolveSessionId() {
     return fromHost;
   }
   if (!fallbackSessionId) {
-    fallbackSessionId = randomUUID();
+    fallbackSessionId = randomUUID2();
   }
   return fallbackSessionId;
 }
@@ -25898,10 +26248,10 @@ function formatArgumentsForFile(toolName, args) {
 async function writeApprovalArgsFile(toolName, args) {
   const base = process.env.PLUGIN_DATA_DIR || process.env.CLAUDE_PLUGIN_DATA || os.tmpdir();
   const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
-  const dir = path3.join(base, "glean-approvals", sessionId);
-  await fs3.mkdir(dir, { recursive: true });
-  const file = path3.join(dir, "glean-approval-args.md");
-  await fs3.writeFile(file, formatArgumentsForFile(toolName, args), "utf-8");
+  const dir = path4.join(base, "glean-approvals", sessionId);
+  await fs4.mkdir(dir, { recursive: true });
+  const file = path4.join(dir, "glean-approval-args.md");
+  await fs4.writeFile(file, formatArgumentsForFile(toolName, args), "utf-8");
   return file;
 }
 
@@ -25951,7 +26301,7 @@ async function resolveFileArgs(fileArgs, baseArgs, inputSchema) {
         `file_args.${argName} must be a non-empty string path`
       );
     }
-    if (!path4.isAbsolute(filePathRaw)) {
+    if (!path5.isAbsolute(filePathRaw)) {
       throw new FileArgsError(
         `file_args.${argName} must be an absolute path; got "${filePathRaw}"`
       );
@@ -25963,7 +26313,7 @@ async function resolveFileArgs(fileArgs, baseArgs, inputSchema) {
     }
     let stat;
     try {
-      stat = await fs4.stat(filePathRaw);
+      stat = await fs5.stat(filePathRaw);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new FileArgsError(
@@ -25980,7 +26330,7 @@ async function resolveFileArgs(fileArgs, baseArgs, inputSchema) {
         `file_args.${argName}: "${filePathRaw}" is ${stat.size} bytes, exceeds ${maxBytes} byte limit (set GLEAN_FILE_ARG_MAX_BYTES to override)`
       );
     }
-    const content = await fs4.readFile(filePathRaw, "utf-8");
+    const content = await fs5.readFile(filePathRaw, "utf-8");
     const types = declaredParamTypes(inputSchema, argName);
     if (types.has("object") || types.has("array")) {
       try {
@@ -26003,12 +26353,12 @@ async function resolveFileArgs(fileArgs, baseArgs, inputSchema) {
 }
 async function findToolJson(skillsBaseDir, toolName) {
   try {
-    const skillDirs = await fs4.readdir(skillsBaseDir, { withFileTypes: true });
+    const skillDirs = await fs5.readdir(skillsBaseDir, { withFileTypes: true });
     for (const dir of skillDirs) {
       if (!dir.isDirectory()) continue;
-      const toolPath = path4.join(skillsBaseDir, dir.name, "tools", `${toolName}.json`);
+      const toolPath = path5.join(skillsBaseDir, dir.name, "tools", `${toolName}.json`);
       try {
-        const content = await fs4.readFile(toolPath, "utf-8");
+        const content = await fs5.readFile(toolPath, "utf-8");
         return JSON.parse(content);
       } catch {
         continue;
@@ -26049,13 +26399,13 @@ function primeElicitationCancellation(mcpServer) {
   });
 }
 function permissionModeMarkerPath() {
-  const base = process.env.CLAUDE_PLUGIN_DATA || path4.join(os2.homedir(), ".glean");
+  const base = process.env.CLAUDE_PLUGIN_DATA || path5.join(os2.homedir(), ".glean");
   const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
-  return path4.join(base, "glean-hitl-mode", `${sessionId}.json`);
+  return path5.join(base, "glean-hitl-mode", `${sessionId}.json`);
 }
 async function currentPermissionMode() {
   try {
-    const raw = await fs4.readFile(permissionModeMarkerPath(), "utf-8");
+    const raw = await fs5.readFile(permissionModeMarkerPath(), "utf-8");
     const parsed = JSON.parse(raw);
     return typeof parsed.permission_mode === "string" ? parsed.permission_mode : null;
   } catch {
@@ -26152,21 +26502,21 @@ function runToolAnnotations(enableHitl, clientSupportsElicitation, isCursor) {
 }
 
 // src/url-config-store.ts
-import fs5 from "node:fs";
-import path5 from "node:path";
-import { homedir as homedir2 } from "node:os";
+import fs6 from "node:fs";
+import path6 from "node:path";
 var CONFIG_FILENAME = "mcp-server-url.json";
-var DIR_MODE2 = 448;
-var FILE_MODE2 = 384;
+var DIR_MODE3 = 448;
+var FILE_MODE3 = 384;
 function resolveConfigDir() {
-  return process.env.PLUGIN_DATA_DIR || path5.join(homedir2(), ".glean");
+  return resolveDataDir();
 }
 function configFile() {
-  return path5.join(resolveConfigDir(), CONFIG_FILENAME);
+  return path6.join(resolveConfigDir(), CONFIG_FILENAME);
 }
 function loadServerUrl() {
+  migrateLegacyData();
   try {
-    const raw = fs5.readFileSync(configFile(), "utf-8");
+    const raw = fs6.readFileSync(configFile(), "utf-8");
     const data = JSON.parse(raw);
     if (typeof data.serverUrl !== "string" || !data.serverUrl) return void 0;
     return data.serverUrl;
@@ -26175,40 +26525,41 @@ function loadServerUrl() {
   }
 }
 function saveServerUrl(url2) {
+  migrateLegacyData();
   const filePath = configFile();
-  const dir = path5.dirname(filePath);
-  fs5.mkdirSync(dir, { recursive: true, mode: DIR_MODE2 });
-  fs5.chmodSync(dir, DIR_MODE2);
+  const dir = ensureDataDir();
+  fs6.chmodSync(dir, DIR_MODE3);
   const data = { serverUrl: url2 };
-  fs5.writeFileSync(filePath, JSON.stringify(data, null, 2), {
+  fs6.writeFileSync(filePath, JSON.stringify(data, null, 2), {
     encoding: "utf-8",
-    mode: FILE_MODE2
+    mode: FILE_MODE3
   });
-  fs5.chmodSync(filePath, FILE_MODE2);
+  fs6.chmodSync(filePath, FILE_MODE3);
 }
 function clearServerUrl() {
+  migrateLegacyData();
   try {
-    fs5.rmSync(configFile(), { force: true });
+    fs6.rmSync(configFile(), { force: true });
   } catch {
   }
 }
 
 // src/remote-tools-cache-store.ts
-import fs6 from "node:fs";
-import path6 from "node:path";
-import { homedir as homedir3 } from "node:os";
+import fs7 from "node:fs";
+import path7 from "node:path";
 var CACHE_FILENAME = "remote-tools-cache.json";
-var DIR_MODE3 = 448;
-var FILE_MODE3 = 384;
+var DIR_MODE4 = 448;
+var FILE_MODE4 = 384;
 function resolveCacheDir() {
-  return process.env.PLUGIN_DATA_DIR || path6.join(homedir3(), ".glean");
+  return resolveDataDir();
 }
 function cacheFile() {
-  return path6.join(resolveCacheDir(), CACHE_FILENAME);
+  return path7.join(resolveCacheDir(), CACHE_FILENAME);
 }
 function readStore() {
+  migrateLegacyData();
   try {
-    const raw = fs6.readFileSync(cacheFile(), "utf-8");
+    const raw = fs7.readFileSync(cacheFile(), "utf-8");
     const data = JSON.parse(raw);
     if (data && typeof data === "object" && !Array.isArray(data)) {
       return data;
@@ -26220,14 +26571,13 @@ function readStore() {
 }
 function writeStore(store) {
   const filePath = cacheFile();
-  const dir = path6.dirname(filePath);
-  fs6.mkdirSync(dir, { recursive: true, mode: DIR_MODE3 });
-  fs6.chmodSync(dir, DIR_MODE3);
-  fs6.writeFileSync(filePath, JSON.stringify(store, null, 2), {
+  const dir = ensureDataDir();
+  fs7.chmodSync(dir, DIR_MODE4);
+  fs7.writeFileSync(filePath, JSON.stringify(store, null, 2), {
     encoding: "utf-8",
-    mode: FILE_MODE3
+    mode: FILE_MODE4
   });
-  fs6.chmodSync(filePath, FILE_MODE3);
+  fs7.chmodSync(filePath, FILE_MODE4);
 }
 function loadRemoteTools(serverUrl) {
   if (!serverUrl) return [];
@@ -26248,16 +26598,17 @@ function saveRemoteTools(serverUrl, tools) {
   }
 }
 function clearRemoteTools(serverUrl) {
+  migrateLegacyData();
   try {
     if (!serverUrl) {
-      fs6.rmSync(cacheFile(), { force: true });
+      fs7.rmSync(cacheFile(), { force: true });
       return;
     }
     const store = readStore();
     if (store[serverUrl] !== void 0) {
       delete store[serverUrl];
       if (Object.keys(store).length === 0) {
-        fs6.rmSync(cacheFile(), { force: true });
+        fs7.rmSync(cacheFile(), { force: true });
       } else {
         writeStore(store);
       }
@@ -26446,14 +26797,13 @@ var EMAIL_RESOLVE_FAILED_TEXT = `Double-check the email for typos and try again 
 var SETUP_NEEDED_ERROR = "Glean is not configured yet. Call the `setup` tool first to provide your Glean Server URL before using find_skills or run_tool.";
 var AUTH_REDIRECT_TO_SETUP_TEXT = "[SETUP_REQUIRED]\n\nAuthentication is required. Call the `setup` tool (no arguments) to sign in to Glean, then retry this tool.";
 function resolveLogPath() {
-  const base = process.env.PLUGIN_DATA_DIR || path7.join(homedir4(), ".glean");
-  return path7.join(base, "glean-server.log");
+  return path8.join(resolveDataDir(), "glean-server.log");
 }
 var LOG_PATH = resolveLogPath();
 try {
-  const logDir = path7.dirname(LOG_PATH);
-  fs7.mkdirSync(logDir, { recursive: true, mode: 448 });
-  fs7.chmodSync(logDir, 448);
+  const logDir = path8.dirname(LOG_PATH);
+  fs8.mkdirSync(logDir, { recursive: true, mode: 448 });
+  fs8.chmodSync(logDir, 448);
 } catch {
 }
 function logLine(label, detail) {
@@ -26462,8 +26812,8 @@ function logLine(label, detail) {
   const line = `${ts} ${label}${suffix}
 `;
   try {
-    fs7.appendFileSync(LOG_PATH, line, { mode: 384 });
-    fs7.chmodSync(LOG_PATH, 384);
+    fs8.appendFileSync(LOG_PATH, line, { mode: 384 });
+    fs8.chmodSync(LOG_PATH, 384);
   } catch {
   }
   console.error(line.trimEnd());
@@ -26472,7 +26822,7 @@ function resolveSkillsBaseDir() {
   if (process.env.SKILLS_BASE_DIR) {
     return process.env.SKILLS_BASE_DIR;
   }
-  return path7.join(tmpdir(), "glean-skills-cache");
+  return path8.join(tmpdir(), "glean-skills-cache");
 }
 var server = new Server(
   { name: "glean", version: "1.0.0" },
@@ -26540,7 +26890,7 @@ var RUN_TOOL_TOOL = {
 var SETUP_TOOL = {
   name: "setup",
   annotations: { readOnlyHint: true },
-  description: "Check or configure the Glean connection. Setup completes in three stages: (1) resolve and save the Server URL, (2) authenticate, (3) fetch the remote tool catalog. Call with no arguments to advance through the next missing stage. Call with email to look up and (re)configure user's Glean instance. Call with reset=true to clear all configuration.",
+  description: "Check or configure the Glean connection. Setup completes in three stages: (1) resolve and save the Server URL, (2) authenticate, (3) fetch the remote tool catalog. Call with no arguments to advance through the next missing stage. Call with email to look up and (re)configure user's Glean instance. Call with reset=true to clear the current authentication and setup URL while retaining the DCR client when it can safely be reused. Pass fresh_client=true only when a new OAuth client registration is explicitly required.",
   inputSchema: {
     type: "object",
     properties: {
@@ -26554,7 +26904,11 @@ var SETUP_TOOL = {
       },
       reset: {
         type: "boolean",
-        description: "Clear cached URL, credentials, and remote tool cache."
+        description: "Clear the cached URL, authentication, and remote tool cache. The registered OAuth client is retained when possible."
+      },
+      fresh_client: {
+        type: "boolean",
+        description: "With reset=true, also discard the registered OAuth client and force a new dynamic client registration."
       }
     },
     required: []
@@ -26733,6 +27087,10 @@ async function advanceSetup() {
   const serverUrl = resolveServerUrl();
   if (!serverUrl) {
     return { content: [{ type: "text", text: SETUP_REQUIRED_TEXT }] };
+  }
+  const provider = getOAuthProvider();
+  if (provider.clientServerUrl() !== serverUrl) {
+    provider.setAccountContext(provider.accountEmail(), serverUrl);
   }
   const conn = await connectWithSignIn(serverUrl);
   if (!conn.ok) return conn.result;
@@ -26915,19 +27273,39 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clientInfo: server.getClientVersion() ?? null
       });
       if (args.reset === true) {
+        const freshClient = args.fresh_client === true;
+        const stored = loadCredentials();
+        const previousServerUrl = loadServerUrl();
         clearServerUrl();
-        clearCredentials();
+        if (freshClient) {
+          clearCredentials();
+        } else if (stored) {
+          saveCredentials(
+            void 0,
+            stored.clientInfo,
+            {
+              accountEmail: null,
+              clientServerUrl: stored.clientServerUrl ?? previousServerUrl ?? null,
+              abandonedSignIns: 0,
+              tokenUpdatedAt: Date.now()
+            },
+            { forceTokenUpdate: true }
+          );
+        }
         clearRemoteTools();
         oauthProvider = void 0;
         cachedRemoteTools = [];
-        logLine("setup.reset");
+        logLine("setup.reset", {
+          freshClient,
+          retainedClient: !freshClient && !!stored?.clientInfo
+        });
         server.sendToolListChanged().catch(() => {
         });
         return {
           content: [
             {
               type: "text",
-              text: "Glean configuration has been reset. Call setup again with your email to reconfigure."
+              text: "Glean authentication has been reset. Call setup again with your email to sign in. The registered OAuth client will be reused when it belongs to the same server; pass fresh_client=true with reset=true to register a new client."
             }
           ]
         };
@@ -26969,6 +27347,11 @@ ${EMAIL_RESOLVE_FAILED_TEXT}`
           };
         }
         const previousUrl = loadServerUrl();
+        const stored = loadCredentials();
+        const requestedEmail = normalizeAccountEmail(email2);
+        const urlChanged = previousUrl !== normalized;
+        const reusableClient = !!stored?.clientInfo && stored.clientServerUrl === normalized;
+        const accountChanged = !!requestedEmail && !!stored?.tokens && stored.accountEmail !== requestedEmail;
         try {
           saveServerUrl(normalized);
         } catch (err) {
@@ -26980,13 +27363,26 @@ ${EMAIL_RESOLVE_FAILED_TEXT}`
             isError: true
           };
         }
-        const urlChanged = previousUrl !== normalized;
-        if (urlChanged) {
+        if (urlChanged && !reusableClient) {
           clearCredentials();
           oauthProvider = void 0;
         }
+        const provider = getOAuthProvider();
+        if (accountChanged) {
+          provider.resetAuthentication(requestedEmail, normalized);
+        } else {
+          provider.setAccountContext(
+            requestedEmail ?? provider.accountEmail(),
+            normalized
+          );
+        }
         cachedRemoteTools = loadRemoteTools(normalized);
-        logLine("setup.configured", { serverUrl: normalized, urlChanged });
+        logLine("setup.configured", {
+          serverUrl: normalized,
+          urlChanged,
+          reusableClient,
+          accountChanged
+        });
       }
       return await advanceSetup();
     }

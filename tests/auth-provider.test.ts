@@ -28,6 +28,8 @@ describe("GleanOAuthClientProvider", () => {
 
   beforeEach(() => {
     delete process.env.PLUGIN_DATA_DIR;
+    delete process.env.CLAUDE_PLUGIN_DATA;
+    delete process.env.GLEAN_AUTH_DATA_DIR;
     // Skip the rotation grace window by default so invalidation tests don't
     // wait out the real 2s poll; the grace test overrides this explicitly.
     process.env.GLEAN_ROTATION_GRACE_MS = "0";
@@ -448,5 +450,44 @@ describe("GleanOAuthClientProvider", () => {
     provider.onTokensChanged = (t) => observed.push(t);
     await provider.invalidateCredentials("client");
     expect(observed).toEqual([]);
+  });
+
+  it("switches accounts without creating a new DCR client", () => {
+    const provider = new GleanOAuthClientProvider();
+    provider.saveClientInformation({ client_id: "cid" } as any);
+    provider.setAccountContext(
+      "Alice@Example.com",
+      "https://acme-be.glean.com/mcp/gateway/proxy",
+    );
+    provider.saveTokens({ access_token: "alice-token" } as any);
+
+    provider.resetAuthentication(
+      "Bob@Example.com",
+      "https://acme-be.glean.com/mcp/gateway/proxy",
+    );
+
+    expect(provider.tokens()).toBeUndefined();
+    expect(provider.clientInformation()).toEqual({ client_id: "cid" });
+    expect(provider.accountEmail()).toBe("bob@example.com");
+    const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
+    expect(raw.clientInfo.client_id).toBe("cid");
+    expect(raw.tokens).toBeUndefined();
+    expect(raw.accountEmail).toBe("bob@example.com");
+  });
+
+  it("shares the abandoned-sign-in budget across provider instances", () => {
+    const first = new GleanOAuthClientProvider();
+    first.saveClientInformation({ client_id: "cid" } as any);
+    expect(first.abandonPendingSignIn()).toBe(true);
+
+    const second = new GleanOAuthClientProvider();
+    expect(second.abandonPendingSignIn()).toBe(false);
+  });
+
+  it("immediately escalates when the server explicitly rejects the client", () => {
+    const provider = new GleanOAuthClientProvider();
+    expect(provider.abandonPendingSignIn(true)).toBe(false);
+    const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
+    expect(raw.abandonedSignIns).toBe(2);
   });
 });
