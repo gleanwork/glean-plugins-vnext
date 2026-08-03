@@ -1371,12 +1371,12 @@ var require_errors = __commonJS({
       }
       return [E.schemaPath, schPath];
     }
-    function extraErrorProps(cxt, { params, message }, keyValues) {
+    function extraErrorProps(cxt, { params, message: message2 }, keyValues) {
       const { keyword, data, schemaValue, it } = cxt;
       const { opts, propertyName, topSchemaRef, schemaPath } = it;
       keyValues.push([E.keyword, keyword], [E.params, typeof params == "function" ? params(cxt) : params || (0, codegen_1._)`{}`]);
       if (opts.messages) {
-        keyValues.push([E.message, typeof message == "function" ? message(cxt) : message]);
+        keyValues.push([E.message, typeof message2 == "function" ? message2(cxt) : message2]);
       }
       if (opts.verbose) {
         keyValues.push([E.schema, schemaValue], [E.parentSchema, (0, codegen_1._)`${topSchemaRef}${schemaPath}`], [names_1.default.data, data]);
@@ -4196,11 +4196,11 @@ var require_core = __commonJS({
         }
         const valid = this.validate($schema, schema);
         if (!valid && throwOrLogError) {
-          const message = "schema is invalid: " + this.errorsText();
+          const message2 = "schema is invalid: " + this.errorsText();
           if (this.opts.validateSchema === "log")
-            this.logger.error(message);
+            this.logger.error(message2);
           else
-            throw new Error(message);
+            throw new Error(message2);
         }
         return valid;
       }
@@ -7127,10 +7127,10 @@ var require_directives = __commonJS({
     };
     var escapeTagName = (tn) => tn.replace(/[!,[\]{}]/g, (ch) => escapeChars[ch]);
     var Directives = class _Directives {
-      constructor(yaml2, tags) {
+      constructor(yaml3, tags) {
         this.docStart = null;
         this.docEnd = false;
-        this.yaml = Object.assign({}, _Directives.defaultYaml, yaml2);
+        this.yaml = Object.assign({}, _Directives.defaultYaml, yaml3);
         this.tags = Object.assign({}, _Directives.defaultTags, tags);
       }
       clone() {
@@ -10568,22 +10568,22 @@ var require_errors2 = __commonJS({
   "node_modules/yaml/dist/errors.js"(exports) {
     "use strict";
     var YAMLError = class extends Error {
-      constructor(name, pos, code, message) {
+      constructor(name, pos, code, message2) {
         super();
         this.name = name;
         this.code = code;
-        this.message = message;
+        this.message = message2;
         this.pos = pos;
       }
     };
     var YAMLParseError = class extends YAMLError {
-      constructor(pos, code, message) {
-        super("YAMLParseError", pos, code, message);
+      constructor(pos, code, message2) {
+        super("YAMLParseError", pos, code, message2);
       }
     };
     var YAMLWarning = class extends YAMLError {
-      constructor(pos, code, message) {
-        super("YAMLWarning", pos, code, message);
+      constructor(pos, code, message2) {
+        super("YAMLWarning", pos, code, message2);
       }
     };
     var prettifyError2 = (src, lc) => (error2) => {
@@ -11263,8 +11263,8 @@ var require_compose_collection = __commonJS({
         const { anchor, newlineAfterProp: nl } = props;
         const lastProp = anchor && tagToken ? anchor.offset > tagToken.offset ? anchor : tagToken : anchor ?? tagToken;
         if (lastProp && (!nl || nl.offset < lastProp.offset)) {
-          const message = "Missing newline after block sequence props";
-          onError(lastProp, "MISSING_CHAR", message);
+          const message2 = "Missing newline after block sequence props";
+          onError(lastProp, "MISSING_CHAR", message2);
         }
       }
       const expType = token.type === "block-map" ? "map" : token.type === "block-seq" ? "seq" : token.start.source === "{" ? "map" : "seq";
@@ -11336,15 +11336,15 @@ var require_resolve_block_scalar = __commonJS({
             trimIndent = indent.length;
         } else {
           if (indent.length < trimIndent) {
-            const message = "Block scalars with more-indented leading empty lines must use an explicit indentation indicator";
-            onError(offset + indent.length, "MISSING_CHAR", message);
+            const message2 = "Block scalars with more-indented leading empty lines must use an explicit indentation indicator";
+            onError(offset + indent.length, "MISSING_CHAR", message2);
           }
           if (header.indent === 0)
             trimIndent = indent.length;
           contentStart = i;
           if (trimIndent === 0 && !ctx.atRoot) {
-            const message = "Block scalar values in collections must be indented";
-            onError(offset, "BAD_INDENT", message);
+            const message2 = "Block scalar values in collections must be indented";
+            onError(offset, "BAD_INDENT", message2);
           }
           break;
         }
@@ -11367,8 +11367,8 @@ var require_resolve_block_scalar = __commonJS({
           content = content.slice(0, -1);
         if (content && indent.length < trimIndent) {
           const src = header.indent ? "explicit indentation indicator" : "first line";
-          const message = `Block scalar lines must not be less indented than their ${src}`;
-          onError(offset - content.length - (crlf ? 2 : 1), "BAD_INDENT", message);
+          const message2 = `Block scalar lines must not be less indented than their ${src}`;
+          onError(offset - content.length - (crlf ? 2 : 1), "BAD_INDENT", message2);
           indent = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
@@ -11446,8 +11446,8 @@ var require_resolve_block_scalar = __commonJS({
             break;
           case "comment":
             if (strict && !hasSpace) {
-              const message = "Comments must be separated from other tokens by white space characters";
-              onError(token, "MISSING_CHAR", message);
+              const message2 = "Comments must be separated from other tokens by white space characters";
+              onError(token, "MISSING_CHAR", message2);
             }
             length += token.source.length;
             comment = token.source.substring(1);
@@ -11458,8 +11458,8 @@ var require_resolve_block_scalar = __commonJS({
             break;
           /* istanbul ignore next should not happen */
           default: {
-            const message = `Unexpected token in block scalar header: ${token.type}`;
-            onError(token, "UNEXPECTED_TOKEN", message);
+            const message2 = `Unexpected token in block scalar header: ${token.type}`;
+            onError(token, "UNEXPECTED_TOKEN", message2);
             const ts = token.source;
             if (ts && typeof ts === "string")
               length += ts.length;
@@ -11851,13 +11851,13 @@ var require_compose_node = __commonJS({
             if (anchor)
               node.anchor = anchor.source.substring(1);
           } catch (error2) {
-            const message = error2 instanceof Error ? error2.message : String(error2);
-            onError(token, "RESOURCE_EXHAUSTION", message);
+            const message2 = error2 instanceof Error ? error2.message : String(error2);
+            onError(token, "RESOURCE_EXHAUSTION", message2);
           }
           break;
         default: {
-          const message = token.type === "error" ? token.message : `Unsupported token (type: ${token.type})`;
-          onError(token, "UNEXPECTED_TOKEN", message);
+          const message2 = token.type === "error" ? token.message : `Unsupported token (type: ${token.type})`;
+          onError(token, "UNEXPECTED_TOKEN", message2);
           isSrcToken = false;
         }
       }
@@ -12013,12 +12013,12 @@ var require_composer = __commonJS({
         this.prelude = [];
         this.errors = [];
         this.warnings = [];
-        this.onError = (source, code, message, warning) => {
+        this.onError = (source, code, message2, warning) => {
           const pos = getErrorPos(source);
           if (warning)
-            this.warnings.push(new errors.YAMLWarning(pos, code, message));
+            this.warnings.push(new errors.YAMLWarning(pos, code, message2));
           else
-            this.errors.push(new errors.YAMLParseError(pos, code, message));
+            this.errors.push(new errors.YAMLParseError(pos, code, message2));
         };
         this.directives = new directives.Directives({ version: options.version || "1.2" });
         this.options = options;
@@ -12088,10 +12088,10 @@ ${cb}` : comment;
           console.dir(token, { depth: null });
         switch (token.type) {
           case "directive":
-            this.directives.add(token.source, (offset, message, warning) => {
+            this.directives.add(token.source, (offset, message2, warning) => {
               const pos = getErrorPos(token);
               pos[0] += offset;
-              this.onError(pos, "BAD_DIRECTIVE", message, warning);
+              this.onError(pos, "BAD_DIRECTIVE", message2, warning);
             });
             this.prelude.push(token.source);
             this.atDirectives = true;
@@ -12180,12 +12180,12 @@ var require_cst_scalar = __commonJS({
     var stringifyString = require_stringifyString();
     function resolveAsScalar(token, strict = true, onError) {
       if (token) {
-        const _onError = (pos, code, message) => {
+        const _onError = (pos, code, message2) => {
           const offset = typeof pos === "number" ? pos : Array.isArray(pos) ? pos[0] : pos.offset;
           if (onError)
-            onError(offset, code, message);
+            onError(offset, code, message2);
           else
-            throw new errors.YAMLParseError([offset, offset + 1], code, message);
+            throw new errors.YAMLParseError([offset, offset + 1], code, message2);
         };
         switch (token.type) {
           case "scalar":
@@ -13345,8 +13345,8 @@ var require_parser = __commonJS({
         }
         const type = cst.tokenType(source);
         if (!type) {
-          const message = `Not a YAML token: ${source}`;
-          yield* this.pop({ type: "error", offset: this.offset, message, source });
+          const message2 = `Not a YAML token: ${source}`;
+          yield* this.pop({ type: "error", offset: this.offset, message: message2, source });
           this.offset += source.length;
         } else if (type === "scalar") {
           this.atNewLine = false;
@@ -13436,8 +13436,8 @@ var require_parser = __commonJS({
       *pop(error2) {
         const token = error2 ?? this.stack.pop();
         if (!token) {
-          const message = "Tried to pop an empty stack";
-          yield { type: "error", offset: this.offset, source: "", message };
+          const message2 = "Tried to pop an empty stack";
+          yield { type: "error", offset: this.offset, source: "", message: message2 };
         } else if (this.stack.length === 0) {
           yield token;
         } else {
@@ -14886,14 +14886,14 @@ function prefixIssues(path8, issues) {
     return iss;
   });
 }
-function unwrapMessage(message) {
-  return typeof message === "string" ? message : message?.message;
+function unwrapMessage(message2) {
+  return typeof message2 === "string" ? message2 : message2?.message;
 }
 function finalizeIssue(iss, ctx, config2) {
-  const message = iss.message ? iss.message : unwrapMessage(iss.inst?._zod.def?.error?.(iss)) ?? unwrapMessage(ctx?.error?.(iss)) ?? unwrapMessage(config2.customError?.(iss)) ?? unwrapMessage(config2.localeError?.(iss)) ?? "Invalid input";
+  const message2 = iss.message ? iss.message : unwrapMessage(iss.inst?._zod.def?.error?.(iss)) ?? unwrapMessage(ctx?.error?.(iss)) ?? unwrapMessage(config2.customError?.(iss)) ?? unwrapMessage(config2.localeError?.(iss)) ?? "Invalid input";
   const { inst: _inst, continue: _continue, input: _input, ...rest } = iss;
   rest.path ?? (rest.path = []);
-  rest.message = message;
+  rest.message = message2;
   if (ctx?.reportInput) {
     rest.input = _input;
   }
@@ -21180,8 +21180,8 @@ var ServerResultSchema = union([
   CreateTaskResultSchema
 ]);
 var McpError = class _McpError extends Error {
-  constructor(code, message, data) {
-    super(`MCP error ${code}: ${message}`);
+  constructor(code, message2, data) {
+    super(`MCP error ${code}: ${message2}`);
     this.code = code;
     this.data = data;
     this.name = "McpError";
@@ -21189,19 +21189,19 @@ var McpError = class _McpError extends Error {
   /**
    * Factory method to create the appropriate error type based on the error code and data
    */
-  static fromError(code, message, data) {
+  static fromError(code, message2, data) {
     if (code === ErrorCode.UrlElicitationRequired && data) {
       const errorData = data;
       if (errorData.elicitations) {
-        return new UrlElicitationRequiredError(errorData.elicitations, message);
+        return new UrlElicitationRequiredError(errorData.elicitations, message2);
       }
     }
-    return new _McpError(code, message, data);
+    return new _McpError(code, message2, data);
   }
 };
 var UrlElicitationRequiredError = class extends McpError {
-  constructor(elicitations, message = `URL elicitation${elicitations.length > 1 ? "s" : ""} required`) {
-    super(ErrorCode.UrlElicitationRequired, message, {
+  constructor(elicitations, message2 = `URL elicitation${elicitations.length > 1 ? "s" : ""} required`) {
+    super(ErrorCode.UrlElicitationRequired, message2, {
       elicitations
     });
   }
@@ -21284,15 +21284,15 @@ var Protocol = class {
             let queuedMessage;
             while (queuedMessage = await this._taskMessageQueue.dequeue(taskId, extra.sessionId)) {
               if (queuedMessage.type === "response" || queuedMessage.type === "error") {
-                const message = queuedMessage.message;
-                const requestId = message.id;
+                const message2 = queuedMessage.message;
+                const requestId = message2.id;
                 const resolver = this._requestResolvers.get(requestId);
                 if (resolver) {
                   this._requestResolvers.delete(requestId);
                   if (queuedMessage.type === "response") {
-                    resolver(message);
+                    resolver(message2);
                   } else {
-                    const errorMessage = message;
+                    const errorMessage = message2;
                     const error2 = new McpError(errorMessage.error.code, errorMessage.error.message, errorMessage.error.data);
                     resolver(error2);
                   }
@@ -21431,16 +21431,16 @@ var Protocol = class {
       this._onerror(error2);
     };
     const _onmessage = this._transport?.onmessage;
-    this._transport.onmessage = (message, extra) => {
-      _onmessage?.(message, extra);
-      if (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) {
-        this._onresponse(message);
-      } else if (isJSONRPCRequest(message)) {
-        this._onrequest(message, extra);
-      } else if (isJSONRPCNotification(message)) {
-        this._onnotification(message);
+    this._transport.onmessage = (message2, extra) => {
+      _onmessage?.(message2, extra);
+      if (isJSONRPCResultResponse(message2) || isJSONRPCErrorResponse(message2)) {
+        this._onresponse(message2);
+      } else if (isJSONRPCRequest(message2)) {
+        this._onrequest(message2, extra);
+      } else if (isJSONRPCNotification(message2)) {
+        this._onnotification(message2);
       } else {
-        this._onerror(new Error(`Unknown message type: ${JSON.stringify(message)}`));
+        this._onerror(new Error(`Unknown message type: ${JSON.stringify(message2)}`));
       }
     };
     await this._transport.start();
@@ -22050,12 +22050,12 @@ var Protocol = class {
    * the error appropriately (e.g., by failing the task, logging, etc.). The Protocol layer
    * simply propagates the error.
    */
-  async _enqueueTaskMessage(taskId, message, sessionId) {
+  async _enqueueTaskMessage(taskId, message2, sessionId) {
     if (!this._taskStore || !this._taskMessageQueue) {
       throw new Error("Cannot enqueue task message: taskStore and taskMessageQueue are not configured");
     }
     const maxQueueSize = this._options?.maxTaskQueueSize;
-    await this._taskMessageQueue.enqueue(taskId, message, sessionId, maxQueueSize);
+    await this._taskMessageQueue.enqueue(taskId, message2, sessionId, maxQueueSize);
   }
   /**
    * Clears the message queue for a task and rejects any pending request resolvers.
@@ -22065,9 +22065,9 @@ var Protocol = class {
   async _clearTaskQueue(taskId, sessionId) {
     if (this._taskMessageQueue) {
       const messages = await this._taskMessageQueue.dequeueAll(taskId, sessionId);
-      for (const message of messages) {
-        if (message.type === "request" && isJSONRPCRequest(message.message)) {
-          const requestId = message.message.id;
+      for (const message2 of messages) {
+        if (message2.type === "request" && isJSONRPCRequest(message2.message)) {
+          const requestId = message2.message.id;
           const resolver = this._requestResolvers.get(requestId);
           if (resolver) {
             resolver(new McpError(ErrorCode.InternalError, "Task cancelled or completed"));
@@ -22916,8 +22916,8 @@ var ReadBuffer = class {
 function deserializeMessage(line) {
   return JSONRPCMessageSchema.parse(JSON.parse(line));
 }
-function serializeMessage(message) {
-  return JSON.stringify(message) + "\n";
+function serializeMessage(message2) {
+  return JSON.stringify(message2) + "\n";
 }
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js
@@ -22949,11 +22949,11 @@ var StdioServerTransport = class {
   processReadBuffer() {
     while (true) {
       try {
-        const message = this._readBuffer.readMessage();
-        if (message === null) {
+        const message2 = this._readBuffer.readMessage();
+        if (message2 === null) {
           break;
         }
-        this.onmessage?.(message);
+        this.onmessage?.(message2);
       } catch (error2) {
         this.onerror?.(error2);
       }
@@ -22969,9 +22969,9 @@ var StdioServerTransport = class {
     this._readBuffer.clear();
     this.onclose?.();
   }
-  send(message) {
+  send(message2) {
     return new Promise((resolve) => {
-      const json = serializeMessage(message);
+      const json = serializeMessage(message2);
       if (this._stdout.write(json)) {
         resolve();
       } else {
@@ -23037,9 +23037,9 @@ var ExperimentalClientTasks = class {
     };
     const stream = clientInternal.requestStream({ method: "tools/call", params }, resultSchema, optionsWithTask);
     const validator = clientInternal.getToolOutputValidator(params.name);
-    for await (const message of stream) {
-      if (message.type === "result" && validator) {
-        const result = message.result;
+    for await (const message2 of stream) {
+      if (message2.type === "result" && validator) {
+        const result = message2.result;
         if (!result.structuredContent && !result.isError) {
           yield {
             type: "error",
@@ -23070,7 +23070,7 @@ var ExperimentalClientTasks = class {
           }
         }
       }
-      yield message;
+      yield message2;
     }
   }
   /**
@@ -23896,8 +23896,8 @@ function checkResourceAllowed({ requestedResource, configuredResource }) {
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/auth/errors.js
 var OAuthError = class extends Error {
-  constructor(message, errorUri) {
-    super(message);
+  constructor(message2, errorUri) {
+    super(message2);
     this.errorUri = errorUri;
     this.name = this.constructor.name;
   }
@@ -23991,8 +23991,8 @@ var OAUTH_ERRORS = {
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/client/auth.js
 var UnauthorizedError = class extends Error {
-  constructor(message) {
-    super(message ?? "Unauthorized");
+  constructor(message2) {
+    super(message2 ?? "Unauthorized");
   }
 };
 function isClientAuthMethod(method) {
@@ -24532,8 +24532,8 @@ async function registerClient(authorizationServerUrl, { metadata, clientMetadata
 
 // node_modules/eventsource-parser/dist/index.js
 var ParseError = class extends Error {
-  constructor(message, options) {
-    super(message), this.name = "ParseError", this.type = options.type, this.field = options.field, this.value = options.value, this.line = options.line;
+  constructor(message2, options) {
+    super(message2), this.name = "ParseError", this.type = options.type, this.field = options.field, this.value = options.value, this.line = options.line;
   }
 };
 var LF = 10;
@@ -24739,8 +24739,8 @@ var DEFAULT_STREAMABLE_HTTP_RECONNECTION_OPTIONS = {
   maxRetries: 2
 };
 var StreamableHTTPError = class extends Error {
-  constructor(code, message) {
-    super(`Streamable HTTP error: ${message}`);
+  constructor(code, message2) {
+    super(`Streamable HTTP error: ${message2}`);
     this.code = code;
   }
 };
@@ -24892,14 +24892,14 @@ var StreamableHTTPClientTransport = class {
           }
           if (!event.event || event.event === "message") {
             try {
-              const message = JSONRPCMessageSchema.parse(JSON.parse(event.data));
-              if (isJSONRPCResultResponse(message)) {
+              const message2 = JSONRPCMessageSchema.parse(JSON.parse(event.data));
+              if (isJSONRPCResultResponse(message2)) {
                 receivedResponse = true;
                 if (replayMessageId !== void 0) {
-                  message.id = replayMessageId;
+                  message2.id = replayMessageId;
                 }
               }
-              this.onmessage?.(message);
+              this.onmessage?.(message2);
             } catch (error2) {
               this.onerror?.(error2);
             }
@@ -24965,11 +24965,11 @@ var StreamableHTTPClientTransport = class {
     this._abortController?.abort();
     this.onclose?.();
   }
-  async send(message, options) {
+  async send(message2, options) {
     try {
       const { resumptionToken, onresumptiontoken } = options || {};
       if (resumptionToken) {
-        this._startOrAuthSse({ resumptionToken, replayMessageId: isJSONRPCRequest(message) ? message.id : void 0 }).catch((err) => this.onerror?.(err));
+        this._startOrAuthSse({ resumptionToken, replayMessageId: isJSONRPCRequest(message2) ? message2.id : void 0 }).catch((err) => this.onerror?.(err));
         return;
       }
       const headers = await this._commonHeaders();
@@ -24979,7 +24979,7 @@ var StreamableHTTPClientTransport = class {
         ...this._requestInit,
         method: "POST",
         headers,
-        body: JSON.stringify(message),
+        body: JSON.stringify(message2),
         signal: this._abortController?.signal
       };
       const response = await (this._fetch ?? fetch)(this._url, init);
@@ -25006,7 +25006,7 @@ var StreamableHTTPClientTransport = class {
             throw new UnauthorizedError();
           }
           this._hasCompletedAuthFlow = true;
-          return this.send(message);
+          return this.send(message2);
         }
         if (response.status === 403 && this._authProvider) {
           const { resourceMetadataUrl, scope, error: error2 } = extractWWWAuthenticateParams(response);
@@ -25031,7 +25031,7 @@ var StreamableHTTPClientTransport = class {
             if (result !== "AUTHORIZED") {
               throw new UnauthorizedError();
             }
-            return this.send(message);
+            return this.send(message2);
           }
         }
         throw new StreamableHTTPError(response.status, `Error POSTing to endpoint: ${text}`);
@@ -25040,12 +25040,12 @@ var StreamableHTTPClientTransport = class {
       this._lastUpscopingHeader = void 0;
       if (response.status === 202) {
         await response.body?.cancel();
-        if (isInitializedNotification(message)) {
+        if (isInitializedNotification(message2)) {
           this._startOrAuthSse({ resumptionToken: void 0 }).catch((err) => this.onerror?.(err));
         }
         return;
       }
-      const messages = Array.isArray(message) ? message : [message];
+      const messages = Array.isArray(message2) ? message2 : [message2];
       const hasRequests = messages.filter((msg) => "method" in msg && "id" in msg && msg.id !== void 0).length > 0;
       const contentType = response.headers.get("content-type");
       if (hasRequests) {
@@ -25160,12 +25160,12 @@ function buildGatewayMetadataHeader(chatSessionId) {
     ...encodeStringField(2, GLEAN_PLUGIN),
     ...encodeStringField(3, GLEAN_PLUGIN)
   ];
-  const message = [
+  const message2 = [
     ...encodeStringField(1, GLEAN_PLUGIN),
     ...chatSessionId ? encodeStringField(2, chatSessionId) : [],
     ...encodeMessageField(4, sourceInfo)
   ];
-  return Buffer.from(new Uint8Array(message)).toString("base64");
+  return Buffer.from(new Uint8Array(message2)).toString("base64");
 }
 function loggingFetch(input, init) {
   const method = init?.method ?? "GET";
@@ -25773,8 +25773,8 @@ async function writeApprovalArgsFile(toolName, args) {
 var DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 var defaultHitlTimeoutMs = 3e5;
 var FileArgsError = class extends Error {
-  constructor(message) {
-    super(message);
+  constructor(message2) {
+    super(message2);
     this.name = "FileArgsError";
   }
 };
@@ -25890,7 +25890,7 @@ async function buildApprovalMessage(mcpServer, toolName, args) {
     return `Review the tool and arguments shown above, click on Submit to allow and Cancel to deny.`;
   }
   const { lines, needsFile } = buildCompactArgs(args);
-  const message = [
+  const message2 = [
     `Action: ${toolName}`,
     "Arguments:",
     ...lines.map((line) => `  ${line}`)
@@ -25898,12 +25898,12 @@ async function buildApprovalMessage(mcpServer, toolName, args) {
   if (needsFile) {
     try {
       const filePath = await writeApprovalArgsFile(toolName, args);
-      message.push(`  Full arguments: ${filePath}`);
+      message2.push(`  Full arguments: ${filePath}`);
     } catch {
-      message.push("  (some arguments truncated; full-args file unavailable)");
+      message2.push("  (some arguments truncated; full-args file unavailable)");
     }
   }
-  return message.join("\n");
+  return message2.join("\n");
 }
 var elicitationIdPrimed = /* @__PURE__ */ new WeakSet();
 function primeElicitationCancellation(mcpServer) {
@@ -25959,7 +25959,7 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
   if (hitlEnabled && toolMeta?.requires_approval && !isCursorClient(mcpServer) && mcpServer.getClientCapabilities()?.elicitation) {
     const bypass = await currentPermissionMode() === "bypassPermissions";
     if (!bypass) {
-      const message = await buildApprovalMessage(
+      const message2 = await buildApprovalMessage(
         mcpServer,
         toolName,
         resolvedArgs
@@ -25969,7 +25969,7 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
       try {
         const result = await mcpServer.elicitInput(
           {
-            message,
+            message: message2,
             requestedSchema: { type: "object", properties: {} }
           },
           { timeout }
@@ -26013,6 +26013,379 @@ function buildRemoteArgs(serverId, toolName, resolvedArgs) {
 }
 function runToolAnnotations(enableHitl, clientSupportsElicitation, isCursor) {
   return enableHitl && clientSupportsElicitation && !isCursor ? { readOnlyHint: true } : void 0;
+}
+
+// src/skills-catalog.ts
+var import_yaml2 = __toESM(require_dist2(), 1);
+import { createHash } from "node:crypto";
+import { isUtf8 } from "node:buffer";
+
+// src/zip.ts
+import { inflateRawSync } from "node:zlib";
+var EOCD_SIG = 101010256;
+var CD_ENTRY_SIG = 33639248;
+var LOCAL_SIG = 67324752;
+var MAX_COMMENT = 65535;
+function isZip(buf) {
+  return buf.length >= 4 && buf.readUInt32LE(0) === LOCAL_SIG;
+}
+function unzip(buf) {
+  const eocd = findEocd(buf);
+  const totalEntries = buf.readUInt16LE(eocd + 10);
+  const cdOffset = buf.readUInt32LE(eocd + 16);
+  if (totalEntries === 65535 || cdOffset === 4294967295) {
+    throw new Error("zip64 archives are not supported");
+  }
+  const files = /* @__PURE__ */ new Map();
+  let p = cdOffset;
+  for (let i = 0; i < totalEntries; i++) {
+    if (p + 46 > buf.length || buf.readUInt32LE(p) !== CD_ENTRY_SIG) {
+      throw new Error(`malformed zip: bad central directory entry ${i}`);
+    }
+    const method = buf.readUInt16LE(p + 10);
+    const compSize = buf.readUInt32LE(p + 20);
+    const uncompSize = buf.readUInt32LE(p + 24);
+    const nameLen = buf.readUInt16LE(p + 28);
+    const extraLen = buf.readUInt16LE(p + 30);
+    const commentLen = buf.readUInt16LE(p + 32);
+    const localOffset = buf.readUInt32LE(p + 42);
+    const name = buf.subarray(p + 46, p + 46 + nameLen).toString("utf-8");
+    p += 46 + nameLen + extraLen + commentLen;
+    if (name.endsWith("/")) continue;
+    if (compSize === 4294967295 || uncompSize === 4294967295) {
+      throw new Error(`zip64 entry is not supported: ${name}`);
+    }
+    if (localOffset + 30 > buf.length) {
+      throw new Error(`malformed zip: local header out of range for ${name}`);
+    }
+    const localNameLen = buf.readUInt16LE(localOffset + 26);
+    const localExtraLen = buf.readUInt16LE(localOffset + 28);
+    const start = localOffset + 30 + localNameLen + localExtraLen;
+    if (start + compSize > buf.length) {
+      throw new Error(`malformed zip: truncated entry ${name}`);
+    }
+    const raw = buf.subarray(start, start + compSize);
+    if (method === 0) {
+      files.set(name, Buffer.from(raw));
+    } else if (method === 8) {
+      files.set(name, inflateRawSync(raw));
+    } else {
+      throw new Error(
+        `unsupported zip compression method ${method} for ${name}`
+      );
+    }
+  }
+  return files;
+}
+function findEocd(buf) {
+  const start = Math.max(0, buf.length - (MAX_COMMENT + 22));
+  for (let i = buf.length - 22; i >= start; i--) {
+    if (buf.readUInt32LE(i) === EOCD_SIG) return i;
+  }
+  throw new Error("malformed zip: end-of-central-directory record not found");
+}
+
+// src/skills-catalog.ts
+var SKILLS_CAPABILITY = "io.modelcontextprotocol/skills";
+var URI_PREFIX = "skill://glean/";
+var PAGE_SIZE = 10;
+var MAX_SKILL_MD_BYTES = 256 * 1024;
+var MAX_FILE_BYTES = 1024 * 1024;
+var MAX_SKILL_BYTES = 5 * 1024 * 1024;
+var MAX_FILES = 100;
+var MAX_CRAWL_PAGES = 10;
+function createSkillsCatalog(deps) {
+  const doFetch = deps.fetchImpl ?? fetch;
+  const entries = /* @__PURE__ */ new Map();
+  const resources = /* @__PURE__ */ new Map();
+  const skillIdByName = /* @__PURE__ */ new Map();
+  let crawled = false;
+  async function apiGet(pathAndQuery) {
+    const auth2 = deps.getAuth();
+    if (!auth2) throw new NotSignedInError();
+    const res = await doFetch(`${auth2.origin}${pathAndQuery}`, {
+      headers: {
+        Authorization: `Bearer ${auth2.token}`,
+        "X-Glean-Include-Experimental": "true",
+        Accept: "*/*"
+      }
+    });
+    if (!res.ok) {
+      throw new Error(`GET ${pathAndQuery} failed: ${res.status}`);
+    }
+    return res;
+  }
+  async function fetchPage(cursor) {
+    const params = new URLSearchParams({ page_size: String(PAGE_SIZE) });
+    if (cursor) params.set("cursor", cursor);
+    const res = await apiGet(`/api/skills?${params.toString()}`);
+    const body = await res.json();
+    return {
+      skills: Array.isArray(body.skills) ? body.skills : [],
+      nextCursor: body.has_more && body.next_cursor ? body.next_cursor : void 0
+    };
+  }
+  async function fetchBundle(skillId) {
+    const res = await apiGet(
+      `/api/skills/${encodeURIComponent(skillId)}/content`
+    );
+    const buf = Buffer.from(await res.arrayBuffer());
+    return isZip(buf) ? unzip(buf) : /* @__PURE__ */ new Map([["SKILL.md", buf]]);
+  }
+  function cache(entry, files) {
+    entries.set(entry.uri, entry);
+    for (const file of files) resources.set(file.uri, file);
+  }
+  async function loadSkill(skill) {
+    if (skill.status && skill.status !== "ENABLED") {
+      deps.log("skills.skipped", { id: skill.id, reason: skill.status });
+      return void 0;
+    }
+    let bundle;
+    try {
+      bundle = await fetchBundle(skill.id);
+    } catch (err) {
+      deps.log("skills.bundle-failed", { id: skill.id, msg: message(err) });
+      return void 0;
+    }
+    const built = buildSkillEntry(skill, bundle, deps.log);
+    if (!built) return void 0;
+    const owner = skillIdByName.get(built.name);
+    if (owner && owner !== skill.id) {
+      deps.log("skills.duplicate-name", { id: skill.id, name: built.name });
+      return void 0;
+    }
+    skillIdByName.set(built.name, skill.id);
+    cache(built.entry, built.files);
+    return built.entry;
+  }
+  async function list(cursor) {
+    const page = await fetchPage(cursor);
+    const loaded = await Promise.all(
+      page.skills.map((skill) => loadSkill(skill).catch(() => void 0))
+    );
+    const skills = loaded.filter((e) => !!e);
+    deps.log("skills-list.served", {
+      requested: page.skills.length,
+      served: skills.length,
+      hasMore: !!page.nextCursor
+    });
+    return { skills, nextCursor: page.nextCursor };
+  }
+  async function crawl() {
+    let cursor;
+    try {
+      for (let page = 0; page < MAX_CRAWL_PAGES; page++) {
+        const res = await list(cursor);
+        cursor = res.nextCursor;
+        if (!cursor) break;
+      }
+    } catch (err) {
+      if (err instanceof NotSignedInError) {
+        throw new McpError(ErrorCode.InvalidRequest, err.message);
+      }
+      throw err;
+    }
+    crawled = true;
+  }
+  return {
+    list,
+    async get(uri) {
+      const hit = entries.get(uri);
+      if (hit) return hit;
+      if (!crawled) await crawl();
+      const entry = entries.get(uri);
+      if (!entry) {
+        throw new McpError(ErrorCode.InvalidParams, `Unknown skill: ${uri}`);
+      }
+      return entry;
+    },
+    async read(uri) {
+      const hit = resources.get(uri);
+      if (hit) return hit;
+      if (!crawled) await crawl();
+      const resource = resources.get(uri);
+      if (!resource) {
+        throw new McpError(ErrorCode.InvalidParams, `Unknown resource: ${uri}`);
+      }
+      return resource;
+    },
+    // ponytail: only what this process has already listed. Enumerating every
+    // skill here would mean downloading every bundle on the host's startup
+    // resources/list — the skills flow (skills/list → resources/read) never
+    // needs it.
+    listResources() {
+      return [...resources.values()].map((r) => ({
+        uri: r.uri,
+        digest: digestOf(r.bytes)
+      }));
+    }
+  };
+}
+var NotSignedInError = class extends Error {
+  constructor() {
+    super("Glean is not configured or not signed in \u2014 run the `setup` tool.");
+  }
+};
+function buildSkillEntry(skill, bundle, log) {
+  const files = normalizeBundle(bundle);
+  const skillMd = files.get("SKILL.md");
+  if (!skillMd) {
+    log("skills.no-skill-md", { id: skill.id });
+    return void 0;
+  }
+  if (skillMd.length > MAX_SKILL_MD_BYTES) {
+    log("skills.skill-md-too-large", { id: skill.id, bytes: skillMd.length });
+    return void 0;
+  }
+  const frontmatter = parseFrontmatter2(skillMd.toString("utf-8"));
+  const name = resolveSkillName(frontmatter.name, skill);
+  frontmatter.name = name;
+  if (typeof frontmatter.description !== "string" || !frontmatter.description) {
+    frontmatter.description = skill.description ?? "";
+  }
+  const resources = [];
+  let total = 0;
+  for (const [relPath, bytes] of files) {
+    if (bytes.length > MAX_FILE_BYTES) {
+      log("skills.file-too-large", { id: skill.id, path: relPath });
+      continue;
+    }
+    if (resources.length >= MAX_FILES) {
+      log("skills.file-count-capped", { id: skill.id, path: relPath });
+      continue;
+    }
+    total += bytes.length;
+    if (total > MAX_SKILL_BYTES) {
+      log("skills.bundle-too-large", { id: skill.id, bytes: total });
+      return void 0;
+    }
+    resources.push({
+      uri: `${URI_PREFIX}${name}/${relPath}`,
+      bytes,
+      mimeType: mimeTypeFor(relPath, bytes)
+    });
+  }
+  const uri = `${URI_PREFIX}${name}/SKILL.md`;
+  return {
+    name,
+    entry: {
+      uri,
+      frontmatter,
+      resources: resources.map((r) => ({
+        uri: r.uri,
+        digest: digestOf(r.bytes)
+      }))
+    },
+    files: resources
+  };
+}
+function normalizeBundle(bundle) {
+  const safe = /* @__PURE__ */ new Map();
+  for (const [rawPath, bytes] of bundle) {
+    const relPath = rawPath.replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!relPath || relPath.split("/").includes("..")) continue;
+    safe.set(relPath, bytes);
+  }
+  if (safe.has("SKILL.md")) return safe;
+  const paths = [...safe.keys()];
+  const prefix = paths[0]?.includes("/") ? `${paths[0].split("/")[0]}/` : "";
+  if (!prefix || !paths.every((p) => p.startsWith(prefix))) return safe;
+  return new Map(
+    paths.map((p) => [p.slice(prefix.length), safe.get(p)])
+  );
+}
+function digestOf(bytes) {
+  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+function parseFrontmatter2(content) {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!match) return {};
+  try {
+    const parsed = import_yaml2.default.parse(match[1]);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return JSON.parse(JSON.stringify(parsed));
+  } catch {
+    return {};
+  }
+}
+var SAFE_NAME = /^[a-z0-9][a-z0-9._-]*$/;
+function resolveSkillName(frontmatterName, skill) {
+  if (typeof frontmatterName === "string" && SAFE_NAME.test(frontmatterName)) {
+    return frontmatterName;
+  }
+  const fallback = typeof frontmatterName === "string" && frontmatterName ? frontmatterName : skill.display_name || skill.id;
+  return fallback.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[-.]+|-+$/g, "").slice(0, 64) || skill.id;
+}
+function mimeTypeFor(relPath, bytes) {
+  const ext = relPath.slice(relPath.lastIndexOf(".")).toLowerCase();
+  switch (ext) {
+    case ".md":
+      return "text/markdown";
+    case ".json":
+      return "application/json";
+    case ".yaml":
+    case ".yml":
+      return "application/yaml";
+    case ".txt":
+      return "text/plain";
+    case ".csv":
+      return "text/csv";
+    default:
+      return isUtf8(bytes) ? "text/plain" : "application/octet-stream";
+  }
+}
+function message(err) {
+  return err instanceof Error ? err.message : String(err);
+}
+var SkillsListRequestSchema = RequestSchema.extend({
+  method: literal("skills/list"),
+  params: looseObject({ cursor: string2().optional() }).optional()
+});
+var SkillsGetRequestSchema = RequestSchema.extend({
+  method: literal("skills/get"),
+  params: looseObject({ uri: string2() })
+});
+function registerSkillsExtension(server2, deps) {
+  const catalog = createSkillsCatalog(deps);
+  server2.setRequestHandler(SkillsListRequestSchema, async (request) => {
+    try {
+      const page = await catalog.list(request.params?.cursor);
+      return { skills: page.skills, nextCursor: page.nextCursor };
+    } catch (err) {
+      if (err instanceof NotSignedInError) {
+        deps.log("skills-list.not-signed-in");
+        return { skills: [] };
+      }
+      deps.log("skills-list.failed", { msg: message(err) });
+      throw err instanceof McpError ? err : new McpError(ErrorCode.InternalError, message(err));
+    }
+  });
+  server2.setRequestHandler(SkillsGetRequestSchema, async (request) => {
+    return { skill: await catalog.get(request.params.uri) };
+  });
+  server2.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: catalog.listResources().map((r) => ({
+      uri: r.uri,
+      name: r.uri.slice(URI_PREFIX.length)
+    }))
+  }));
+  server2.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const resource = await catalog.read(request.params.uri);
+    const isText = resource.mimeType !== "application/octet-stream" && isUtf8(resource.bytes);
+    return {
+      contents: [
+        {
+          uri: resource.uri,
+          mimeType: resource.mimeType,
+          ...isText ? { text: resource.bytes.toString("utf-8") } : { blob: resource.bytes.toString("base64") }
+        }
+      ]
+    };
+  });
+  return catalog;
 }
 
 // src/url-config-store.ts
@@ -26340,7 +26713,15 @@ function resolveSkillsBaseDir() {
 }
 var server = new Server(
   { name: "glean", version: "1.0.0" },
-  { capabilities: { tools: { listChanged: true } } }
+  {
+    capabilities: {
+      tools: { listChanged: true },
+      // `resources` is required to register resources/read, which the skills
+      // extension uses to serve SKILL.md and its supporting files.
+      resources: {},
+      extensions: { [SKILLS_CAPABILITY]: {} }
+    }
+  }
 );
 var oauthProvider;
 var cachedRemoteTools = loadRemoteTools(resolveServerUrl() ?? "");
@@ -26357,6 +26738,15 @@ function getOAuthProvider() {
 function getRemoteClientOpts() {
   return { authProvider: getOAuthProvider() };
 }
+registerSkillsExtension(server, {
+  getAuth: () => {
+    const serverUrl = resolveServerUrl();
+    const token = getOAuthProvider().tokens()?.access_token;
+    if (!serverUrl || !token) return void 0;
+    return { origin: new URL(serverUrl).origin, token };
+  },
+  log: logLine
+});
 var FIND_SKILLS_TOOL = {
   name: "find_skills",
   annotations: { readOnlyHint: true },

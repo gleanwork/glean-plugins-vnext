@@ -27,6 +27,10 @@ import {
 } from "./tools/run-tool.js";
 import { evictStaleSkills } from "./skill-writer.js";
 import {
+  SKILLS_CAPABILITY,
+  registerSkillsExtension,
+} from "./skills-catalog.js";
+import {
   loadServerUrl,
   saveServerUrl,
   clearServerUrl,
@@ -127,7 +131,15 @@ function resolveSkillsBaseDir(): string {
 
 const server = new Server(
   { name: "glean", version: "1.0.0" },
-  { capabilities: { tools: { listChanged: true } } },
+  {
+    capabilities: {
+      tools: { listChanged: true },
+      // `resources` is required to register resources/read, which the skills
+      // extension uses to serve SKILL.md and its supporting files.
+      resources: {},
+      extensions: { [SKILLS_CAPABILITY]: {} },
+    },
+  },
 );
 
 let oauthProvider: GleanOAuthClientProvider | undefined;
@@ -163,6 +175,20 @@ function getOAuthProvider(): GleanOAuthClientProvider {
 function getRemoteClientOpts(): RemoteClientOptions {
   return { authProvider: getOAuthProvider() };
 }
+
+// Glean-hosted skills, served over the MCP skills extension for hosts that
+// import skills from the server (e.g. ChatGPT plugins) instead of from the
+// packaged plugin directory. Unconfigured/signed-out sessions serve an empty
+// catalog; `setup` is still the only path that drives OAuth.
+registerSkillsExtension(server, {
+  getAuth: () => {
+    const serverUrl = resolveServerUrl();
+    const token = getOAuthProvider().tokens()?.access_token;
+    if (!serverUrl || !token) return undefined;
+    return { origin: new URL(serverUrl).origin, token };
+  },
+  log: logLine,
+});
 
 const FIND_SKILLS_TOOL: Tool = {
   name: "find_skills",
