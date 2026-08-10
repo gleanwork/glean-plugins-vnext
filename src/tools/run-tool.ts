@@ -9,7 +9,7 @@ import { callRemoteTool } from "../remote-client.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
 import { resolveSessionId } from "../session-id.js";
 
-const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
+const DEFAULT_FILE_ARG_MAX_BYTES = 5 * 1024 * 1024;
 
 // How long a user has to respond to an approval prompt. The MCP SDK's own
 // request timeout is 60s and, on expiry, elicitInput REJECTS — so unless we

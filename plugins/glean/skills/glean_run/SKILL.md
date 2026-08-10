@@ -116,7 +116,7 @@ run_tool({
 Constraints:
 - Paths must be absolute.
 - A key in `file_args` must not also appear in `arguments`.
-- Each file must be ≤ 1 MB (override via `GLEAN_FILE_ARG_MAX_BYTES`).
+- Each file must be ≤ 5 MB (override via `GLEAN_FILE_ARG_MAX_BYTES`).
 
 ## Rules
 
