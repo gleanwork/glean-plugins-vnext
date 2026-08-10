@@ -245,7 +245,7 @@ const RUN_TOOL_TOOL: Tool = {
           "string. Use this to keep large values out of the inline call — " +
           "long-form text (Slack message bodies, Confluence pages, doc " +
           "contents) or a large structured argument (e.g. an agent spec). " +
-          "Paths must be absolute. Each file must be ≤ 1 MB (override " +
+          "Paths must be absolute. Each file must be ≤ 5 MB (override " +
           "via GLEAN_FILE_ARG_MAX_BYTES). A key in `file_args` must not " +
           "also appear in `arguments`.",
         additionalProperties: { type: "string" },
