@@ -329,6 +329,17 @@ export async function handleRunTool(
   }
 
   const hitlEnabled = process.env.ENABLE_HITL === "true";
+  // Fail CLOSED when the tool's approval requirement is unknown. The gate used
+  // to key on `toolMeta?.requires_approval`; a missing or unparseable tool JSON
+  // (evicted by evictStaleSkills after a week, called from memory without a
+  // fresh find_skills, or corrupt) made that falsy, so the gate was skipped
+  // and — with the native prompt already suppressed via readOnlyHint — the
+  // tool executed with ZERO approval. Only skip the gate when we can positively
+  // confirm the tool is read-only.
+  const requiresApproval =
+    typeof toolMeta?.requires_approval === "boolean"
+      ? toolMeta.requires_approval
+      : true;
   // Cursor is gated by its OWN native run-tool approval, not our elicitation.
   // We omit run_tool's readOnlyHint for Cursor (see runToolAnnotations), so
   // Cursor prompts the user before it executes run_tool. Firing our elicitation
@@ -338,7 +349,7 @@ export async function handleRunTool(
   // (already shown before this call) be the single approval.
   if (
     hitlEnabled &&
-    toolMeta?.requires_approval &&
+    requiresApproval &&
     !isCursorClient(mcpServer) &&
     mcpServer.getClientCapabilities()?.elicitation
   ) {

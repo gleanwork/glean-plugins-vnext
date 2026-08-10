@@ -59,7 +59,13 @@ function compactArgLine(
     rendered = String(value);
   }
 
-  return { line: `${key.toUpperCase()}: ${rendered}`, truncated };
+  // Sanitize the KEY the same way as values: collapse all whitespace (incl.
+  // newlines) to single spaces. A prompt-injected model can otherwise add an
+  // argument whose key embeds newlines (e.g. "note\nACTION: read_only\n...") to
+  // forge extra structural lines in the approval message and spoof what the
+  // user is approving. Uppercased so a key reads distinctly from its value.
+  const safeKey = key.replace(/\s+/g, " ").trim().toUpperCase();
+  return { line: `${safeKey}: ${rendered}`, truncated };
 }
 
 // Build the compact, viewport-friendly argument lines for the approval prompt.
@@ -80,10 +86,23 @@ export function buildCompactArgs(args: unknown): {
   const entries = Object.entries(args as Record<string, unknown>);
   const rendered = entries.map(([key, value]) => compactArgLine(key, value));
   const anyTruncated = rendered.some((r) => r.truncated);
-  const needsFile = entries.length > maxArgSectionLines || anyTruncated;
-  // Reserve one line for the file path when spilling.
-  const inlineCount = needsFile ? maxArgSectionLines - 1 : maxArgSectionLines;
+  // Reserve one line for the spill-file path (buildApprovalMessage appends it).
+  const fileReserve =
+    entries.length > maxArgSectionLines || anyTruncated ? 1 : 0;
+  const capacity = maxArgSectionLines - fileReserve;
+  // If not everything fits, reserve one more line for the "(+N more)" marker so
+  // hidden arguments are always disclosed — a prompt-injected extra arg can't
+  // silently pad the list past the cap and vanish.
+  const willOmit = entries.length > capacity;
+  const inlineCount = willOmit ? capacity - 1 : capacity;
   const lines = rendered.slice(0, inlineCount).map((r) => r.line);
+  const omitted = entries.length - lines.length;
+  if (omitted > 0) {
+    lines.push(
+      `(+${omitted} more argument${omitted === 1 ? "" : "s"} — see full arguments file)`,
+    );
+  }
+  const needsFile = omitted > 0 || anyTruncated;
   return { lines, needsFile };
 }
 

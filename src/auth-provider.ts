@@ -5,6 +5,7 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { execFile, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { platform } from "node:os";
 import { getCallbackUrl, setExpectedState } from "./auth-callback-server.js";
 import { clearCredentials, loadCredentials, saveCredentials } from "./token-store.js";
@@ -158,6 +159,16 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   // propagates out as AuthRequiredError) and hand the loopback server the
   // `state` value to validate the redirect against.
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
+    // The MCP SDK does not attach an OAuth `state` parameter, which left the
+    // loopback callback's CSRF check (see startCallbackServer) dead code:
+    // expectedState was always undefined, so the check never ran. Generate a
+    // state nonce here and attach it to the URL the browser opens; a compliant
+    // authorization server echoes it back to the redirect URI, where the
+    // callback server verifies it matches. (Loopback-only bind + PKCE already
+    // limit exposure; state closes the CSRF gap the callback server checks.)
+    if (!authorizationUrl.searchParams.get("state")) {
+      authorizationUrl.searchParams.set("state", randomUUID());
+    }
     this.authorizationUrl = authorizationUrl.toString();
     this._authUrlPending = true;
     setExpectedState(authorizationUrl.searchParams.get("state") ?? undefined);
