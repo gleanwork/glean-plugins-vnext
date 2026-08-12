@@ -26256,7 +26256,7 @@ async function writeApprovalArgsFile(toolName, args) {
 }
 
 // src/tools/run-tool.ts
-var DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
+var DEFAULT_FILE_ARG_MAX_BYTES = 5 * 1024 * 1024;
 var defaultHitlTimeoutMs = 3e5;
 var FileArgsError = class extends Error {
   constructor(message) {
@@ -26885,7 +26885,7 @@ var RUN_TOOL_TOOL = {
       },
       file_args: {
         type: "object",
-        description: "Optional map from argument name to absolute local file path. The plugin reads each file and substitutes its contents into the corresponding key in `arguments` before calling the remote tool. If the target parameter is typed as an object or array in the tool's inputSchema, the file is parsed as JSON and injected as structured data; otherwise its contents are injected as a UTF-8 string. Use this to keep large values out of the inline call \u2014 long-form text (Slack message bodies, Confluence pages, doc contents) or a large structured argument (e.g. an agent spec). Paths must be absolute. Each file must be \u2264 1 MB (override via GLEAN_FILE_ARG_MAX_BYTES). A key in `file_args` must not also appear in `arguments`.",
+        description: "Optional map from argument name to absolute local file path. The plugin reads each file and substitutes its contents into the corresponding key in `arguments` before calling the remote tool. If the target parameter is typed as an object or array in the tool's inputSchema, the file is parsed as JSON and injected as structured data; otherwise its contents are injected as a UTF-8 string. Use this to keep large values out of the inline call \u2014 long-form text (Slack message bodies, Confluence pages, doc contents) or a large structured argument (e.g. an agent spec). Paths must be absolute. Each file must be \u2264 5 MB (override via GLEAN_FILE_ARG_MAX_BYTES). A key in `file_args` must not also appear in `arguments`.",
         additionalProperties: { type: "string" }
       }
     },
