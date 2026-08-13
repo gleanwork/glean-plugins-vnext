@@ -8,10 +8,18 @@ import { execFile, spawn } from "node:child_process";
 import { platform } from "node:os";
 import { getCallbackUrl, setExpectedState } from "./auth-callback-server.js";
 import {
+  acquireDataFileLockSync,
+  releaseDataFileLock,
+  type DataLockHandle,
+} from "./data-dir.js";
+import {
+  acquireClientRegistrationLock,
   clearCredentials,
   credentialsMtimeMs,
   loadCredentials,
+  releaseClientRegistrationLock,
   saveCredentials,
+  type CredentialMetadata,
 } from "./token-store.js";
 
 export type InvalidationScope = "all" | "client" | "tokens" | "verifier";
@@ -31,6 +39,11 @@ function rotationGraceMs(): number {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function normalizeAccountEmail(email: string | undefined): string | undefined {
+  const normalized = email?.trim().toLowerCase();
+  return normalized || undefined;
 }
 
 /**
@@ -71,6 +84,14 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   private _authUrlPending = false;
   // mtime at last read; detects sibling rewrites of the shared store.
   private _credentialsMtimeMs: number | undefined;
+  // Consecutive abandoned sign-ins with the current client.
+  private _abandonedSignIns = 0;
+  // Held from clientInformation() returning undefined until the SDK either
+  // persists the registration or the connection attempt fails.
+  private _clientRegistrationLock: DataLockHandle | undefined;
+  private _accountEmail: string | undefined;
+  private _clientServerUrl: string | undefined;
+  private _tokenUpdatedAt: number | undefined;
 
   authorizationUrl: string | undefined;
 
@@ -85,8 +106,12 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   constructor() {
     const stored = loadCredentials();
     if (stored) {
-      this._tokens = stored.tokens as OAuthTokens | undefined;
-      this._clientInfo = stored.clientInfo as OAuthClientInformationMixed | undefined;
+      this._tokens = (stored.tokens ?? undefined) as OAuthTokens | undefined;
+      this._clientInfo = (stored.clientInfo ?? undefined) as OAuthClientInformationMixed | undefined;
+      this._accountEmail = stored.accountEmail ?? undefined;
+      this._clientServerUrl = stored.clientServerUrl ?? undefined;
+      this._abandonedSignIns = stored.abandonedSignIns ?? 0;
+      this._tokenUpdatedAt = stored.tokenUpdatedAt ?? undefined;
     }
     this._credentialsMtimeMs = credentialsMtimeMs();
   }
@@ -107,9 +132,35 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     if (!stored) return;
     if (stored.tokens) {
       this._tokens = stored.tokens as OAuthTokens;
+    } else if (
+      stored.tokenUpdatedAt !== undefined &&
+      stored.tokenUpdatedAt !== null &&
+      (this._tokenUpdatedAt === undefined ||
+        stored.tokenUpdatedAt > this._tokenUpdatedAt)
+    ) {
+      // A newer explicit reset/invalidation is different from a transient
+      // missing file or a client-only rewrite; propagate the token tombstone.
+      this._tokens = undefined;
     }
     if (stored.clientInfo) {
       this._clientInfo = stored.clientInfo as OAuthClientInformationMixed;
+      // A sibling completed the registration while this process was waiting.
+      if (this._clientRegistrationLock) {
+        releaseClientRegistrationLock(this._clientRegistrationLock);
+        this._clientRegistrationLock = undefined;
+      }
+    }
+    if (stored.accountEmail !== undefined) {
+      this._accountEmail = stored.accountEmail ?? undefined;
+    }
+    if (stored.clientServerUrl !== undefined) {
+      this._clientServerUrl = stored.clientServerUrl ?? undefined;
+    }
+    if (stored.abandonedSignIns !== undefined) {
+      this._abandonedSignIns = stored.abandonedSignIns ?? 0;
+    }
+    if (stored.tokenUpdatedAt !== undefined) {
+      this._tokenUpdatedAt = stored.tokenUpdatedAt ?? undefined;
     }
   }
 
@@ -133,6 +184,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
       return false;
     }
     this._tokens = diskTokens;
+    this._tokenUpdatedAt = stored?.tokenUpdatedAt ?? Date.now();
     this._credentialsMtimeMs = diskMtime;
     if (stored?.clientInfo) {
       this._clientInfo = stored.clientInfo as OAuthClientInformationMixed;
@@ -183,13 +235,35 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   }
 
   clientInformation(): OAuthClientInformationMixed | undefined {
+    // Pick up a sibling's registration; the SDK registers whenever this is undefined.
+    this.syncTokensFromDisk();
+    if (this._clientInfo) return this._clientInfo;
+
+    // The SDK's provider API is synchronous here. Acquire a lock before
+    // returning undefined and hold it until saveClientInformation() or the
+    // connection error path. A second process therefore waits for the first
+    // registration to land instead of registering a second client.
+    if (!this._clientRegistrationLock) {
+      this._clientRegistrationLock = acquireClientRegistrationLock();
+      // The lock may have been held by a sibling that just completed DCR.
+      // Force a post-lock read before deciding that registration is needed.
+      this._credentialsMtimeMs = undefined;
+      this.syncTokensFromDisk();
+      if (this._clientInfo) {
+        releaseClientRegistrationLock(this._clientRegistrationLock);
+        this._clientRegistrationLock = undefined;
+      }
+    }
     return this._clientInfo;
   }
 
   saveClientInformation(info: OAuthClientInformationMixed): void {
+    console.error(`[auth] Registered OAuth client: ${info.client_id}`);
     this._clientInfo = info;
-    saveCredentials(this._tokens, this._clientInfo);
+    saveCredentials(this._tokens, this._clientInfo, this.credentialMetadata());
     this._credentialsMtimeMs = credentialsMtimeMs();
+    releaseClientRegistrationLock(this._clientRegistrationLock);
+    this._clientRegistrationLock = undefined;
   }
 
   tokens(): OAuthTokens | undefined {
@@ -199,11 +273,63 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
 
   saveTokens(tokens: OAuthTokens): void {
     this._tokens = tokens;
+    this._tokenUpdatedAt = Date.now();
     this._authUrlPending = false;
-    saveCredentials(this._tokens, this._clientInfo);
+    this._abandonedSignIns = 0;
+    saveCredentials(this._tokens, this._clientInfo, this.credentialMetadata());
     // Own write must not look like a sibling change.
     this._credentialsMtimeMs = credentialsMtimeMs();
     this.onTokensChanged?.(tokens);
+  }
+
+  /** Persist the account/server context without changing the grant. */
+  setAccountContext(accountEmail: string | undefined, serverUrl: string): void {
+    this._accountEmail = normalizeAccountEmail(accountEmail);
+    this._clientServerUrl = serverUrl;
+    saveCredentials(this._tokens, this._clientInfo, this.credentialMetadata());
+    this._credentialsMtimeMs = credentialsMtimeMs();
+  }
+
+  /** The account associated with the currently cached grant, if known. */
+  accountEmail(): string | undefined {
+    return this._accountEmail;
+  }
+
+  /** The server for which the cached DCR client was registered, if known. */
+  clientServerUrl(): string | undefined {
+    return this._clientServerUrl;
+  }
+
+  /**
+   * Force a new user sign-in while retaining a client registered for the same
+   * server. This is used for account switching; full setup reset clears the
+   * provider and registered client in the setup tool.
+   */
+  resetAuthentication(accountEmail: string | undefined, serverUrl: string): void {
+    const hadTokens = this._tokens !== undefined;
+    this._tokens = undefined;
+    this._tokenUpdatedAt = Date.now();
+    this._accountEmail = normalizeAccountEmail(accountEmail);
+    this._clientServerUrl = serverUrl;
+    this._codeVerifier = "";
+    this._pendingAuthCode = undefined;
+    this.authorizationUrl = undefined;
+    this._authUrlPending = false;
+    this._abandonedSignIns = 0;
+    saveCredentials(undefined, this._clientInfo, this.credentialMetadata(), {
+      forceTokenUpdate: true,
+    });
+    this._credentialsMtimeMs = credentialsMtimeMs();
+    if (hadTokens) this.onTokensChanged?.(undefined);
+  }
+
+  private credentialMetadata(): CredentialMetadata {
+    return {
+      accountEmail: this._accountEmail ?? null,
+      clientServerUrl: this._clientServerUrl ?? null,
+      abandonedSignIns: this._abandonedSignIns,
+      tokenUpdatedAt: this._tokenUpdatedAt ?? null,
+    };
   }
 
   async invalidateCredentials(scope: InvalidationScope): Promise<void> {
@@ -211,21 +337,32 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     const tokensClearedBefore = this._tokens === undefined;
     switch (scope) {
       case "all":
+        this.releaseClientRegistrationLock();
         this._tokens = undefined;
         this._clientInfo = undefined;
+        this._accountEmail = undefined;
+        this._clientServerUrl = undefined;
         this._codeVerifier = "";
         this._authUrlPending = false;
+        // Fresh client → fresh retry budget.
+        this._abandonedSignIns = 0;
         clearCredentials();
         break;
       case "client":
+        this.releaseClientRegistrationLock();
         this._clientInfo = undefined;
-        saveCredentials(this._tokens, undefined);
+        saveCredentials(this._tokens, undefined, this.credentialMetadata(), {
+          forceClientUpdate: true,
+        });
         break;
       case "tokens":
         // Usually a sibling's rotation — try adopting before clearing.
         if (await this.adoptNewerTokenWithGrace()) return;
         this._tokens = undefined;
-        saveCredentials(undefined, this._clientInfo);
+        this._tokenUpdatedAt = Date.now();
+        saveCredentials(undefined, this._clientInfo, this.credentialMetadata(), {
+          forceTokenUpdate: true,
+        });
         break;
       case "verifier":
         this._codeVerifier = "";
@@ -239,6 +376,11 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     }
   }
 
+  releaseClientRegistrationLock(): void {
+    releaseClientRegistrationLock(this._clientRegistrationLock);
+    this._clientRegistrationLock = undefined;
+  }
+
   // True if we previously issued an authorize URL but never received tokens —
   // implying the URL was likely rejected by the server (e.g. stale client_id).
   needsFreshClient(): boolean {
@@ -247,6 +389,32 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
       !this._tokens?.access_token &&
       this._pendingAuthCode === undefined
     );
+  }
+
+  // Abandoned sign-in: keep the client and clear the pending flow. Returns
+  // false after two consecutive failures (client likely dead → re-register).
+  abandonPendingSignIn(clientRejected = false): boolean {
+    const lock = acquireDataFileLockSync("mcp-auth-recovery", {
+      waitMs: 5_000,
+      staleMs: 30_000,
+    });
+    try {
+      // Re-read first so a sibling's token/client metadata is not clobbered by
+      // this process's recovery bookkeeping.
+      this.syncTokensFromDisk();
+      this._abandonedSignIns = clientRejected
+        ? 2
+        : this._abandonedSignIns + 1;
+      this._codeVerifier = "";
+      this._pendingAuthCode = undefined;
+      this.authorizationUrl = undefined;
+      this._authUrlPending = false;
+      saveCredentials(this._tokens, this._clientInfo, this.credentialMetadata());
+      this._credentialsMtimeMs = credentialsMtimeMs();
+      return !clientRejected && this._abandonedSignIns < 2;
+    } finally {
+      releaseDataFileLock(lock);
+    }
   }
 
   get pendingAuthCode(): string | undefined {

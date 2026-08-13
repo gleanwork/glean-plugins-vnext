@@ -1,14 +1,18 @@
 import fs from "node:fs";
 import path from "node:path";
-import { homedir } from "node:os";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ensureDataDir,
+  migrateLegacyData,
+  resolveDataDir,
+} from "./data-dir.js";
 
 const CACHE_FILENAME = "remote-tools-cache.json";
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 
 function resolveCacheDir(): string {
-  return process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
+  return resolveDataDir();
 }
 
 function cacheFile(): string {
@@ -23,6 +27,7 @@ interface CacheEntry {
 type Store = Record<string, CacheEntry>;
 
 function readStore(): Store {
+  migrateLegacyData();
   try {
     const raw = fs.readFileSync(cacheFile(), "utf-8");
     const data = JSON.parse(raw);
@@ -37,8 +42,7 @@ function readStore(): Store {
 
 function writeStore(store: Store): void {
   const filePath = cacheFile();
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  const dir = ensureDataDir();
   fs.chmodSync(dir, DIR_MODE);
   fs.writeFileSync(filePath, JSON.stringify(store, null, 2), {
     encoding: "utf-8",
@@ -68,6 +72,7 @@ export function saveRemoteTools(serverUrl: string, tools: Tool[]): void {
 }
 
 export function clearRemoteTools(serverUrl?: string): void {
+  migrateLegacyData();
   try {
     if (!serverUrl) {
       fs.rmSync(cacheFile(), { force: true });

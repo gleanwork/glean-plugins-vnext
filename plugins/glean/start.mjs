@@ -21,7 +21,9 @@ function val(v) {
 
 const launchCwd = process.cwd();
 
-// Resolve where credentials, caches, and config are stored.
+// Resolve the host-managed plugin data directory for skills/cache state.
+// Auth credentials and setup state are resolved by the bundle to the stable
+// per-user ~/.glean directory, with one-time migration from this legacy path.
 // CLAUDE_PLUGIN_DATA is the managed lifecycle dir provided by the plugin host.
 const pluginDataDir =
   val(process.env.CLAUDE_PLUGIN_DATA) ??

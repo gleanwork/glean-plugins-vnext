@@ -111,6 +111,14 @@ export class AuthRequiredError extends Error {
 }
 
 let pendingTransport: StreamableHTTPClientTransport | undefined;
+// The provider API is synchronous, so two connect calls in one MCP process can
+// both observe an empty client before the SDK's async DCR request completes.
+// Serialize that first registration per provider in addition to the OS lock
+// used by token-store for sibling processes.
+const pendingRegistrations = new WeakMap<
+  GleanOAuthClientProvider,
+  Promise<void>
+>();
 
 function buildTransport(
   serverUrl: string,
@@ -169,20 +177,42 @@ export async function createRemoteClient(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[auth] Code exchange failed: ${msg} — discarding stale auth state`);
-      authProvider.clearPendingAuth();
       pendingTransport = undefined;
-      await authProvider.invalidateCredentials("all");
+      // Keep the registration for code/verifier failures. An explicit
+      // invalid_client response escalates immediately; generic repeated
+      // failures use the shared two-attempt recovery budget.
+      if (!authProvider.abandonPendingSignIn(isInvalidClientError(err))) {
+        await authProvider.invalidateCredentials("all");
+      }
       return createRemoteClient(serverUrl, opts, chatSessionId);
     }
   }
 
-  // DCR recovery: we previously issued an authorize URL but never received
-  // tokens. The URL was likely rejected by the server (most commonly: the
-  // cached DCR client was deleted server-side). Force a fresh DCR so the next
-  // URL we generate uses a valid, server-known client_id.
+  // Unfinished sign-in: reuse the existing registration first; fresh DCR is
+  // the escalation path.
   if (authProvider?.needsFreshClient()) {
-    console.error("[auth] Previous auth URL didn't complete — forcing fresh DCR");
-    await authProvider.invalidateCredentials("all");
+    if (authProvider.abandonPendingSignIn()) {
+      console.error(
+        "[auth] Previous sign-in didn't complete — retrying with the existing client",
+      );
+    } else {
+      console.error(
+        "[auth] Sign-in failed twice with this client — forcing fresh DCR",
+      );
+      await authProvider.invalidateCredentials("all");
+    }
+  }
+
+  let registrationNeeded = false;
+  if (authProvider?.clientInformation) {
+    registrationNeeded = !authProvider.clientInformation();
+    if (registrationNeeded) {
+      const pending = pendingRegistrations.get(authProvider);
+      if (pending) {
+        await pending;
+        registrationNeeded = !authProvider.clientInformation();
+      }
+    }
   }
 
   const client = new Client(
@@ -194,10 +224,25 @@ export async function createRemoteClient(
   const accessTokenAtConnect = authProvider?.tokens()?.access_token;
 
   const transport = buildTransport(serverUrl, opts, chatSessionId);
+  let trackedRegistration: Promise<void> | undefined;
+  let connectPromise: Promise<void>;
+  if (registrationNeeded && authProvider) {
+    connectPromise = client.connect(transport);
+    trackedRegistration = connectPromise.then(
+      () => undefined,
+      () => undefined,
+    );
+    pendingRegistrations.set(authProvider, trackedRegistration);
+  } else {
+    connectPromise = client.connect(transport);
+  }
 
   try {
-    await client.connect(transport);
+    await connectPromise;
   } catch (error) {
+    // If registration failed before saveClientInformation() ran, do not leave
+    // the cross-process registration lock behind until stale-lock expiry.
+    authProvider?.releaseClientRegistrationLock?.();
     if (error instanceof UnauthorizedError && authProvider) {
       const refreshedAccessToken = authProvider.tokens()?.access_token;
       if (
@@ -230,9 +275,22 @@ export async function createRemoteClient(
       return createRemoteClient(serverUrl, opts, chatSessionId, true);
     }
     throw error;
+  } finally {
+    if (
+      trackedRegistration &&
+      authProvider &&
+      pendingRegistrations.get(authProvider) === trackedRegistration
+    ) {
+      pendingRegistrations.delete(authProvider);
+    }
   }
 
   return client;
+}
+
+function isInvalidClientError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  return /invalid[_ -]?client|unknown client|client authentication failed/i.test(msg);
 }
 
 // Match broadly; the caller's disk re-check gates the actual retry.

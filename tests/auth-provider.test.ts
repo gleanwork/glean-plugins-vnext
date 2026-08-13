@@ -28,6 +28,8 @@ describe("GleanOAuthClientProvider", () => {
 
   beforeEach(() => {
     delete process.env.PLUGIN_DATA_DIR;
+    delete process.env.CLAUDE_PLUGIN_DATA;
+    delete process.env.GLEAN_AUTH_DATA_DIR;
     // Skip the rotation grace window by default so invalidation tests don't
     // wait out the real 2s poll; the grace test overrides this explicitly.
     process.env.GLEAN_ROTATION_GRACE_MS = "0";
@@ -215,6 +217,82 @@ describe("GleanOAuthClientProvider", () => {
     expect(provider.tokens()).toBeUndefined();
   });
 
+  // --- Client reuse: an abandoned sign-in must not burn the DCR client.
+  // Every registration permanently adds a client server-side, so the
+  // existing one is retried first and a fresh DCR is the escalation path. ---
+
+  it("clientInformation() adopts a sibling's registration from disk", () => {
+    // Constructed with no credentials — this process would otherwise register.
+    const provider = new GleanOAuthClientProvider();
+    expect(provider.clientInformation()).toBeUndefined();
+
+    // Sibling process wins the registration race and persists its client.
+    writeCredFileNewer(undefined, { client_id: "cid_sibling" });
+
+    expect(provider.clientInformation()).toEqual({ client_id: "cid_sibling" });
+  });
+
+  it("abandonPendingSignIn keeps the registered client and clears the pending flow", async () => {
+    const provider = new GleanOAuthClientProvider();
+    provider.saveClientInformation({ client_id: "cid" } as any);
+    provider.saveCodeVerifier("v1");
+    await provider.redirectToAuthorization(
+      new URL("https://example.com/oauth/authorize?state=s1"),
+    );
+    expect(provider.needsFreshClient()).toBe(true);
+
+    expect(provider.abandonPendingSignIn()).toBe(true);
+
+    expect(provider.clientInformation()).toEqual({ client_id: "cid" });
+    expect(provider.codeVerifier()).toBe("");
+    expect(provider.authorizationUrl).toBeUndefined();
+    expect(provider.needsFreshClient()).toBe(false);
+    // Registration untouched on disk — nothing was wiped.
+    const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
+    expect(raw.clientInfo.client_id).toBe("cid");
+  });
+
+  it("abandonPendingSignIn exhausts after two consecutive abandonments", () => {
+    const provider = new GleanOAuthClientProvider();
+    expect(provider.abandonPendingSignIn()).toBe(true);
+    expect(provider.abandonPendingSignIn()).toBe(false);
+  });
+
+  it("a completed sign-in resets the abandonment budget", () => {
+    const provider = new GleanOAuthClientProvider();
+    expect(provider.abandonPendingSignIn()).toBe(true);
+    provider.saveTokens({ access_token: "tok" } as any);
+    // Fresh budget: the next abandonment retries the client again.
+    expect(provider.abandonPendingSignIn()).toBe(true);
+  });
+
+  it("invalidateCredentials('all') resets the budget for the next registration", async () => {
+    const provider = new GleanOAuthClientProvider();
+    expect(provider.abandonPendingSignIn()).toBe(true);
+    expect(provider.abandonPendingSignIn()).toBe(false);
+    await provider.invalidateCredentials("all");
+    // A freshly registered client gets a fresh retry budget.
+    expect(provider.abandonPendingSignIn()).toBe(true);
+  });
+
+  it("resetAuthentication keeps the client for account switching", () => {
+    const provider = new GleanOAuthClientProvider();
+    provider.saveTokens({ access_token: "tok", refresh_token: "refresh" } as any);
+    provider.saveClientInformation({ client_id: "cid" } as any);
+
+    provider.resetAuthentication(
+      "new-account@example.com",
+      "https://example.com/mcp/gateway/proxy",
+    );
+
+    expect(provider.tokens()).toBeUndefined();
+    expect(provider.clientInformation()).toEqual({ client_id: "cid" });
+    expect(provider.accountEmail()).toBe("new-account@example.com");
+    const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
+    expect(raw.tokens).toBeUndefined();
+    expect(raw.clientInfo.client_id).toBe("cid");
+  });
+
   it("saveClientInformation persists to disk", () => {
     const provider = new GleanOAuthClientProvider();
     const info = { client_id: "cid", client_secret: "sec" } as any;
@@ -390,5 +468,44 @@ describe("GleanOAuthClientProvider", () => {
     provider.onTokensChanged = (t) => observed.push(t);
     await provider.invalidateCredentials("client");
     expect(observed).toEqual([]);
+  });
+
+  it("switches accounts without creating a new DCR client", () => {
+    const provider = new GleanOAuthClientProvider();
+    provider.saveClientInformation({ client_id: "cid" } as any);
+    provider.setAccountContext(
+      "Alice@Example.com",
+      "https://acme-be.glean.com/mcp/gateway/proxy",
+    );
+    provider.saveTokens({ access_token: "alice-token" } as any);
+
+    provider.resetAuthentication(
+      "Bob@Example.com",
+      "https://acme-be.glean.com/mcp/gateway/proxy",
+    );
+
+    expect(provider.tokens()).toBeUndefined();
+    expect(provider.clientInformation()).toEqual({ client_id: "cid" });
+    expect(provider.accountEmail()).toBe("bob@example.com");
+    const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
+    expect(raw.clientInfo.client_id).toBe("cid");
+    expect(raw.tokens).toBeUndefined();
+    expect(raw.accountEmail).toBe("bob@example.com");
+  });
+
+  it("shares the abandoned-sign-in budget across provider instances", () => {
+    const first = new GleanOAuthClientProvider();
+    first.saveClientInformation({ client_id: "cid" } as any);
+    expect(first.abandonPendingSignIn()).toBe(true);
+
+    const second = new GleanOAuthClientProvider();
+    expect(second.abandonPendingSignIn()).toBe(false);
+  });
+
+  it("immediately escalates when the server explicitly rejects the client", () => {
+    const provider = new GleanOAuthClientProvider();
+    expect(provider.abandonPendingSignIn(true)).toBe(false);
+    const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
+    expect(raw.abandonedSignIns).toBe(2);
   });
 });

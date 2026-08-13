@@ -10,19 +10,34 @@ vi.mock("node:os", async () => {
   return { ...actual, homedir: () => tmpDir };
 });
 
-const { clearCredentials, credentialsMtimeMs, loadCredentials, saveCredentials } =
-  await import("../src/token-store.js");
+const {
+  acquireClientRegistrationLock,
+  clearCredentials,
+  credentialsMtimeMs,
+  loadCredentials,
+  releaseClientRegistrationLock,
+  saveCredentials,
+} = await import("../src/token-store.js");
+const { acquireDataFileLockSync, releaseDataFileLock } = await import(
+  "../src/data-dir.js"
+);
 
 describe("token-store", () => {
   const gleanDir = path.join(tmpDir, ".glean");
   const credFile = path.join(gleanDir, "mcp-credentials.json");
+  const legacyDir = path.join(tmpDir, "managed-plugin-data");
 
   beforeEach(() => {
+    delete process.env.PLUGIN_DATA_DIR;
+    delete process.env.CLAUDE_PLUGIN_DATA;
+    delete process.env.GLEAN_AUTH_DATA_DIR;
     fs.rmSync(gleanDir, { recursive: true, force: true });
+    fs.rmSync(legacyDir, { recursive: true, force: true });
   });
 
   afterEach(() => {
     fs.rmSync(gleanDir, { recursive: true, force: true });
+    fs.rmSync(legacyDir, { recursive: true, force: true });
   });
 
   it("returns undefined when credentials file does not exist", () => {
@@ -105,5 +120,62 @@ describe("token-store", () => {
     const future = new Date(Date.now() + 10_000);
     fs.utimesSync(credFile, future, future);
     expect(credentialsMtimeMs()!).toBeGreaterThan(first);
+  });
+
+  it("migrates a host-managed credentials store into the canonical store", () => {
+    process.env.PLUGIN_DATA_DIR = legacyDir;
+    fs.mkdirSync(legacyDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(legacyDir, "mcp-credentials.json"),
+      JSON.stringify({
+        tokens: { access_token: "legacy-token" },
+        clientInfo: { client_id: "legacy-client" },
+      }),
+    );
+
+    expect(loadCredentials()).toEqual({
+      tokens: { access_token: "legacy-token" },
+      clientInfo: { client_id: "legacy-client" },
+    });
+    expect(fs.existsSync(credFile)).toBe(true);
+  });
+
+  it("serializes cross-process lock acquisition", () => {
+    const first = acquireDataFileLockSync("lock-test", { waitMs: 0 });
+    expect(first).toBeTruthy();
+    const second = acquireDataFileLockSync("lock-test", { waitMs: 0 });
+    expect(second).toBeUndefined();
+    releaseDataFileLock(first);
+    const third = acquireDataFileLockSync("lock-test", { waitMs: 0 });
+    expect(third).toBeTruthy();
+    releaseDataFileLock(third);
+  });
+
+  it("holds a client registration lock until registration completes", () => {
+    const first = acquireClientRegistrationLock();
+    expect(first).toBeTruthy();
+    const second = acquireDataFileLockSync("mcp-client-registration", { waitMs: 0 });
+    expect(second).toBeUndefined();
+    releaseClientRegistrationLock(first);
+  });
+
+  it("does not let a metadata write clobber a newer token grant", () => {
+    saveCredentials(
+      { access_token: "new-token", refresh_token: "new-refresh" },
+      { client_id: "cid" },
+      { tokenUpdatedAt: 200 },
+    );
+    saveCredentials(
+      undefined,
+      undefined,
+      { accountEmail: "user@example.com", tokenUpdatedAt: 100 },
+    );
+
+    expect(loadCredentials()).toMatchObject({
+      tokens: { access_token: "new-token", refresh_token: "new-refresh" },
+      clientInfo: { client_id: "cid" },
+      accountEmail: "user@example.com",
+      tokenUpdatedAt: 200,
+    });
   });
 });

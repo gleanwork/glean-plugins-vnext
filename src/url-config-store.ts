@@ -1,13 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
-import { homedir } from "node:os";
+import {
+  ensureDataDir,
+  migrateLegacyData,
+  resolveDataDir,
+} from "./data-dir.js";
 
 const CONFIG_FILENAME = "mcp-server-url.json";
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 
 function resolveConfigDir(): string {
-  return process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
+  return resolveDataDir();
 }
 
 function configFile(): string {
@@ -19,6 +23,7 @@ interface StoredConfig {
 }
 
 export function loadServerUrl(): string | undefined {
+  migrateLegacyData();
   try {
     const raw = fs.readFileSync(configFile(), "utf-8");
     const data = JSON.parse(raw) as StoredConfig;
@@ -30,9 +35,9 @@ export function loadServerUrl(): string | undefined {
 }
 
 export function saveServerUrl(url: string): void {
+  migrateLegacyData();
   const filePath = configFile();
-  const dir = path.dirname(filePath);
-  fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
+  const dir = ensureDataDir();
   fs.chmodSync(dir, DIR_MODE);
   const data: StoredConfig = { serverUrl: url };
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2), {
@@ -43,6 +48,7 @@ export function saveServerUrl(url: string): void {
 }
 
 export function clearServerUrl(): void {
+  migrateLegacyData();
   try {
     fs.rmSync(configFile(), { force: true });
   } catch {

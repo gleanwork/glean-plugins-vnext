@@ -8,13 +8,17 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import path from "node:path";
 import fs from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import {
   AuthRequiredError,
   createRemoteClient,
   type RemoteClientOptions,
 } from "./remote-client.js";
-import { GleanOAuthClientProvider, openBrowser } from "./auth-provider.js";
+import {
+  GleanOAuthClientProvider,
+  normalizeAccountEmail,
+  openBrowser,
+} from "./auth-provider.js";
 import {
   startCallbackServer,
   closeCallbackServer,
@@ -31,7 +35,11 @@ import {
   saveServerUrl,
   clearServerUrl,
 } from "./url-config-store.js";
-import { clearCredentials } from "./token-store.js";
+import {
+  clearCredentials,
+  loadCredentials,
+  saveCredentials,
+} from "./token-store.js";
 import {
   loadRemoteTools,
   saveRemoteTools,
@@ -45,6 +53,8 @@ import {
 } from "./tools/remote-passthrough.js";
 import { resolveSessionId } from "./session-id.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
+import { resolveDataDir } from "./data-dir.js";
+import { normalizeServerUrl } from "./server-url.js";
 
 function readEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -60,11 +70,6 @@ function resolveServerUrl(): string | undefined {
   const fromEnv = readEnv("GLEAN_MCP_SERVER_URL");
   if (fromEnv) return fromEnv;
   return loadServerUrl();
-}
-
-function normalizeServerUrl(raw: string): string {
-  const parsed = new URL(raw);
-  return `${parsed.origin}/mcp/gateway/proxy`;
 }
 
 const SETUP_REQUIRED_TEXT =
@@ -92,8 +97,7 @@ const AUTH_REDIRECT_TO_SETUP_TEXT =
   "(no arguments) to sign in to Glean, then retry this tool.";
 
 function resolveLogPath(): string {
-  const base = process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
-  return path.join(base, "glean-server.log");
+  return path.join(resolveDataDir(), "glean-server.log");
 }
 
 const LOG_PATH = resolveLogPath();
@@ -264,7 +268,8 @@ const SETUP_TOOL: Tool = {
     "(3) fetch the remote tool catalog. Call with no arguments to advance " +
     "through the next missing stage. Call with email to look up and " +
     "(re)configure user's Glean instance. Call with reset=true to clear " +
-    "all configuration.",
+    "the current authentication, setup URL, and registered DCR client before " +
+    "starting a new setup flow.",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -284,7 +289,9 @@ const SETUP_TOOL: Tool = {
       },
       reset: {
         type: "boolean",
-        description: "Clear cached URL, credentials, and remote tool cache.",
+        description:
+          "Clear the cached URL, authentication, registered OAuth client, " +
+          "and remote tool cache. The next setup registers a new client.",
       },
     },
     required: [],
@@ -521,6 +528,11 @@ async function advanceSetup(): Promise<CallToolResult> {
     return { content: [{ type: "text", text: SETUP_REQUIRED_TEXT }] };
   }
 
+  const provider = getOAuthProvider();
+  if (provider.clientServerUrl() !== serverUrl) {
+    provider.setAccountContext(provider.accountEmail(), serverUrl);
+  }
+
   const conn = await connectWithSignIn(serverUrl);
   if (!conn.ok) return conn.result;
   const remoteClient = conn.client;
@@ -730,12 +742,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clientInfo: server.getClientVersion() ?? null,
       });
       if (args.reset === true) {
+        const hadClient = !!loadCredentials()?.clientInfo;
         clearServerUrl();
         clearCredentials();
         clearRemoteTools();
         oauthProvider = undefined;
         cachedRemoteTools = [];
-        logLine("setup.reset");
+        logLine("setup.reset", {
+          clearedClient: hadClient,
+        });
         // Fire-and-forget — tools list is shorter without the dynamic
         // surface; the host should re-fetch on its next idle cycle.
         server.sendToolListChanged().catch(() => {
@@ -746,8 +761,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text:
-                "Glean configuration has been reset. Call setup again with " +
-                "your email to reconfigure.",
+                "Glean authentication has been reset, including the registered " +
+                "OAuth client. Call setup again with your email to register a " +
+                "new client and sign in.",
             },
           ],
         };
@@ -795,6 +811,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
+        const previousUrl = loadServerUrl();
+        const stored = loadCredentials();
+        const requestedEmail = normalizeAccountEmail(email);
+        const urlChanged = previousUrl !== normalized;
+        const reusableClient =
+          !!stored?.clientInfo && stored.clientServerUrl === normalized;
+        // A new email on the same server is an account switch, not a new
+        // instance: clear only the grant and retain the server-scoped DCR
+        // client. This lets users change accounts without adding a client.
+        const accountChanged =
+          !!requestedEmail &&
+          !!stored?.tokens &&
+          stored.accountEmail !== requestedEmail;
+
         try {
           saveServerUrl(normalized);
         } catch (err) {
@@ -807,14 +837,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         }
 
-        // New instance — clear stale auth state. The on-disk remote-tool
-        // cache for the previous URL is left intact (so switching back is
-        // instant); we just rehydrate from whatever cache exists for the
-        // newly configured URL — empty for a first-time server.
-        clearCredentials();
-        oauthProvider = undefined;
+        // A DCR client is scoped to its server. Reuse a retained client after
+        // reset only when its recorded server matches; otherwise remove it.
+        if (urlChanged && !reusableClient) {
+          clearCredentials();
+          oauthProvider = undefined;
+        }
+
+        const provider = getOAuthProvider();
+        if (accountChanged) {
+          // Email is an account-switch request. Clear only the grant and keep
+          // the server's DCR client, so switching users does not create a new
+          // authorized-app entry.
+          provider.resetAuthentication(requestedEmail, normalized);
+        } else {
+          provider.setAccountContext(
+            requestedEmail ?? provider.accountEmail(),
+            normalized,
+          );
+        }
+
         cachedRemoteTools = loadRemoteTools(normalized);
-        logLine("setup.configured", { serverUrl: normalized });
+        logLine("setup.configured", {
+          serverUrl: normalized,
+          urlChanged,
+          reusableClient,
+          accountChanged,
+        });
         // Fall through to advanceSetup, which will now find URL ✓ and try
         // to drive auth + tool fetch in the same call.
       }

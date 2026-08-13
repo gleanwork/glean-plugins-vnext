@@ -121,8 +121,11 @@ The launcher (`plugins/glean/start.mjs`) also derives and **exports** three more
 variables the bundle reads, so these are internal — start.mjs overwrites them on
 every launch and setting them yourself has no effect:
 
-- `PLUGIN_DATA_DIR` — directory for credentials, caches, the saved server URL,
-  and `glean-server.log`. Defaults to `~/.glean`, or the host's
+- `PLUGIN_DATA_DIR` — host-managed directory used for skills/cache compatibility.
+  Auth credentials, server configuration, remote-tool cache, and logs use the
+  stable canonical `~/.glean` directory so terminal and plugin launches share
+  state. Legacy files in host-managed plugin directories are migrated once into
+  `~/.glean`. The launcher still defaults this variable to `~/.glean`, or the host's
   `CLAUDE_PLUGIN_DATA` dir when provided.
 - `SKILLS_BASE_DIR` — where discovered skill files are written; defaults to
   `<PLUGIN_DATA_DIR>/glean-skills-cache`, or redirected under the launch
@@ -134,8 +137,8 @@ every launch and setting them yourself has no effect:
 
 - **Sign-in loop or stale auth** — prompt the agent to reset and sign in again
   (e.g. "reset the Glean setup"). It calls the `setup` tool with `reset=true` to
-  clear the saved configuration and credentials, then runs `setup` again to
-  re-authenticate.
+  clear the saved configuration, grant, and registered OAuth client. The next
+  setup registers a new client and signs in again.
 - **Tools return `[SETUP_REQUIRED]`** — the plugin isn't configured or
   authenticated yet. Prompt the agent to set up Glean (e.g. "set up Glean").
   The `setup` tool, called with no arguments, advances through the next missing

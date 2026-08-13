@@ -5,7 +5,7 @@ import os from "node:os";
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "url-config-store-test-"));
 
-vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
+vi.stubEnv("GLEAN_AUTH_DATA_DIR", tmpDir);
 
 const { loadServerUrl, saveServerUrl, clearServerUrl } = await import(
   "../src/url-config-store.js"
