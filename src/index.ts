@@ -817,6 +817,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const urlChanged = previousUrl !== normalized;
         const reusableClient =
           !!stored?.clientInfo && stored.clientServerUrl === normalized;
+        // A new email on the same server is an account switch, not a new
+        // instance: clear only the grant and retain the server-scoped DCR
+        // client. This lets users change accounts without adding a client.
         const accountChanged =
           !!requestedEmail &&
           !!stored?.tokens &&
