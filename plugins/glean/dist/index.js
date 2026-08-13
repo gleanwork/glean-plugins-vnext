@@ -25880,9 +25880,8 @@ var GleanOAuthClientProvider = class {
   }
   /**
    * Force a new user sign-in while retaining a client registered for the same
-   * server. This is used for account switching and normal reset. A fresh DCR
-   * is only required when the server changes or the caller explicitly asks
-   * for a fresh client.
+   * server. This is used for account switching; full setup reset clears the
+   * provider and registered client in the setup tool.
    */
   resetAuthentication(accountEmail, serverUrl) {
     const hadTokens = this._tokens !== void 0;
@@ -26895,7 +26894,7 @@ var RUN_TOOL_TOOL = {
 var SETUP_TOOL = {
   name: "setup",
   annotations: { readOnlyHint: true },
-  description: "Check or configure the Glean connection. Setup completes in three stages: (1) resolve and save the Server URL, (2) authenticate, (3) fetch the remote tool catalog. Call with no arguments to advance through the next missing stage. Call with email to look up and (re)configure user's Glean instance. Call with reset=true to clear the current authentication and setup URL while retaining the DCR client when it can safely be reused. Pass fresh_client=true only when a new OAuth client registration is explicitly required.",
+  description: "Check or configure the Glean connection. Setup completes in three stages: (1) resolve and save the Server URL, (2) authenticate, (3) fetch the remote tool catalog. Call with no arguments to advance through the next missing stage. Call with email to look up and (re)configure user's Glean instance. Call with reset=true to clear the current authentication, setup URL, and registered DCR client before starting a new setup flow.",
   inputSchema: {
     type: "object",
     properties: {
@@ -26909,11 +26908,7 @@ var SETUP_TOOL = {
       },
       reset: {
         type: "boolean",
-        description: "Clear the cached URL, authentication, and remote tool cache. The registered OAuth client is retained when possible."
-      },
-      fresh_client: {
-        type: "boolean",
-        description: "With reset=true, also discard the registered OAuth client and force a new dynamic client registration."
+        description: "Clear the cached URL, authentication, registered OAuth client, and remote tool cache. The next setup registers a new client."
       }
     },
     required: []
@@ -27278,31 +27273,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clientInfo: server.getClientVersion() ?? null
       });
       if (args.reset === true) {
-        const freshClient = args.fresh_client === true;
-        const stored = loadCredentials();
-        const previousServerUrl = loadServerUrl();
+        const hadClient = !!loadCredentials()?.clientInfo;
         clearServerUrl();
-        if (freshClient) {
-          clearCredentials();
-        } else if (stored) {
-          saveCredentials(
-            void 0,
-            stored.clientInfo,
-            {
-              accountEmail: null,
-              clientServerUrl: stored.clientServerUrl ?? previousServerUrl ?? null,
-              abandonedSignIns: 0,
-              tokenUpdatedAt: Date.now()
-            },
-            { forceTokenUpdate: true }
-          );
-        }
+        clearCredentials();
         clearRemoteTools();
         oauthProvider = void 0;
         cachedRemoteTools = [];
         logLine("setup.reset", {
-          freshClient,
-          retainedClient: !freshClient && !!stored?.clientInfo
+          clearedClient: hadClient
         });
         server.sendToolListChanged().catch(() => {
         });
@@ -27310,7 +27288,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content: [
             {
               type: "text",
-              text: "Glean authentication has been reset. Call setup again with your email to sign in. The registered OAuth client will be reused when it belongs to the same server; pass fresh_client=true with reset=true to register a new client."
+              text: "Glean authentication has been reset, including the registered OAuth client. Call setup again with your email to register a new client and sign in."
             }
           ]
         };

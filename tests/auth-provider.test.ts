@@ -275,6 +275,24 @@ describe("GleanOAuthClientProvider", () => {
     expect(provider.abandonPendingSignIn()).toBe(true);
   });
 
+  it("resetAuthentication keeps the client for account switching", () => {
+    const provider = new GleanOAuthClientProvider();
+    provider.saveTokens({ access_token: "tok", refresh_token: "refresh" } as any);
+    provider.saveClientInformation({ client_id: "cid" } as any);
+
+    provider.resetAuthentication(
+      "new-account@example.com",
+      "https://example.com/mcp/gateway/proxy",
+    );
+
+    expect(provider.tokens()).toBeUndefined();
+    expect(provider.clientInformation()).toEqual({ client_id: "cid" });
+    expect(provider.accountEmail()).toBe("new-account@example.com");
+    const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
+    expect(raw.tokens).toBeUndefined();
+    expect(raw.clientInfo.client_id).toBe("cid");
+  });
+
   it("saveClientInformation persists to disk", () => {
     const provider = new GleanOAuthClientProvider();
     const info = { client_id: "cid", client_secret: "sec" } as any;

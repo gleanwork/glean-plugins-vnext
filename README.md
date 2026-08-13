@@ -137,10 +137,8 @@ every launch and setting them yourself has no effect:
 
 - **Sign-in loop or stale auth** — prompt the agent to reset and sign in again
   (e.g. "reset the Glean setup"). It calls the `setup` tool with `reset=true` to
-  clear the saved configuration and grant, while retaining the registered OAuth
-  client when it belongs to the same server. Use `fresh_client=true` with
-  `reset=true` only when the server explicitly rejects the client or a genuinely
-  new registration is required.
+  clear the saved configuration, grant, and registered OAuth client. The next
+  setup registers a new client and signs in again.
 - **Tools return `[SETUP_REQUIRED]`** — the plugin isn't configured or
   authenticated yet. Prompt the agent to set up Glean (e.g. "set up Glean").
   The `setup` tool, called with no arguments, advances through the next missing

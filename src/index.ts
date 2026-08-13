@@ -268,9 +268,8 @@ const SETUP_TOOL: Tool = {
     "(3) fetch the remote tool catalog. Call with no arguments to advance " +
     "through the next missing stage. Call with email to look up and " +
     "(re)configure user's Glean instance. Call with reset=true to clear " +
-    "the current authentication and setup URL while retaining the DCR client " +
-    "when it can safely be reused. Pass fresh_client=true only when a new " +
-    "OAuth client registration is explicitly required.",
+    "the current authentication, setup URL, and registered DCR client before " +
+    "starting a new setup flow.",
   inputSchema: {
     type: "object" as const,
     properties: {
@@ -291,14 +290,8 @@ const SETUP_TOOL: Tool = {
       reset: {
         type: "boolean",
         description:
-          "Clear the cached URL, authentication, and remote tool cache. " +
-          "The registered OAuth client is retained when possible.",
-      },
-      fresh_client: {
-        type: "boolean",
-        description:
-          "With reset=true, also discard the registered OAuth client and " +
-          "force a new dynamic client registration.",
+          "Clear the cached URL, authentication, registered OAuth client, " +
+          "and remote tool cache. The next setup registers a new client.",
       },
     },
     required: [],
@@ -749,35 +742,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clientInfo: server.getClientVersion() ?? null,
       });
       if (args.reset === true) {
-        const freshClient = args.fresh_client === true;
-        const stored = loadCredentials();
-        const previousServerUrl = loadServerUrl();
+        const hadClient = !!loadCredentials()?.clientInfo;
         clearServerUrl();
-        if (freshClient) {
-          clearCredentials();
-        } else if (stored) {
-          // Reset authentication and setup state, but retain the DCR client
-          // plus the server it belongs to. The next setup can reuse that
-          // registration when it targets the same server.
-          saveCredentials(
-            undefined,
-            stored.clientInfo,
-            {
-              accountEmail: null,
-              clientServerUrl:
-                stored.clientServerUrl ?? previousServerUrl ?? null,
-              abandonedSignIns: 0,
-              tokenUpdatedAt: Date.now(),
-            },
-            { forceTokenUpdate: true },
-          );
-        }
+        clearCredentials();
         clearRemoteTools();
         oauthProvider = undefined;
         cachedRemoteTools = [];
         logLine("setup.reset", {
-          freshClient,
-          retainedClient: !freshClient && !!stored?.clientInfo,
+          clearedClient: hadClient,
         });
         // Fire-and-forget — tools list is shorter without the dynamic
         // surface; the host should re-fetch on its next idle cycle.
@@ -789,10 +761,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text:
-                "Glean authentication has been reset. Call setup again with " +
-                "your email to sign in. The registered OAuth client will be " +
-                "reused when it belongs to the same server; pass " +
-                "fresh_client=true with reset=true to register a new client.",
+                "Glean authentication has been reset, including the registered " +
+                "OAuth client. Call setup again with your email to register a " +
+                "new client and sign in.",
             },
           ],
         };

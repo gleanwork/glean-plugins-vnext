@@ -302,9 +302,8 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
 
   /**
    * Force a new user sign-in while retaining a client registered for the same
-   * server. This is used for account switching and normal reset. A fresh DCR
-   * is only required when the server changes or the caller explicitly asks
-   * for a fresh client.
+   * server. This is used for account switching; full setup reset clears the
+   * provider and registered client in the setup tool.
    */
   resetAuthentication(accountEmail: string | undefined, serverUrl: string): void {
     const hadTokens = this._tokens !== undefined;
