@@ -15,6 +15,11 @@ Today it ships one plugin:
   `user_activity`, and `employee_search` — directly, with schemas pulled from
   the remote MCP server.
 
+An experimental fourth static tool, `run_code`, is exposed only when
+`DANGEROUSLY_ENABLE_UNSTABLE_RUN_CODE_FEATURE` is set to exactly `true` in the
+MCP server process. It is off by default and the baseline skill/discovery
+behavior remains `run_tool`-only when disabled.
+
 ## Install
 
 ### Claude Code (terminal)
@@ -112,21 +117,39 @@ HITL ones — or in your shell:
 | `HITL_TIMEOUT_MS` | Timeout in milliseconds for a HITL confirmation prompt. Positive integer. | `300000` (5 min), set in `.mcp.json` |
 | `GLEAN_REMOTE_TOOL_TIMEOUT_MS` | Timeout in milliseconds for a downstream tool call made via `run_tool` (overrides the MCP SDK's 60s default). Positive integer. | `300000` (5 min), bundle default |
 | `GLEAN_FILE_ARG_MAX_BYTES` | Maximum size in bytes of each file read via `run_tool`'s `file_args`. Positive integer. | `5242880` (5 MiB), bundle default |
+| `DANGEROUSLY_ENABLE_UNSTABLE_RUN_CODE_FEATURE` | Set to exactly `true` to expose experimental full-Node `run_code`, add PTC execution guidance to discovery, and let `glean_run` lazily read its bundled experimental guide. Full OS permissions; not a security boundary. Restart the host after changing it. | unset (disabled) |
 | `USE_CLAUDE_PROJECT_DIR` | Set to `1` to route the skills cache under the launch project's `.claude/tmp/`, so the `glean_run` skill's `Read` glob can match cache files. | unset |
 
 Empty values and un-interpolated `${VAR}` placeholders are ignored, falling back
-to the default.
+to the default. To try experimental code mode from Claude Code without editing
+the plugin, set the flag in the shell that launches Claude:
 
-The launcher (`plugins/glean/start.mjs`) also derives and **exports** three more
+```bash
+DANGEROUSLY_ENABLE_UNSTABLE_RUN_CODE_FEATURE=true claude
+```
+
+Only the exact lowercase string `true` enables it. The shipped `.mcp.json` does
+not force the flag on. When disabled, `run_code` is absent, discovery omits its
+Node/PTC instructions, and `glean_run` directs the model to the standard
+`run_tool` workflow. The static skill contains only a small availability check;
+the detailed experimental instructions live outside the auto-discovered skills
+directory at `plugins/glean/guides/glean-run-code.md` and are read only when the
+current tool list contains `run_code`.
+
+The launcher (`plugins/glean/start.mjs`) also derives and **exports** four more
 variables the bundle reads, so these are internal — start.mjs overwrites them on
 every launch and setting them yourself has no effect:
 
 - `PLUGIN_DATA_DIR` — directory for credentials, caches, the saved server URL,
   and `glean-server.log`. Defaults to `~/.glean`, or the host's
   `CLAUDE_PLUGIN_DATA` dir when provided.
-- `SKILLS_BASE_DIR` — where discovered skill files are written; defaults to
-  `<PLUGIN_DATA_DIR>/glean-skills-cache`, or redirected under the launch
+- `SKILLS_BASE_DIR` — the primary/write root for discovered skill files; defaults
+  to `<PLUGIN_DATA_DIR>/glean-skills-cache`, or redirects under the launch
   project's `.claude/tmp/` when `USE_CLAUDE_PROJECT_DIR=1`.
+- `GLEAN_PROJECT_SKILLS_BASE_DIR` — the launch project's
+  `.claude/tmp/glean-skills-cache`. `run_code` and metadata lookup scan this as a
+  fallback after `SKILLS_BASE_DIR`, so Claude-managed and project-local caches
+  are both visible while current/primary metadata keeps precedence.
 - `GLEAN_SESSION_ID` — the host's conversation id: `CLAUDE_CODE_SESSION_ID` for
   Claude Code, `CODEX_THREAD_ID` for Codex, otherwise a generated UUID.
 
