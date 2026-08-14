@@ -120,7 +120,12 @@ export async function writeSkillsToDisk(
   return index;
 }
 
-export function formatAvailableSkillsPrompt(index: SkillIndex[]): string {
+export function formatAvailableSkillsPrompt(
+  index: SkillIndex[],
+  opts: {
+    codeMode?: boolean;
+  } = {},
+): string {
   if (index.length === 0) {
     return "<available_skills />";
   }
@@ -138,10 +143,59 @@ export function formatAvailableSkillsPrompt(index: SkillIndex[]): string {
     ].join("\n");
   });
 
-  // Usage instructions live in the find_skills tool description (advertised
-  // once at tools/list) rather than being re-emitted in every response.
+  // General skill-usage instructions live in the find_skills tool description
+  // (advertised once at tools/list). Code mode adds its full-Node and PTC
+  // execution guidance to the discovery response.
+  const runCodeInstructions =
+    "PREFER run_code whenever a task has ANY filesystem/system work, local Node.js " +
+    "operation, or BATCH of 2+ Glean tool calls (chaining, fan-out, or loops). " +
+    "Keep the whole workflow in one run_code call instead of splitting it across " +
+    "Bash/filesystem tools and individual run_tool calls. It provides real " +
+    "CommonJS `require()`, standard Node globals (`process`, `Buffer`, timers, " +
+    "fetch), captured `console`, and prebound `fs`/`path`. Builtins including " +
+    "`node:zlib` and `node:child_process` are available; third-party packages " +
+    "must be physically installed and resolvable from the plugin bundle. Never " +
+    "write `process.stdout` because it carries MCP JSON-RPC. Code has full OS " +
+    "permissions; file changes and commands are immediate, not rolled back, and " +
+    "not individually HITL-gated. For Glean tools: (1) browse the skills " +
+    "below and pick the most relevant. " +
+    "(2) Read its SKILL.md. (3) Read each tool's JSON file (tools/TOOL_NAME.json) " +
+    "for the exact `name` and `inputSchema` (argument names/types) — do NOT guess " +
+    "parameter names. (4) Use `run_tool` ONLY for exactly one isolated Glean " +
+    "tool call with no filesystem/system work, chaining, transformation, or " +
+    "intermediate state. Otherwise use `run_code`. " +
+    "In run_code, invoke each tool " +
+    "as `await PTC_<TOOL_NAME>(args)` (the binding name is `PTC_` + the tool's " +
+    "`name`; server_id is bound automatically). Exact names win, then a unique " +
+    "case-insensitive spelling resolves to the canonical backend name. Metadata " +
+    "is scanned from both the managed and project-local Claude skill caches. " +
+    "Each call returns a ToolResult " +
+    "(`.text`, `.json()`, `.get('a.b', fallback)`) on success and THROWS on " +
+    "failure (`Error: PTC_<TOOL> failed: <reason>`); an uncaught throw ends the " +
+    "cell with ok:false + error. try/catch to handle a failure or keep a batch " +
+    "going (writes already made are NOT rolled back). Outputs have no fixed " +
+    "schema: `inspect(value)` returns a value's SHAPE (not its data) — use it to " +
+    "learn a result's structure before drilling in. " +
+    "Do multi-step work (loops, filtering, chaining one tool's output into the " +
+    "next) inside ONE run_code call: fetch, then format and `print()` or `return` " +
+    "only the final answer. `return` sends the value back verbatim, so return only " +
+    "what you need. The full result always stays in the runtime, so read " +
+    "the fields you need from the variable you already have rather than re-fetching. " +
+    "run_code is a stateful REPL: to persist a variable across calls, assign it " +
+    "with a BARE assignment — no var/let/const (e.g. `bugs = await PTC_X()`). " +
+    "`var`, `let`, and `const` are ALL temporary (this call only; var does not " +
+    "persist). Persistence lasts until the plugin process exits or you pass " +
+    "reset:true. " +
+    "Call run_code ONE AT A TIME: await each call's result before issuing the " +
+    "next — do NOT issue parallel run_code calls.";
+
+  const instructions = opts.codeMode
+    ? ["<instructions>", runCodeInstructions, "</instructions>"].join("\n")
+    : undefined;
+
   return [
     "<available_skills>",
+    ...(instructions ? [instructions] : []),
     ...skillEntries,
     "</available_skills>",
   ].join("\n");

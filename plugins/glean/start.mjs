@@ -28,28 +28,37 @@ const pluginDataDir =
   path.join(os.homedir() || os.tmpdir(), ".glean");
 process.env.PLUGIN_DATA_DIR = pluginDataDir;
 
-// Discovered skill files are written under the data dir by default, so the
-// skills cache tracks PLUGIN_DATA_DIR instead of being resolved separately.
-let skillsBaseDir = path.join(pluginDataDir, "glean-skills-cache");
+// Always resolve the launch project's cache as a readable fallback. Claude may
+// have materialized skill/tool files under <project>/.claude/tmp in an earlier
+// plugin process, while this install's managed data/cache lives under
+// CLAUDE_PLUGIN_DATA. Export both roots so the server can read them in a stable
+// order instead of declaring a known tool "unknown" merely because it is in the
+// other Claude cache. The managed cache remains the default write target.
+let projectDir = launchCwd;
+try {
+  const top = execFileSync(
+    "git",
+    ["-C", launchCwd, "rev-parse", "--show-toplevel"],
+    { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
+  ).trim();
+  if (top) projectDir = top;
+} catch {
+  /* not a git repo or git missing: keep the launch cwd fallback */
+}
+const projectSkillsBaseDir = path.join(
+  projectDir,
+  ".claude",
+  "tmp",
+  "glean-skills-cache",
+);
+process.env.GLEAN_PROJECT_SKILLS_BASE_DIR = projectSkillsBaseDir;
 
-// Opt-in: when USE_CLAUDE_PROJECT_DIR=1, route the skills cache under the launch
-// project's .claude/tmp/ so the glean_run skill's allowed-tools Read glob can
-// match cache files via a path anchored to the project root. projectDir is the
-// git repo root for the launch cwd, falling back to the launch cwd when it is
-// not inside a git repo (or git is unavailable).
+// Discovered skill files are written under the managed data dir by default.
+// The existing opt-in still switches the primary/write root to the project;
+// read-side discovery de-duplicates the two roots when they are then identical.
+let skillsBaseDir = path.join(pluginDataDir, "glean-skills-cache");
 if (process.env.USE_CLAUDE_PROJECT_DIR === "1") {
-  let projectDir = launchCwd;
-  try {
-    const top = execFileSync(
-      "git",
-      ["-C", launchCwd, "rev-parse", "--show-toplevel"],
-      { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
-    ).trim();
-    if (top) projectDir = top;
-  } catch {
-    /* not a git repo or git missing: keep the launch cwd fallback */
-  }
-  skillsBaseDir = path.join(projectDir, ".claude", "tmp", "glean-skills-cache");
+  skillsBaseDir = projectSkillsBaseDir;
 }
 process.env.SKILLS_BASE_DIR = skillsBaseDir;
 

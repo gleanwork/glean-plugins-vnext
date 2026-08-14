@@ -7,6 +7,7 @@ export async function handleFindSkills(
   remoteClient: Client,
   skillsBaseDir: string,
   args: Record<string, unknown>,
+  opts: { codeMode?: boolean } = {},
 ): Promise<string> {
   const toolArgs: Record<string, unknown> = {};
   if (Array.isArray(args.queries)) {
@@ -34,5 +35,5 @@ export async function handleFindSkills(
     return "<available_skills />";
   }
   const index = await writeSkillsToDisk(parsed.skills, skillsBaseDir);
-  return formatAvailableSkillsPrompt(index);
+  return formatAvailableSkillsPrompt(index, { codeMode: opts.codeMode });
 }

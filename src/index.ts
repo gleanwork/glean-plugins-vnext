@@ -25,6 +25,8 @@ import {
   isCursorClient,
   runToolAnnotations,
 } from "./tools/run-tool.js";
+import { handleRunCode } from "./tools/run-code.js";
+import { isRunCodeEnabled } from "./run-code-mode.js";
 import { evictStaleSkills } from "./skill-writer.js";
 import {
   loadServerUrl,
@@ -124,6 +126,27 @@ function resolveSkillsBaseDir(): string {
   }
   return path.join(tmpdir(), "glean-skills-cache");
 }
+
+/**
+ * Ordered read roots for tool metadata. New find_skills results are written to
+ * the primary root; run_tool/run_code also scan Claude's project-local cache so
+ * tools materialized by an earlier plugin process remain usable. Primary wins
+ * exact-name collisions. start.mjs resolves/exports the project path.
+ */
+function resolveSkillsBaseDirs(): string[] {
+  const roots = [
+    resolveSkillsBaseDir(),
+    readEnv("GLEAN_PROJECT_SKILLS_BASE_DIR"),
+  ].filter((root): root is string => typeof root === "string");
+  return [...new Set(roots.map((root) => path.resolve(root)))];
+}
+
+// Experimental "code mode". When ON, the model additionally gets `run_code`: it
+// writes full local Node.js programs (CommonJS require, standard globals, and
+// full OS permissions) that can also call each downstream tool as an async
+// `PTC_<TOOL>()` function. The persistent node:vm context is NOT a security
+// boundary. Default OFF so deployed behavior (run_tool) is untouched.
+const RUN_CODE_ENABLED = isRunCodeEnabled();
 
 const server = new Server(
   { name: "glean", version: "1.0.0" },
@@ -255,6 +278,100 @@ const RUN_TOOL_TOOL: Tool = {
   },
 };
 
+const RUN_CODE_TOOL: Tool = {
+  name: "run_code",
+  description:
+    "PREFERRED execution path whenever a task has ANY local filesystem/system " +
+    "work or needs multiple/chained operations. Use one run_code Node.js program " +
+    "for files or archives, binary/data transforms, network requests, child " +
+    "processes, 2+ Glean tool calls, output-to-input chaining, fan-out, loops, " +
+    "filtering, aggregation, retries, or batches. Prefer it over splitting work " +
+    "across Bash/filesystem tools and separate run_tool calls. Use `run_tool` ONLY " +
+    "for exactly one isolated Glean tool call with no local Node work, chaining, " +
+    "transformation, or intermediate state.\n\n" +
+    "Use real CommonJS `require()` to load any Node builtin (for example " +
+    "`require('node:zlib')` or `require('node:child_process')`) and any third-party " +
+    "package physically installed and resolvable from the plugin bundle's location. " +
+    "Dependencies inlined into the single-file bundle are NOT automatically " +
+    "requireable by package name. Dynamic `import()` is not configured; use " +
+    "`require()`. Familiar globals include `process`, `Buffer`, timers, URL/text " +
+    "APIs, `fetch`, and a captured `console`; `fs` (full node:fs) and `path` are " +
+    "also prebound. Prefer async APIs. Use `return`, `print`, or `console.log` for " +
+    "output — NEVER write to `process.stdout`, which carries MCP JSON-RPC.\n\n" +
+    "DANGER: code has the plugin process's full OS permissions. It can access ANY " +
+    "readable/writable path and execute arbitrary commands through child_process. " +
+    "Filesystem changes and commands happen immediately, are not rolled back, and " +
+    "are not individually HITL-gated. node:vm is NOT a security boundary; run only " +
+    "trusted model-generated code authorized by the user's intent.\n\n" +
+    "Each discovered Glean tool is `PTC_<TOOL_NAME>(args)` (server_id bound for " +
+    "you; first-class tools like `PTC_search` too). Names match exactly first, " +
+    "then resolve a unique case-insensitive spelling (`PTC_GET_AGENT` can invoke " +
+    "canonical `get_agent`); ambiguous case-only names fail rather than guessing. " +
+    "Tool metadata is read from both the managed plugin cache and Claude's " +
+    "project-local `.claude/tmp/glean-skills-cache`, with managed/current metadata " +
+    "taking precedence. Call find_skills first and read each tool's JSON for its " +
+    "exact argument names. A PTC_ call resolves to " +
+    "a ToolResult: `.json()` (parsed, or undefined for " +
+    "non-JSON — branch on `.format` = 'json'|'text'|'empty', NOT `if(r.json())`), " +
+    "`.text`, `.get('a.b', fallback)` (never throws). `return` sends a value back " +
+    "VERBATIM. So return/print ONLY what you need; full data stays " +
+    "in the runtime. To persist a variable across calls use a BARE assignment " +
+    "(`x = await PTC_...()`); var/let/const are temporary. `inspect(x)` shows a " +
+    "value's shape; `print(...)` for output. Top-level await works. " +
+    "Call run_code ONE AT A TIME — await each call's result before issuing the " +
+    "next; do NOT make parallel run_code calls.\n\n" +
+    "The result is JSON: { ok, value?, stdout?, session?, error? }. A failed PTC_ call " +
+    "THROWS (`Error: PTC_<TOOL> failed: <reason>`); an uncaught throw ends the cell " +
+    "with `ok:false` + `error.message`. Use try/catch to handle a failure " +
+    "or keep a batch going (writes already made are NOT rolled back). " +
+    "See find_skills output for the full guide.",
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      code: {
+        type: "string",
+        description:
+          "JavaScript to execute with CommonJS `require`, standard Node globals, " +
+          "prebound `fs`/`path`, and async `PTC_<TOOL_NAME>(args)` Glean tools. " +
+          "Use `return`, `print`, or `console.log`; never write process.stdout.",
+      },
+      reset: {
+        type: "boolean",
+        description:
+          "If true, clear all persisted session variables and start a fresh " +
+          "runtime before executing this code.",
+      },
+    },
+    required: ["code"],
+  },
+  outputSchema: {
+    type: "object" as const,
+    properties: {
+      ok: {
+        type: "boolean",
+        description: "true if the cell finished without throwing.",
+      },
+      // The cell's return value, verbatim — any JSON type; omitted on error.
+      value: {},
+      stdout: { type: "string", description: "print(...) output, if any." },
+      session: {
+        type: "object",
+        properties: { fresh: { type: "boolean" } },
+      },
+      error: {
+        type: "object",
+        properties: {
+          message: {
+            type: "string",
+            description: "Thrown message, e.g. `PTC_X failed: <reason>`.",
+          },
+        },
+      },
+    },
+    required: ["ok"],
+  },
+};
+
 const SETUP_TOOL: Tool = {
   name: "setup",
   annotations: { readOnlyHint: true },
@@ -300,17 +417,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       isCursorClient(server),
     ),
   };
-  const staticTools: Tool[] = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
+  // Code mode ADDS run_code alongside run_tool (it does not replace it):
+  // run_tool handles single one-off calls, run_code is for batches (2+ calls /
+  // chaining / fan-out). When the flag is off the surface is identical to
+  // what's deployed today.
+  const staticTools: Tool[] = RUN_CODE_ENABLED
+    ? [FIND_SKILLS_TOOL, runTool, RUN_CODE_TOOL, SETUP_TOOL]
+    : [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
 
   // One structured line on every return path, so "why don't my tools appear?"
-  // is answerable from the log alone: `static` is constant, `names` lists the
-  // dynamic tools we actually surfaced (freshly fetched or served from cache),
-  // and `state` names the path we took. The allow-list only ever drops tools
+  // is answerable from the log alone: `runCodeEnabled` records the feature-gate
+  // decision, `static` records the resulting count, `names` lists the dynamic
+  // tools we actually surfaced (freshly fetched or served from cache), and
+  // `state` names the path we took. The allow-list only ever drops tools
   // outside our fixed set, so a missing allow-listed name (e.g. `chat`) means
   // the backend never returned it. Only tool *names*, counts and the state
   // tag are logged — never argument values, which can carry PII/secrets.
   const serve = (state: string, dynamic: Tool[]): { tools: Tool[] } => {
     logLine("tools-list.served", {
+      runCodeEnabled: RUN_CODE_ENABLED,
       static: staticTools.length,
       dynamic: dynamic.length,
       names: dynamic.map((t) => t.name),
@@ -572,6 +697,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   // setup has provided a server URL. Auth is handled by dispatchRemoteTool
   // via the standard [AUTHENTICATION_REQUIRED] flow.
   if (REMOTE_TOOLS_ALLOWLIST.has(name)) {
+    // First-class tools run directly. A single call belongs here, not in
+    // run_code (which is scoped to batches); they remain usable as PTC_<name>
+    // inside run_code when the model is batching/composing.
     const serverUrl = resolveServerUrl();
     if (!serverUrl) {
       return {
@@ -650,6 +778,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           remoteClient,
           skillsBaseDir,
           args,
+          { codeMode: RUN_CODE_ENABLED },
         );
         return { content: [{ type: "text", text }] };
       } catch (err) {
@@ -710,13 +839,80 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
       try {
-        const skillsBaseDir = resolveSkillsBaseDir();
-        return await handleRunTool(remoteClient, server, skillsBaseDir, args);
+        const skillsBaseDirs = resolveSkillsBaseDirs();
+        return await handleRunTool(remoteClient, server, skillsBaseDirs, args);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`run_tool: execution failed: ${msg}`);
         return {
           content: [{ type: "text", text: `run_tool failed: ${msg}` }],
+          isError: true,
+        };
+      } finally {
+        await remoteClient.close();
+      }
+    }
+
+    case "run_code": {
+      if (!RUN_CODE_ENABLED) {
+        return {
+          content: [{ type: "text", text: "run_code is not enabled." }],
+          isError: true,
+        };
+      }
+
+      const serverUrl = resolveServerUrl();
+      if (!serverUrl) {
+        return {
+          content: [{ type: "text", text: SETUP_NEEDED_ERROR }],
+          isError: true,
+        };
+      }
+      if (!getOAuthProvider().tokens()) {
+        return {
+          content: [{ type: "text", text: AUTH_REDIRECT_TO_SETUP_TEXT }],
+        };
+      }
+
+      const sessionId = resolveSessionId();
+
+      let remoteClient;
+      try {
+        remoteClient = await createRemoteClient(
+          serverUrl,
+          getRemoteClientOpts(),
+          sessionId,
+        );
+      } catch (err) {
+        if (err instanceof AuthRequiredError) {
+          return {
+            content: [{ type: "text", text: AUTH_REDIRECT_TO_SETUP_TEXT }],
+          };
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        logLine("connect.backend-error", { label: "run_code", msg });
+        return {
+          content: [
+            { type: "text", text: `Failed to connect to Glean backend: ${msg}` },
+          ],
+          isError: true,
+        };
+      }
+      try {
+        const skillsBaseDirs = resolveSkillsBaseDirs();
+        logLine("run-code.tool-cache-roots", { roots: skillsBaseDirs });
+        return await handleRunCode(
+          remoteClient,
+          server,
+          skillsBaseDirs,
+          args,
+          cachedRemoteTools,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`run_code: execution failed: ${msg}`);
+        return {
+          content: [{ type: "text", text: `run_code failed: ${msg}` }],
           isError: true,
         };
       } finally {

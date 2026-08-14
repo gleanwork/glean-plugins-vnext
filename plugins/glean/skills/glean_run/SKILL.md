@@ -23,7 +23,7 @@ When this happens:
 1. Call `setup` (no arguments).
    - If no Server URL is configured, `setup` returns `[SETUP_REQUIRED]` with
      instructions. Relay them, ask the user for their work email, then call
-     `setup` again with `email` set to what they provided. 
+     `setup` again with `email` set to what they provided.
    - Once a Server URL is configured, `setup` opens the Glean sign-in page in
      the browser and waits for sign-in.
 2. Once `setup` returns "Glean setup is complete", retry the original tool
@@ -83,7 +83,21 @@ Read each tool's JSON file (e.g. `tools/TOOL_NAME.json`) to get the exact
 
 **Never guess parameter names** - always read the tool JSON file first.
 
-## Step 4: Execute Tools
+## Step 4: Load the Optional Experimental Guide
+
+Check the Glean MCP tools currently exposed in this session.
+
+If and only if a `run_code` tool is present, use the `Read` tool to load
+`${CLAUDE_PLUGIN_ROOT}/guides/glean-run-code.md` and follow that guide for the
+rest of this task. Do not load that file based on memory, cached files, or prior
+sessions; current tool availability is authoritative.
+
+If `run_code` is absent, do not read the guide and continue with the standard
+execution path below.
+
+## Step 5: Standard Execution Path
+
+This section applies when the optional experimental guide was not loaded.
 
 Call `run_tool` with the `server_id`, `tool_name` (from the `name` field in the
 JSON), and `arguments` matching the `inputSchema` exactly.
@@ -120,5 +134,7 @@ Constraints:
 
 ## Rules
 
-- Always read tool JSON files before calling `run_tool` - never guess parameters
-- If discovery returns no relevant skills, tell the user what was searched
+- Always read tool JSON files before calling a discovered tool; never guess tool
+  names or parameter names.
+- Load the experimental guide only when `run_code` is currently exposed.
+- If discovery returns no relevant skills, tell the user what was searched.

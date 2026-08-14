@@ -8,6 +8,15 @@ import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
 import { resolveSessionId } from "../session-id.js";
+import {
+  findToolMeta,
+  normalizeSkillsBaseDirs,
+  type SkillsBaseDirInput,
+} from "../skill-tools.js";
+
+// Read at call time (not module load) so tests and a mid-session env flip take
+// effect. Named distinctly from handleRunTool's local `hitlEnabled` boolean.
+const hitlOn = () => process.env.ENABLE_HITL === "true";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -166,25 +175,59 @@ interface ToolMetadata {
 }
 
 async function findToolJson(
-  skillsBaseDir: string,
+  skillsBaseDirs: SkillsBaseDirInput,
   toolName: string,
 ): Promise<ToolMetadata | null> {
-  try {
-    const skillDirs = await fs.readdir(skillsBaseDir, { withFileTypes: true });
-    for (const dir of skillDirs) {
-      if (!dir.isDirectory()) continue;
-      const toolPath = path.join(skillsBaseDir, dir.name, "tools", `${toolName}.json`);
+  const exact: Array<{ canonicalName: string; path: string }> = [];
+  const folded: Array<{ canonicalName: string; path: string }> = [];
+  const requestedFolded = toolName.toLowerCase();
+
+  for (const skillsBaseDir of normalizeSkillsBaseDirs(skillsBaseDirs)) {
+    let skillDirs;
+    try {
+      skillDirs = await fs.readdir(skillsBaseDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const dir of skillDirs
+      .filter((entry) => entry.isDirectory())
+      .sort((a, b) => a.name.localeCompare(b.name))) {
+      const toolsDir = path.join(skillsBaseDir, dir.name, "tools");
+      let files: string[];
       try {
-        const content = await fs.readFile(toolPath, "utf-8");
-        return JSON.parse(content) as ToolMetadata;
+        files = (await fs.readdir(toolsDir))
+          .filter((file) => file.endsWith(".json"))
+          .sort();
       } catch {
         continue;
       }
+      for (const file of files) {
+        const canonicalName = file.slice(0, -".json".length);
+        const candidate = {
+          canonicalName,
+          path: path.join(toolsDir, file),
+        };
+        if (canonicalName === toolName) exact.push(candidate);
+        else if (canonicalName.toLowerCase() === requestedFolded) {
+          folded.push(candidate);
+        }
+      }
     }
-  } catch {
-    // Skills dir doesn't exist or can't be read
   }
-  return null;
+
+  const candidate =
+    exact[0] ??
+    (new Set(folded.map((entry) => entry.canonicalName)).size === 1
+      ? folded[0]
+      : undefined);
+  if (!candidate) return null;
+
+  try {
+    return JSON.parse(await fs.readFile(candidate.path, "utf-8")) as ToolMetadata;
+  } catch {
+    return null;
+  }
 }
 
 // A stdio server's only client signal is clientInfo.name. Cursor reports
@@ -284,7 +327,7 @@ async function currentPermissionMode(): Promise<string | null> {
 export async function handleRunTool(
   remoteClient: Client,
   mcpServer: Server,
-  skillsBaseDir: string,
+  skillsBaseDir: SkillsBaseDirInput,
   args: Record<string, unknown>,
 ): Promise<CallToolResult> {
   const serverId = args.server_id;
@@ -449,4 +492,100 @@ export function runToolAnnotations(
   return enableHitl && clientSupportsElicitation && !isCursor
     ? { readOnlyHint: true }
     : undefined;
+}
+
+/**
+ * Pure dispatch core — no approval. Resolves file_args, shapes the remote
+ * payload, and calls the gateway's `run_tool`. Shared by run_tool and every
+ * run_code PTC_ binding so auth, file_args, and the wire shape live in one
+ * place. Throws FileArgsError on bad file_args (caller surfaces it).
+ */
+export async function invokeTool(
+  remoteClient: Client,
+  params: {
+    serverId: string;
+    toolName: string;
+    arguments?: unknown;
+    fileArgs?: unknown;
+  },
+): Promise<CallToolResult> {
+  const baseArgs =
+    params.arguments != null && typeof params.arguments === "object"
+      ? (params.arguments as Record<string, unknown>)
+      : {};
+  const resolvedArgs = await resolveFileArgs(params.fileArgs, baseArgs);
+
+  return callRemoteTool(
+    remoteClient,
+    "run_tool",
+    buildRemoteArgs(params.serverId, params.toolName, resolvedArgs),
+  );
+}
+
+export type ApprovalOutcome =
+  | { kind: "approved" }
+  | { kind: "declined"; action: string };
+
+/**
+ * Per-tool HITL gate used by run_code's just-in-time approval path. (run_tool's
+ * own HITL is inlined in handleRunTool above, with richer compact-args /
+ * auto-dismiss handling.) Auto-approves unless ALL of: ENABLE_HITL is set, the
+ * client supports elicitation, and the tool JSON marks `requires_approval`. On
+ * an elicitation transport error the behavior depends on `failClosed`:
+ * run_code passes failClosed=true so a broken approval channel never silently
+ * runs a write.
+ */
+export async function requestToolApproval(
+  mcpServer: Server,
+  skillsBaseDir: SkillsBaseDirInput,
+  toolName: string,
+  serverId: string,
+  opts: {
+    message?: string;
+    failClosed?: boolean;
+    // Callers that already hold the tool's metadata (e.g. run_code) pass these
+    // so we skip the findToolMeta disk rescan of the whole skills tree.
+    requiresApproval?: boolean;
+    description?: string;
+  } = {},
+): Promise<ApprovalOutcome> {
+  if (!hitlOn() || !mcpServer.getClientCapabilities()?.elicitation) {
+    return { kind: "approved" };
+  }
+
+  let requiresApproval = opts.requiresApproval;
+  let description = opts.description;
+  if (requiresApproval === undefined) {
+    const meta = await findToolMeta(skillsBaseDir, toolName);
+    requiresApproval = meta?.requiresApproval;
+    description = meta?.description;
+  }
+  if (!requiresApproval) return { kind: "approved" };
+
+  const message =
+    opts.message ??
+    [
+      `**Action: ${toolName}**`,
+      description || "",
+      `Server: ${serverId}`,
+      "",
+      "Accept to execute, or decline to cancel.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+  try {
+    const result = await mcpServer.elicitInput({
+      message,
+      requestedSchema: { type: "object", properties: {} } as never,
+    });
+    if (result.action !== "accept") {
+      return { kind: "declined", action: result.action };
+    }
+    return { kind: "approved" };
+  } catch {
+    return opts.failClosed
+      ? { kind: "declined", action: "elicitation-error" }
+      : { kind: "approved" };
+  }
 }
