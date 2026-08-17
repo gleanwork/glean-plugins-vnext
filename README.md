@@ -130,6 +130,36 @@ every launch and setting them yourself has no effect:
 - `GLEAN_SESSION_ID` — the host's conversation id: `CLAUDE_CODE_SESSION_ID` for
   Claude Code, `CODEX_THREAD_ID` for Codex, otherwise a generated UUID.
 
+## MCP skills extension
+
+For hosts that import skills from the MCP server itself rather than from the
+packaged plugin directory (ChatGPT plugins, per OpenAI's
+[Import skills from the MCP server](https://developers.openai.com/plugins/build/mcp-server#import-skills-from-the-mcp-server)
+guide), the server advertises the draft
+[SEP-2640](https://github.com/modelcontextprotocol/modelcontextprotocol)
+skills extension:
+
+```json
+{ "capabilities": { "extensions": { "io.modelcontextprotocol/skills": {} } } }
+```
+
+It serves the skills the signed-in user has in Glean, sourced from the
+experimental Platform Skills API (`GET /api/skills` for metadata,
+`GET /api/skills/{id}/content` for the bundle) on the same origin and bearer
+token that `setup` already captured:
+
+| Method | Behavior |
+| --- | --- |
+| `skills/list` | One page of skills (10 per page); `cursor` maps to the Platform API cursor. Each entry has a `skill://glean/<name>/SKILL.md` uri, the full parsed SKILL.md frontmatter, and every bundle file with a `sha256:` digest. |
+| `skills/get` | The catalog entry for one SKILL.md uri. |
+| `resources/read` | The bytes for any listed uri — `text` for UTF-8 files, `blob` for binary. |
+| `resources/list` | Resources this process has already listed. Empty until `skills/list` runs, so host startup never triggers bundle downloads. |
+
+Unconfigured or signed-out sessions serve an empty catalog — `setup` remains
+the only path that drives OAuth. Only `ENABLED` skills are served; draft,
+disabled, oversized (spec import limits), and duplicate-named skills are
+skipped and logged to `glean-server.log`.
+
 ## Troubleshooting
 
 - **Sign-in loop or stale auth** — prompt the agent to reset and sign in again
