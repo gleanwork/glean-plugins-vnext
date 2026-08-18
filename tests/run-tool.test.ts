@@ -340,10 +340,10 @@ describe("handleRunTool (HITL)", () => {
     expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT elicit for Cursor — its native prompt is the gate; executes directly", async () => {
+  it("DOES elicit for Cursor — our prompt is the single gate there too", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
-    const elicit = vi.fn();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
     const server = makeServer({
       elicitation: true,
       clientName: "cursor-vscode",
@@ -353,10 +353,106 @@ describe("handleRunTool (HITL)", () => {
 
     await handleRunTool(remote, server, tmpDir, baseArgs);
 
-    // Cursor: readOnlyHint is omitted (native prompt shows), so our elicitation
-    // is skipped and the tool runs directly.
-    expect(elicit).not.toHaveBeenCalled();
+    // Cursor is no longer excluded: it gets readOnlyHint like every other
+    // elicitation-capable host, so this prompt is the only approval gate.
+    expect(elicit).toHaveBeenCalledTimes(1);
     expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  // Cursor's pre-3.15 bug drops the prompt, so the request burns the whole
+  // timeout. Its version cannot be checked (clientInfo reports a hardcoded
+  // "1.0.0"), so the guidance keys off that duration instead.
+  it("adds Cursor upgrade guidance when the prompt was never answered", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("HITL_TIMEOUT_MS", "40");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockImplementation(
+      () =>
+        new Promise((_resolve, reject) =>
+          setTimeout(() => reject(new Error("Request timed out")), 60),
+        ),
+    );
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(result.isError).toBe(true);
+    expect(text).toContain("3.15");
+    expect(text).toContain("NOT executed");
+    expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  // Escape should resolve with action "cancel", but a host that delivers it as
+  // an abort instead reaches this path as ErrorCode.RequestTimeout — the SDK
+  // wraps every abort reason that way, so the code and message shape are
+  // identical to a real timeout. Duration is the only discriminator, and a fast
+  // failure must not blame Cursor's version.
+  it("omits Cursor guidance when the prompt failed early, e.g. dismissed", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("HITL_TIMEOUT_MS", "10000");
+    const remote = makeRemote();
+    const elicit = vi
+      .fn()
+      .mockRejectedValue(new Error("MCP error -32001: Request timed out"));
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(result.isError).toBe(true);
+    expect(text).not.toContain("3.15");
+    expect(text).toContain("Ask the user to confirm");
+    expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  it("never mentions Cursor to another host, even on a full-timeout hang", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("HITL_TIMEOUT_MS", "40");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockImplementation(
+      () =>
+        new Promise((_resolve, reject) =>
+          setTimeout(() => reject(new Error("Request timed out")), 60),
+        ),
+    );
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+
+    expect((result.content[0] as { text: string }).text).not.toContain("3.15");
+    expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  it("treats a spec-compliant cancel as a cancel, not a failure", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "cancel" });
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(text).toContain("cancelled by the user");
+    expect(text).not.toContain("3.15");
+    expect(result.isError).toBeUndefined();
+    expect(remote.callTool).not.toHaveBeenCalled();
   });
 
   it("prompts with action name + arguments and forwards on accept", async () => {
@@ -710,21 +806,25 @@ describe("formatArgumentsForFile", () => {
 });
 
 describe("runToolAnnotations", () => {
-  it("marks run_tool read-only when HITL gates an elicitation-capable non-Cursor client", () => {
-    expect(runToolAnnotations(true, true, false)).toEqual({
+  it("marks run_tool read-only when HITL gates an elicitation-capable client", () => {
+    expect(runToolAnnotations(true, true)).toEqual({
       readOnlyHint: true,
     });
   });
 
   it("leaves annotations unset when HITL is disabled", () => {
-    expect(runToolAnnotations(false, true, false)).toBeUndefined();
+    expect(runToolAnnotations(false, true)).toBeUndefined();
   });
 
   it("leaves annotations unset when the client cannot elicit", () => {
-    expect(runToolAnnotations(true, false, false)).toBeUndefined();
+    expect(runToolAnnotations(true, false)).toBeUndefined();
   });
 
-  it("does NOT advertise readOnlyHint to Cursor (its elicitation only renders on the attended lane)", () => {
-    expect(runToolAnnotations(true, true, true)).toBeUndefined();
+  // Cursor used to be excluded here so it would show its own native prompt. It no
+  // longer is: our elicitation is the single gate on every elicitation-capable host,
+  // and a Cursor build that drops the prompt surfaces as a timeout carrying upgrade
+  // guidance rather than as a permanently weaker gate.
+  it("advertises readOnlyHint to Cursor as well, so our prompt is the single gate", () => {
+    expect(runToolAnnotations(true, true)).toEqual({ readOnlyHint: true });
   });
 });
