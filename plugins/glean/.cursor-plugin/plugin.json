@@ -1,7 +1,7 @@
 {
   "name": "glean-vnext",
   "displayName": "Glean vNext",
-  "version": "0.2.44",
+  "version": "0.2.45",
   "description": "Search and act across your company's apps \u2014 Jira, Slack, Salesforce, Google Workspace, and more \u2014 without leaving Cursor.",
   "author": {
     "name": "Glean"

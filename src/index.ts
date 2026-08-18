@@ -46,6 +46,12 @@ import {
 import { resolveSessionId } from "./session-id.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
 import { pluginVersionString } from "./version.js";
+import {
+  initPolicySession,
+  policySummary,
+  protocolVersion,
+  setPolicyServerUrl,
+} from "./policy/session.js";
 
 function readEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -130,6 +136,11 @@ const server = new Server(
   { name: "glean", version: pluginVersionString() },
   { capabilities: { tools: { listChanged: true } } },
 );
+
+// Capability/policy negotiation. This reports the plugin's context to the remote and
+// records whatever policy comes back; it does not yet change what the plugin does.
+initPolicySession(server, logLine);
+setPolicyServerUrl(resolveServerUrl());
 
 let oauthProvider: GleanOAuthClientProvider | undefined;
 
@@ -539,7 +550,11 @@ async function advanceSetup(): Promise<CallToolResult> {
             `Glean setup is complete.\n` +
             `Server URL: ${serverUrl}\n` +
             `Authenticated: yes\n` +
-            `Remote tools: ${toolNames}\n\n` +
+            `Remote tools: ${toolNames}\n` +
+            // Surfacing the negotiated context here is what makes a build with a
+            // missing version constant, or an unobserved MCP revision, visible per
+            // install rather than only in logs.
+            `${policySummary().join("\n")}\n\n` +
             `You can now use find_skills, run_tool, and any of the listed ` +
             `remote tools.`,
         },
@@ -736,6 +751,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clearRemoteTools();
         oauthProvider = undefined;
         cachedRemoteTools = [];
+        setPolicyServerUrl(undefined);
         logLine("setup.reset");
         // Fire-and-forget — tools list is shorter without the dynamic
         // surface; the host should re-fetch on its next idle cycle.
@@ -815,6 +831,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clearCredentials();
         oauthProvider = undefined;
         cachedRemoteTools = loadRemoteTools(normalized);
+        // Re-key the policy cache: a different instance must not inherit the previous
+        // instance's policy.
+        setPolicyServerUrl(normalized);
         logLine("setup.configured", { serverUrl: normalized });
         // Fall through to advanceSetup, which will now find URL ✓ and try
         // to drive auth + tool fetch in the same call.
@@ -841,7 +860,10 @@ async function main() {
     logLine("evict-stale-skills.failed", { msg });
   }
 
-  const transport = new StdioServerTransport();
+  // Wrap the transport so the negotiated MCP revision can be observed: the SDK settles
+  // it internally during `initialize` and exposes no server-side accessor for the
+  // result. `Transport` is a plain interface, so this needs no subclassing.
+  const transport = protocolVersion.wrap(new StdioServerTransport());
   await server.connect(transport);
 }
 
