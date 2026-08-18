@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { GleanOAuthClientProvider } from "./auth-provider.js";
+import { pluginVersionString } from "./version.js";
 
 const GLEAN_PLUGIN = "GLEAN_PLUGIN";
 
@@ -185,7 +186,7 @@ export async function createRemoteClient(
   }
 
   const client = new Client(
-    { name: "glean", version: "1.0.0" },
+    { name: "glean", version: pluginVersionString() },
     { capabilities: {} },
   );
 

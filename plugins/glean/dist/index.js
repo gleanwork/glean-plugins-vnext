@@ -25127,6 +25127,16 @@ var StreamableHTTPClientTransport = class {
   }
 };
 
+// src/version.ts
+var BUILD_VERSION = true ? "0.2.44" : void 0;
+function pluginVersion() {
+  if (BUILD_VERSION) return { version: BUILD_VERSION, source: "build" };
+  return { version: "0.0.0", source: "unknown" };
+}
+function pluginVersionString() {
+  return pluginVersion().version;
+}
+
 // src/remote-client.ts
 var GLEAN_PLUGIN = "GLEAN_PLUGIN";
 var DEFAULT_REMOTE_TOOL_TIMEOUT_MS = 3e5;
@@ -25241,7 +25251,7 @@ async function createRemoteClient(serverUrl, opts, chatSessionId) {
     await authProvider.invalidateCredentials("all");
   }
   const client = new Client(
-    { name: "glean", version: "1.0.0" },
+    { name: "glean", version: pluginVersionString() },
     { capabilities: {} }
   );
   const transport = buildTransport(serverUrl, opts, chatSessionId);
@@ -26339,7 +26349,7 @@ function resolveSkillsBaseDir() {
   return path7.join(tmpdir(), "glean-skills-cache");
 }
 var server = new Server(
-  { name: "glean", version: "1.0.0" },
+  { name: "glean", version: pluginVersionString() },
   { capabilities: { tools: { listChanged: true } } }
 );
 var oauthProvider;

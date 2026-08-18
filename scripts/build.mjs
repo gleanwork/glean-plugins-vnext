@@ -18,11 +18,47 @@
 
 import { build } from "esbuild";
 import { builtinModules } from "node:module";
+import { readFileSync } from "node:fs";
 
 const nodeBuiltins = [
   ...builtinModules,
   ...builtinModules.map((m) => `node:${m}`),
 ];
+
+// Bake the plugin version into the bundle as a literal.
+//
+// Why at build time rather than read at runtime: the value is what a remote policy
+// uses to decide whether this plugin is outdated, blocked, or unsupported, so it has
+// to be the version of the code that is actually running. A manifest read at runtime
+// reports only what an editable file next to the bundle claims. CI already verifies
+// that `dist/` is in sync with source, so a compiled-in literal cannot drift from the
+// manifest unnoticed.
+//
+// The build FAILS rather than emitting a bundle with a missing or malformed version.
+// Baking it in makes this step load-bearing: a silently absent constant would make
+// every install report an unknown version and disable any version-dependent
+// behaviour fleet-wide, which is a far worse outcome than a red build.
+const MANIFEST = "plugins/glean/.claude-plugin/plugin.json";
+
+function pluginVersionFromManifest() {
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(MANIFEST, "utf-8"));
+  } catch (err) {
+    throw new Error(`build: cannot read ${MANIFEST}: ${err.message}`);
+  }
+  const version = raw.version;
+  if (typeof version !== "string" || !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(
+      `build: ${MANIFEST} must declare a plain x.y.z version, got ${JSON.stringify(version)}. ` +
+        `The bundled constant is what the plugin reports about itself, so an absent or ` +
+        `malformed value fails the build rather than shipping.`,
+    );
+  }
+  return version;
+}
+
+const pluginVersion = pluginVersionFromManifest();
 
 await build({
   entryPoints: ["src/index.ts"],
@@ -31,6 +67,10 @@ await build({
   platform: "node",
   format: "esm",
   target: "node20",
+  // Substituted into src/version.ts. JSON.stringify so it lands as a quoted literal.
+  define: {
+    __GLEAN_PLUGIN_VERSION__: JSON.stringify(pluginVersion),
+  },
   // Not setting `packages` — esbuild only accepts `"external"` here, which
   // would ship every dep as a runtime lookup (defeating the purpose). The
   // default when `bundle:true` is to inline every import whose specifier
