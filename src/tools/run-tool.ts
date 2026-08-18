@@ -295,6 +295,15 @@ async function currentPermissionMode(): Promise<string | null> {
 // (shared/protocol.js) — a user-driven abort and a real timeout arrive with the same code
 // and message shape. Keying off duration is what keeps someone who simply dismissed the
 // prompt from being told to upgrade Cursor.
+// The HITL timeout defaults to 5 minutes, and "waited the full 300s" reads worse than
+// "the full 5 minutes" in a message a model relays to a user verbatim.
+function humanizeMs(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 120) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
 export function elicitationFailureText(
   mcpServer: Server,
   toolName: string,
@@ -317,7 +326,7 @@ export function elicitationFailureText(
   return (
     `${base}\n\n` +
     `This tool requires explicit approval before it runs, and the approval prompt ` +
-    `never appeared — it waited the full ${Math.round(timeoutMs / 1000)}s and timed ` +
+    `never appeared — it waited the full ${humanizeMs(timeoutMs)} and timed ` +
     `out. Cursor does not deliver approval prompts reliably before version 3.15: the ` +
     `prompt is silently dropped, which is why this looked frozen. If Cursor is older ` +
     `than 3.15, updating it will fix this. Tell the user, and do not retry until they ` +

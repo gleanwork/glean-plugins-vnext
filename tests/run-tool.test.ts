@@ -8,6 +8,7 @@ import {
   FileArgsError,
   handleRunTool,
   runToolAnnotations,
+  elicitationFailureText,
 } from "../src/tools/run-tool.js";
 import {
   buildCompactArgs,
@@ -826,5 +827,24 @@ describe("runToolAnnotations", () => {
   // guidance rather than as a permanently weaker gate.
   it("advertises readOnlyHint to Cursor as well, so our prompt is the single gate", () => {
     expect(runToolAnnotations(true, true)).toEqual({ readOnlyHint: true });
+  });
+});
+
+describe("elicitationFailureText", () => {
+  const cursor = {
+    getClientVersion: () => ({ name: "cursor-vscode", version: "1.0.0" }),
+  } as any;
+
+  // The shipped HITL_TIMEOUT_MS is 300000, so this phrasing is what almost every
+  // real occurrence prints. A model relays it verbatim, so it reads in minutes.
+  it("renders the 5-minute default as minutes, not 300s", () => {
+    const text = elicitationFailureText(cursor, "t", "timed out", 300_000, 300_000);
+    expect(text).toContain("the full 5 minutes");
+    expect(text).not.toContain("300s");
+  });
+
+  it("keeps short test timeouts in seconds", () => {
+    const text = elicitationFailureText(cursor, "t", "timed out", 20_000, 20_000);
+    expect(text).toContain("the full 20s");
   });
 });
