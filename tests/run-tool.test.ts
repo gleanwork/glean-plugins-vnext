@@ -360,10 +360,10 @@ describe("handleRunTool (HITL)", () => {
     expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
 
-  // Cursor's pre-3.15 bug drops the prompt, so the request burns the whole
+  // Cursor's pre-3.15 bug can drop the prompt, so the request burns the whole
   // timeout. Its version cannot be checked (clientInfo reports a hardcoded
-  // "1.0.0"), so the guidance keys off that duration instead.
-  it("adds Cursor upgrade guidance when the prompt was never answered", async () => {
+  // "1.0.0"), so the note keys off that duration instead.
+  it("raises Cursor as a possible cause when the request waits out the clock", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     vi.stubEnv("HITL_TIMEOUT_MS", "40");
     const remote = makeRemote();
@@ -387,6 +387,38 @@ describe("handleRunTool (HITL)", () => {
     expect(text).toContain("3.15");
     expect(text).toContain("NOT executed");
     expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  // A timeout cannot distinguish "prompt shown, nobody answered" from "prompt never
+  // delivered", so the text must not claim the prompt was missing. Asserting it would
+  // send the user chasing a Cursor upgrade for what may just be an unanswered prompt.
+  it("frames the missing prompt as a possibility, never as a finding", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("HITL_TIMEOUT_MS", "40");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockImplementation(
+      () =>
+        new Promise((_resolve, reject) =>
+          setTimeout(() => reject(new Error("Request timed out")), 60),
+        ),
+    );
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(text).toContain("cannot tell which");
+    expect(text).toContain("One possible cause");
+    expect(text).toContain("Ask the user whether they saw an approval prompt");
+    // No claim about what did or did not happen on screen.
+    expect(text).not.toContain("never appeared");
+    expect(text).not.toContain("is silently dropped");
+    expect(text).not.toContain("will fix this");
   });
 
   // Escape should resolve with action "cancel", but a host that delivers it as

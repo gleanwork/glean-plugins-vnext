@@ -188,8 +188,8 @@ async function findToolJson(
 }
 
 // A stdio server's only client signal is clientInfo.name; Cursor reports
-// "cursor-vscode". Used to attach Cursor-specific upgrade guidance when an
-// approval prompt is never answered (see elicitationFailureText).
+// "cursor-vscode". Used to offer a Cursor-specific explanation when an approval
+// request waits out the clock (see elicitationFailureText).
 export function isCursorClient(mcpServer: Server): boolean {
   return (mcpServer.getClientVersion()?.name ?? "")
     .toLowerCase()
@@ -280,21 +280,6 @@ async function currentPermissionMode(): Promise<string | null> {
   }
 }
 
-// Text for a FAILED approval request — a rejection, not a user's decline or cancel.
-// Those resolve with an action and are handled by the caller.
-//
-// Cursor before 3.15 drops server-initiated elicitations onto the auto-run lane, so the
-// prompt never appears and the request sits until the HITL timeout. Its
-// clientInfo.version is a hardcoded "1.0.0" (verified: the app reports 3.14.7 while the
-// handshake says 1.0.0), so the guidance cannot be gated on a version comparison and has
-// to key off the symptom.
-//
-// That symptom is DURATION, not the error: a dropped prompt burns the entire timeout,
-// while an interrupted one fails early. Elapsed time is the only discriminator available,
-// because the SDK wraps every abort reason as ErrorCode.RequestTimeout
-// (shared/protocol.js) — a user-driven abort and a real timeout arrive with the same code
-// and message shape. Keying off duration is what keeps someone who simply dismissed the
-// prompt from being told to upgrade Cursor.
 // The HITL timeout defaults to 5 minutes, and "waited the full 300s" reads worse than
 // "the full 5 minutes" in a message a model relays to a user verbatim.
 function humanizeMs(ms: number): string {
@@ -304,6 +289,22 @@ function humanizeMs(ms: number): string {
   return `${minutes} minute${minutes === 1 ? "" : "s"}`;
 }
 
+// Text for a FAILED approval request — a rejection, not a user's decline or cancel.
+// Those resolve with an action and are handled by the caller.
+//
+// A request that burned the whole timeout is AMBIGUOUS, and the message has to stay that
+// way: the prompt may have been shown and left unanswered, or never delivered at all.
+// Nothing observable from here separates the two, so the Cursor explanation is offered as
+// a possibility for the user to check, never asserted. Cursor before 3.15 can silently
+// drop server-initiated elicitations onto the auto-run lane, and its clientInfo.version
+// is a hardcoded "1.0.0" (verified: the app reports 3.14.7 while the handshake says
+// 1.0.0), so there is no version to compare and no way to confirm which case occurred.
+//
+// The duration check only keeps the note off plainly unrelated failures: an interrupted
+// request fails early, a dropped one waits out the clock. It cannot carry more weight
+// than that, because the SDK wraps every abort reason as ErrorCode.RequestTimeout
+// (shared/protocol.js) — a user-driven abort and a real timeout arrive with the same code
+// and message shape.
 export function elicitationFailureText(
   mcpServer: Server,
   toolName: string,
@@ -315,22 +316,23 @@ export function elicitationFailureText(
     `Action ${toolName} was not approved — the approval request failed ` +
     `(${detail}). The action was NOT executed.`;
 
-  // Within 10% of the deadline: the prompt was never answered, rather than
-  // dismissed. Anything faster was interrupted, so say nothing about Cursor.
-  const hung = elapsedMs >= timeoutMs * 0.9;
+  // Only a request that waited out the clock is a candidate for the Cursor note; an
+  // early failure was interrupted, which the dropped-prompt bug does not explain.
+  const waitedFullTimeout = elapsedMs >= timeoutMs * 0.9;
 
-  if (!hung || !isCursorClient(mcpServer)) {
+  if (!waitedFullTimeout || !isCursorClient(mcpServer)) {
     return `${base} Ask the user to confirm, then retry.`;
   }
 
   return (
     `${base}\n\n` +
-    `This tool requires explicit approval before it runs, and the approval prompt ` +
-    `never appeared — it waited the full ${humanizeMs(timeoutMs)} and timed ` +
-    `out. Cursor does not deliver approval prompts reliably before version 3.15: the ` +
-    `prompt is silently dropped, which is why this looked frozen. If Cursor is older ` +
-    `than 3.15, updating it will fix this. Tell the user, and do not retry until they ` +
-    `have updated — the retry will hang the same way.`
+    `It waited the full ${humanizeMs(timeoutMs)} without an answer. Either the approval ` +
+    `prompt was shown and went unanswered, or it was never shown at all — this end ` +
+    `cannot tell which. One possible cause, if no prompt appeared, is a known Cursor ` +
+    `issue before version 3.15: a server-initiated approval prompt can be dropped ` +
+    `silently, leaving nothing on screen to accept or dismiss. Ask the user whether they ` +
+    `saw an approval prompt. If they did not, suggest checking Cursor's version and ` +
+    `updating if it is below 3.15 — otherwise a retry may wait out the clock again.`
   );
 }
 
@@ -384,15 +386,15 @@ export async function handleRunTool(
   const hitlEnabled = process.env.ENABLE_HITL === "true";
   // Cursor is deliberately NOT excepted here any more. It used to be: we omitted
   // run_tool's readOnlyHint so Cursor showed its own native prompt, and skipped our
-  // elicitation entirely, because Cursor before 3.15 silently drops server-initiated
-  // elicitations onto the auto-run lane — no banner appears and the call hangs to the
+  // elicitation entirely, because Cursor before 3.15 can silently drop server-initiated
+  // elicitations onto the auto-run lane — no prompt appears and the call waits out the
   // HITL timeout. That workaround was permanent and silent, though: it left every Cursor
   // user on the weaker native prompt even on builds where elicitation works, with no
   // signal that upgrading would help. Cursor's clientInfo.version is a hardcoded "1.0.0"
   // (verified: the app reports 3.14.7 while the handshake says 1.0.0), so we cannot
   // detect the fixed build and switch back automatically. Instead we treat Cursor like
-  // any other elicitation-capable host and let the failure carry the explanation — see
-  // elicitationFailureText.
+  // any other elicitation-capable host, and a timeout surfaces the version as a
+  // possible cause — see elicitationFailureText.
   if (
     hitlEnabled &&
     toolMeta?.requires_approval &&
@@ -495,8 +497,8 @@ export function buildRemoteArgs(
  * pre-3.15 elicitation bug, but that traded a permanent weaker gate for a
  * transient bug and left users with no signal that upgrading would help. Cursor
  * now gets `readOnlyHint` like any other elicitation-capable host, so our prompt
- * is the single gate there too; on a broken build the elicitation times out and
- * `elicitationFailureText` explains why and what to do.
+ * is the single gate there too. If the prompt is dropped, the request waits out the HITL
+ * timeout and `elicitationFailureText` raises the version as something to check.
  */
 export function runToolAnnotations(
   enableHitl: boolean,
