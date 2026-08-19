@@ -59,15 +59,15 @@ export function loadCachedPolicy(serverUrl: string): PolicyResponse | undefined 
   return readAll()[serverUrl]?.policy;
 }
 
-/** Replace the cached policy. Only ever called with a VALIDATED policy. */
+/**
+ * Replace the cached policy. Only ever called with a VALIDATED policy.
+ *
+ * Reads every entry to write one, because the file is a map over remote URLs and the
+ * other URLs' entries have to survive the write.
+ */
 export function savePolicy(serverUrl: string, policy: PolicyResponse): void {
   const all = readAll();
-  const entry = all[serverUrl] ?? {};
-  all[serverUrl] = {
-    ...entry,
-    policy,
-    updatedAt: new Date().toISOString(),
-  };
+  all[serverUrl] = { policy, updatedAt: new Date().toISOString() };
   writeAll(all);
 }
 

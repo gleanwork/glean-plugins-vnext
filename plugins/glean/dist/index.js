@@ -25429,12 +25429,7 @@ function loadCachedPolicy(serverUrl) {
 }
 function savePolicy(serverUrl, policy) {
   const all = readAll();
-  const entry = all[serverUrl] ?? {};
-  all[serverUrl] = {
-    ...entry,
-    policy,
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
+  all[serverUrl] = { policy, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
   writeAll(all);
 }
 
