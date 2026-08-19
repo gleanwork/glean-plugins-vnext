@@ -55,6 +55,15 @@ export function loadRemoteTools(serverUrl: string): Tool[] {
   return entry.tools;
 }
 
+// Persist the remote catalog for a URL. Only ever the RAW allow-listed catalog, never
+// a surface that capability policy has already been applied to.
+//
+// That distinction is what lets this cache and the policy cache (policy/cache.ts) be
+// written and cleared independently: tools/list composes its answer by filtering this
+// catalog through the policy in force, at read time, so a catalog from one moment and a
+// policy from another still yield the surface the current policy dictates. Caching a
+// post-policy surface here would reintroduce exactly the skew that avoids — a stored
+// surface would keep advertising what a newer policy has withdrawn.
 export function saveRemoteTools(serverUrl: string, tools: Tool[]): void {
   if (!serverUrl) return;
   try {
