@@ -77,14 +77,29 @@ export function negotiationMeta(): { _meta: Record<string, unknown> } {
  *
  * The four outcomes are distinct on purpose:
  *   policy      - persist it and re-evaluate.
- *   no-policy   - the remote does not implement negotiation yet. Every supported
- *                 feature is treated as enabled and no version rule applies. The
- *                 cache is NOT erased.
+ *   no-policy   - no policy on THIS response. What that means depends on whether this
+ *                 remote has ever sent one; see below. The cache is never erased.
  *   malformed   - keep the last valid policy and treat this round as no-policy, so a
  *                 bad response can never deactivate a working plugin.
  *   unreachable - decided by the caller, not here: an unreachable remote produces no
  *                 result to classify. Conflating it with no-policy would silently
  *                 drop a previously synced version rule on any network blip.
+ *
+ * On no-policy, a cached policy is RETAINED rather than cleared. The compatibility path
+ * -- every supported feature enabled, no version rule -- is for a remote that does not
+ * implement negotiation, and the cached policy is the evidence of whether this one does.
+ * A remote that has already sent a policy is not disowning it by omitting it later.
+ *
+ * Reading omission as revocation looks harmless until a remote attaches policy to
+ * tools/list but not to tools/call -- a plausible split, since a list is answered once
+ * while calls are the hot path. Then every call would clear the policy, every following
+ * list would restore it, and each clear would emit tools/list_changed, so the host would
+ * re-fetch on every tool call and the advertised surface would visibly flicker.
+ *
+ * The cost is that a remote can no longer lift a restriction by going silent: it must
+ * send an explicit `enabled: true`. For a control plane that is the better default --
+ * clearing-by-silence is exactly what makes the flicker possible -- and it makes this
+ * agree with the unreachable path, which already retains the cached policy.
  */
 export function recordPolicyFromResult(result: unknown, label: string): void {
   // No configured remote yet means nothing to key the cache by, and no exchange to
@@ -114,7 +129,12 @@ export function recordPolicyFromResult(result: unknown, label: string): void {
       policy = cachedPolicy;
       break;
     case "no-policy":
-      policy = undefined;
+      // Silence, not revocation. Undefined only when this remote has never sent a
+      // policy, which is the compatibility path's actual condition.
+      policy = cachedPolicy;
+      if (cachedPolicy) {
+        logLine("policy.absent-kept-cache", { label });
+      }
       break;
   }
 

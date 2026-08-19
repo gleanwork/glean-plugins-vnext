@@ -117,10 +117,10 @@ describe("decisionInForce", () => {
     expect(labels).not.toContain("policy.seeded-from-cache");
   });
 
-  // A live response replaces a seeded decision. The no-policy case in particular must
-  // clear a cached restriction rather than keep it, which is what separates "the remote
-  // answered and has no policy" from "the remote was unreachable".
-  it("lets a live no-policy response supersede a cached restriction", async () => {
+  // A response carrying no policy is silence, not revocation. The compatibility path --
+  // everything enabled, no version rule -- is for a remote that does not implement
+  // negotiation at all, and the cached policy is the evidence of whether this one does.
+  it("keeps a cached restriction when a later response carries no policy", async () => {
     const { session, cache } = await freshSession(dir);
     cache.savePolicy(URL_A, { features: { metaTools: { enabled: false } } });
     session.initPolicySession(fakeServer() as never, () => {});
@@ -130,7 +130,62 @@ describe("decisionInForce", () => {
 
     session.recordPolicyFromResult({ tools: [] }, "tools/list");
 
+    expect(session.decisionInForce().features.metaTools).toBe(false);
+  });
+
+  // ...and the remote can still lift it, by saying so rather than by going quiet.
+  it("lets an explicit re-enable lift a cached restriction", async () => {
+    const { session, cache } = await freshSession(dir);
+    cache.savePolicy(URL_A, { features: { metaTools: { enabled: false } } });
+    session.initPolicySession(fakeServer() as never, () => {});
+    session.setPolicyServerUrl(URL_A);
+
+    expect(session.decisionInForce().features.metaTools).toBe(false);
+
+    session.recordPolicyFromResult(
+      resultWith({ features: { metaTools: { enabled: true } } }),
+      "tools/list",
+    );
+
     expect(session.decisionInForce().features.metaTools).toBe(true);
+  });
+
+  it("takes the compatibility path when no policy was ever received", async () => {
+    const { session } = await freshSession(dir);
+    session.initPolicySession(fakeServer() as never, () => {});
+    session.setPolicyServerUrl(URL_A);
+
+    session.recordPolicyFromResult({ tools: [] }, "tools/list");
+
+    const d = session.decisionInForce();
+    expect(d.features.metaTools).toBe(true);
+    expect(d.versionState).toBe("unenforced");
+  });
+
+  // The regression this replaced a wrong assumption for: a remote that attaches policy to
+  // tools/list but not to tools/call is a plausible split, since a list is answered once
+  // while calls are the hot path. Reading omission as revocation made every call clear the
+  // policy and every following list restore it -- and each clear changed the surface, so
+  // the host re-fetched on every tool call and the advertised list visibly flickered.
+  it("does not flip-flop when the remote only attaches policy to tools/list", async () => {
+    const { session } = await freshSession(dir);
+    const server = fakeServer();
+    session.initPolicySession(server as never, () => {});
+    session.setPolicyServerUrl(URL_A);
+
+    const policy = { features: { metaTools: { enabled: false } } };
+    const seen: boolean[] = [];
+
+    for (const label of ["tools/list", "tools/call(search)", "tools/list", "tools/call(chat)"]) {
+      session.recordPolicyFromResult(
+        label === "tools/list" ? resultWith(policy) : { content: [] },
+        label,
+      );
+      seen.push(session.decisionInForce().features.metaTools);
+    }
+
+    expect(seen).toEqual([false, false, false, false]);
+    expect(server.sendToolListChanged).not.toHaveBeenCalled();
   });
 
   it("keeps the cached policy on disk when a response carries none", async () => {

@@ -25562,7 +25562,10 @@ function recordPolicyFromResult(result, label) {
       policy = cachedPolicy;
       break;
     case "no-policy":
-      policy = void 0;
+      policy = cachedPolicy;
+      if (cachedPolicy) {
+        logLine("policy.absent-kept-cache", { label });
+      }
       break;
   }
   const request = lastRequest ?? negotiationRequest();
