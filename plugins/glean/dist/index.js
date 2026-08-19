@@ -25517,6 +25517,7 @@ var mcpServer;
 var logLine = () => {
 };
 var decision;
+var loggedLabels = /* @__PURE__ */ new Set();
 var lastRequest;
 var cacheKeyUrl;
 var protocolVersion = new ProtocolVersionObserver();
@@ -25570,7 +25571,9 @@ function recordPolicyFromResult(result, label) {
   });
   const changed = !decision || JSON.stringify([decision.deactivated, decision.features]) !== JSON.stringify([next.deactivated, next.features]);
   decision = next;
-  if (changed) {
+  const firstForLabel = !loggedLabels.has(label);
+  loggedLabels.add(label);
+  if (changed || firstForLabel) {
     logLine("policy.resolved", {
       label,
       outcome: outcome.kind,

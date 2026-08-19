@@ -24,6 +24,9 @@ type LogFn = (label: string, detail?: Record<string, unknown>) => void;
 let mcpServer: Server | undefined;
 let logLine: LogFn = () => {};
 let decision: Decision | undefined;
+// Labels already logged in this process, so each negotiation path reports itself once
+// even when the resolved decision never changes. See recordPolicyFromResult.
+const loggedLabels = new Set<string>();
 let lastRequest: NegotiationRequest | undefined;
 // The remote the policy cache is keyed by. Held here rather than threaded through
 // every call site so that `callRemoteTool` -- the single funnel every remote tool call
@@ -123,7 +126,19 @@ export function recordPolicyFromResult(result: unknown, label: string): void {
       JSON.stringify([next.deactivated, next.features]);
   decision = next;
 
-  if (changed) {
+  // Log on a change, and once per label per process.
+  //
+  // The second condition is what makes the mechanism observable at all. A steady-state
+  // exchange changes nothing -- against a remote with no policy support, every response
+  // resolves to the same decision -- so change-only logging goes silent after the first
+  // tools/list and never says a word about tools/call again. The result is a feature
+  // whose entire job is remote control, with no evidence in the log that it ran on a
+  // given path. Labels are bounded (one per distinct remote method plus tool name), so
+  // this is a handful of lines per process, not per call.
+  const firstForLabel = !loggedLabels.has(label);
+  loggedLabels.add(label);
+
+  if (changed || firstForLabel) {
     logLine("policy.resolved", {
       label,
       outcome: outcome.kind,
