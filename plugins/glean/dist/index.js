@@ -25401,8 +25401,8 @@ function writeAll(data) {
   } catch {
   }
 }
-function loadCached(serverUrl) {
-  return readAll()[serverUrl] ?? {};
+function loadCachedPolicy(serverUrl) {
+  return readAll()[serverUrl]?.policy;
 }
 function savePolicy(serverUrl, policy) {
   const all = readAll();
@@ -25525,7 +25525,7 @@ function recordPolicyFromResult(result, label) {
   const serverUrl = cacheKeyUrl;
   if (!serverUrl) return;
   const outcome = classifyResult(result);
-  const cached2 = loadCached(serverUrl);
+  const cachedPolicy = loadCachedPolicy(serverUrl);
   let policy;
   switch (outcome.kind) {
     case "policy":
@@ -25537,7 +25537,7 @@ function recordPolicyFromResult(result, label) {
       break;
     case "malformed":
       logLine("policy.malformed", { label, reason: outcome.reason });
-      policy = cached2.policy;
+      policy = cachedPolicy;
       break;
     case "no-policy":
       policy = void 0;

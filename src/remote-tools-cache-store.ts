@@ -15,19 +15,19 @@ function cacheFile(): string {
   return path.join(resolveCacheDir(), CACHE_FILENAME);
 }
 
-interface CacheEntry {
+interface ToolsCacheEntry {
   tools: Tool[];
   fetchedAt: string;
 }
 
-type Store = Record<string, CacheEntry>;
+type ToolsCacheFile = Record<string, ToolsCacheEntry>;
 
-function readStore(): Store {
+function readStore(): ToolsCacheFile {
   try {
     const raw = fs.readFileSync(cacheFile(), "utf-8");
     const data = JSON.parse(raw);
     if (data && typeof data === "object" && !Array.isArray(data)) {
-      return data as Store;
+      return data as ToolsCacheFile;
     }
     return {};
   } catch {
@@ -35,7 +35,7 @@ function readStore(): Store {
   }
 }
 
-function writeStore(store: Store): void {
+function writeStore(store: ToolsCacheFile): void {
   const filePath = cacheFile();
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });

@@ -13,12 +13,12 @@ import type { PolicyResponse } from "./types.js";
 // startup, setup, and instance-switch paths. A second copy here would shadow a live
 // subsystem, and the two could then disagree about which surface belongs with which
 // policy. Anything replaying a cached surface reads it from there.
-interface CacheEntry {
+interface PolicyCacheEntry {
   policy?: PolicyResponse;
   updatedAt?: string;
 }
 
-type CacheFile = Record<string, CacheEntry>;
+type PolicyCacheFile = Record<string, PolicyCacheEntry>;
 
 // Same anchor as url-config-store and token-store: PLUGIN_DATA_DIR when the host
 // provides a managed data directory, else ~/.glean.
@@ -27,7 +27,7 @@ function cachePath(): string {
   return path.join(base, "policy-cache.json");
 }
 
-function readAll(): CacheFile {
+function readAll(): PolicyCacheFile {
   try {
     const parsed = JSON.parse(fs.readFileSync(cachePath(), "utf-8"));
     return typeof parsed === "object" && parsed !== null ? parsed : {};
@@ -36,7 +36,7 @@ function readAll(): CacheFile {
   }
 }
 
-function writeAll(data: CacheFile): void {
+function writeAll(data: PolicyCacheFile): void {
   const file = cachePath();
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -47,8 +47,15 @@ function writeAll(data: CacheFile): void {
   }
 }
 
-export function loadCached(serverUrl: string): CacheEntry {
-  return readAll()[serverUrl] ?? {};
+/**
+ * The cached policy for a remote, or undefined if none has been stored.
+ *
+ * Returns the policy itself rather than the stored entry: `updatedAt` is written for
+ * anyone reading the file by hand and is deliberately not part of the API, so callers
+ * cannot come to depend on a timestamp that says nothing about the policy's validity.
+ */
+export function loadCachedPolicy(serverUrl: string): PolicyResponse | undefined {
+  return readAll()[serverUrl]?.policy;
 }
 
 /** Replace the cached policy. Only ever called with a VALIDATED policy. */

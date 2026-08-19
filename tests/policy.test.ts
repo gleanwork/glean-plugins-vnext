@@ -5,7 +5,7 @@ import path from "node:path";
 import { evaluate } from "../src/policy/evaluate.js";
 import { classifyResult, validatePolicy } from "../src/policy/negotiate.js";
 import { CAPABILITY_POLICY_KEY } from "../src/policy/key.js";
-import { loadCached, savePolicy } from "../src/policy/cache.js";
+import { loadCachedPolicy, savePolicy } from "../src/policy/cache.js";
 
 const allSupported = {
   toolPromotion: true,
@@ -254,10 +254,10 @@ describe("policy cache", () => {
     savePolicy("https://a.glean.com", { features: { hitl: { enabled: false } } });
     savePolicy("https://b.glean.com", { features: { hitl: { enabled: true } } });
 
-    expect(loadCached("https://a.glean.com").policy).toEqual({
+    expect(loadCachedPolicy("https://a.glean.com")).toEqual({
       features: { hitl: { enabled: false } },
     });
-    expect(loadCached("https://b.glean.com").policy).toEqual({
+    expect(loadCachedPolicy("https://b.glean.com")).toEqual({
       features: { hitl: { enabled: true } },
     });
   });
@@ -269,7 +269,7 @@ describe("policy cache", () => {
   // future one would reintroduce exactly that.
   it("exposes no way to discard a cached policy", async () => {
     const mod = await import("../src/policy/cache.js");
-    expect(Object.keys(mod).sort()).toEqual(["loadCached", "savePolicy"]);
+    expect(Object.keys(mod).sort()).toEqual(["loadCachedPolicy", "savePolicy"]);
   });
 
   // Design: "A response without a policy object does not update or erase the
@@ -278,22 +278,28 @@ describe("policy cache", () => {
     savePolicy("https://a.glean.com", { features: { hitl: { enabled: false } } });
 
     // A no-policy round writes nothing, so the entry is untouched.
-    expect(loadCached("https://a.glean.com").policy).toEqual({
+    expect(loadCachedPolicy("https://a.glean.com")).toEqual({
       features: { hitl: { enabled: false } },
     });
   });
 
   // tools/list belongs to remote-tools-cache-store.ts. Caching it here too would
   // shadow a live subsystem and let the two disagree about which surface goes with
-  // which policy.
-  it("stores policy only, never a tools list", () => {
+  // which policy. Asserted against the file, since that is where a stray field
+  // would actually appear.
+  it("writes policy only, never a tools list", () => {
     savePolicy("https://a.glean.com", { features: { hitl: { enabled: false } } });
 
-    const entry = loadCached("https://a.glean.com") as Record<string, unknown>;
-    expect(Object.keys(entry).sort()).toEqual(["policy", "updatedAt"]);
+    const onDisk = JSON.parse(
+      fs.readFileSync(path.join(dir, "policy-cache.json"), "utf-8"),
+    );
+    expect(Object.keys(onDisk["https://a.glean.com"]).sort()).toEqual([
+      "policy",
+      "updatedAt",
+    ]);
   });
 
-  it("returns an empty entry for an unknown URL rather than throwing", () => {
-    expect(loadCached("https://never-seen.glean.com")).toEqual({});
+  it("returns undefined for an unknown URL rather than throwing", () => {
+    expect(loadCachedPolicy("https://never-seen.glean.com")).toBeUndefined();
   });
 });

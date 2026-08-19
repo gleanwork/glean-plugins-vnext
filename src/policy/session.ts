@@ -3,7 +3,7 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { hostIdentityFromHandshake, buildNegotiationRequest } from "./context.js";
 import { classifyResult, metaFor } from "./negotiate.js";
 import { evaluate } from "./evaluate.js";
-import { loadCached, savePolicy } from "./cache.js";
+import { loadCachedPolicy, savePolicy } from "./cache.js";
 import { ProtocolVersionObserver } from "./protocol-version.js";
 import type { Decision, NegotiationRequest, PolicyResponse } from "./types.js";
 
@@ -85,7 +85,7 @@ export function recordPolicyFromResult(result: unknown, label: string): void {
   if (!serverUrl) return;
 
   const outcome = classifyResult(result);
-  const cached = loadCached(serverUrl);
+  const cachedPolicy = loadCachedPolicy(serverUrl);
   let policy: PolicyResponse | undefined;
 
   switch (outcome.kind) {
@@ -102,7 +102,7 @@ export function recordPolicyFromResult(result: unknown, label: string): void {
       break;
     case "malformed":
       logLine("policy.malformed", { label, reason: outcome.reason });
-      policy = cached.policy;
+      policy = cachedPolicy;
       break;
     case "no-policy":
       policy = undefined;
