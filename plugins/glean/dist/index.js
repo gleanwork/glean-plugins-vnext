@@ -26799,7 +26799,7 @@ try {
 function logLine2(label, detail) {
   const ts = (/* @__PURE__ */ new Date()).toISOString();
   const suffix = detail ? ` ${JSON.stringify(detail)}` : "";
-  const line = `${ts} ${label}${suffix}
+  const line = `${ts} [${process.pid}] ${label}${suffix}
 `;
   try {
     fs9.appendFileSync(LOG_PATH, line, { mode: 384 });

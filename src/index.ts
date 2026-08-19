@@ -112,10 +112,15 @@ try {
   /* ignore */
 }
 
+// Every line carries the pid. Hosts spawn and reap this server on their own schedule,
+// and several processes can be alive at once writing to this one shared log, so without
+// a pid an interleaved log cannot be split back into per-process histories — and
+// whether two lines came from one process or two is exactly the question that arises
+// when in-memory state (the negotiated decision, the session id) appears inconsistent.
 function logLine(label: string, detail?: Record<string, unknown>): void {
   const ts = new Date().toISOString();
   const suffix = detail ? ` ${JSON.stringify(detail)}` : "";
-  const line = `${ts} ${label}${suffix}\n`;
+  const line = `${ts} [${process.pid}] ${label}${suffix}\n`;
   try {
     fs.appendFileSync(LOG_PATH, line, { mode: 0o600 });
     fs.chmodSync(LOG_PATH, 0o600);
