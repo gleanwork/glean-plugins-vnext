@@ -10,7 +10,6 @@ import { loadCachedPolicy, savePolicy } from "../src/policy/cache.js";
 const allSupported = {
   toolPromotion: true,
   metaTools: true,
-  hitl: true,
   fileArgs: true,
 };
 
@@ -25,7 +24,6 @@ describe("feature gating", () => {
     expect(d.features).toEqual({
       toolPromotion: true,
       metaTools: true,
-      hitl: true,
       fileArgs: false,
     });
     expect(d.deactivated).toBe(false);
@@ -35,10 +33,10 @@ describe("feature gating", () => {
     const d = evaluate({
       pluginVersion: "1.0.0",
       versionSource: "build",
-      supportedFeatures: { ...allSupported, hitl: false },
-      policy: { features: { hitl: { enabled: true } } },
+      supportedFeatures: { ...allSupported, fileArgs: false },
+      policy: { features: { fileArgs: { enabled: true } } },
     });
-    expect(d.features.hitl).toBe(false);
+    expect(d.features.fileArgs).toBe(false);
   });
 
   it("treats an omitted feature as no opinion, not as disabled", () => {
@@ -161,7 +159,7 @@ describe("outcome classification", () => {
     const outcome = classifyResult({
       tools: [],
       _meta: {
-        [CAPABILITY_POLICY_KEY]: { features: { hitl: { enabled: false } } },
+        [CAPABILITY_POLICY_KEY]: { features: { metaTools: { enabled: false } } },
       },
     });
     expect(outcome.kind).toBe("policy");
@@ -228,12 +226,24 @@ describe("unknown-key reporting", () => {
         blockedVersions: [],
         upgradeRecommendation: { show: true, dailyCap: 1, weeklyCap: 3, message: "x" },
       },
-      features: { hitl: { enabled: false } },
+      features: { metaTools: { enabled: false } },
       message: "x",
     });
     expect(v.ok).toBe(true);
     if (!v.ok) return;
     expect(v.unknownKeys).toEqual([]);
+  });
+
+  // hitl is defined by the design contract but deliberately not declared by this build,
+  // because the stateless remote cannot take approval over yet. It therefore travels the
+  // same path as any feature a policy names ahead of the plugin: accepted so a newer
+  // remote is not called malformed, reported so the ignoring is greppable, and inert.
+  // If a later build declares hitl, this test is the one that should start failing.
+  it("treats hitl as an unknown feature, since this build does not declare it", () => {
+    const v = validatePolicy({ features: { hitl: { enabled: false } } });
+    expect(v.ok).toBe(true);
+    if (!v.ok) return;
+    expect(v.unknownKeys).toEqual(["features.hitl"]);
   });
 });
 
@@ -251,14 +261,14 @@ describe("policy cache", () => {
   });
 
   it("keys by remote URL so switching instances cannot cross-contaminate", () => {
-    savePolicy("https://a.glean.com", { features: { hitl: { enabled: false } } });
-    savePolicy("https://b.glean.com", { features: { hitl: { enabled: true } } });
+    savePolicy("https://a.glean.com", { features: { metaTools: { enabled: false } } });
+    savePolicy("https://b.glean.com", { features: { metaTools: { enabled: true } } });
 
     expect(loadCachedPolicy("https://a.glean.com")).toEqual({
-      features: { hitl: { enabled: false } },
+      features: { metaTools: { enabled: false } },
     });
     expect(loadCachedPolicy("https://b.glean.com")).toEqual({
-      features: { hitl: { enabled: true } },
+      features: { metaTools: { enabled: true } },
     });
   });
 
@@ -275,11 +285,11 @@ describe("policy cache", () => {
   // Design: "A response without a policy object does not update or erase the
   // corresponding cache entry."
   it("keeps the cached policy when a later response carries none", () => {
-    savePolicy("https://a.glean.com", { features: { hitl: { enabled: false } } });
+    savePolicy("https://a.glean.com", { features: { metaTools: { enabled: false } } });
 
     // A no-policy round writes nothing, so the entry is untouched.
     expect(loadCachedPolicy("https://a.glean.com")).toEqual({
-      features: { hitl: { enabled: false } },
+      features: { metaTools: { enabled: false } },
     });
   });
 
@@ -288,7 +298,7 @@ describe("policy cache", () => {
   // which policy. Asserted against the file, since that is where a stray field
   // would actually appear.
   it("writes policy only, never a tools list", () => {
-    savePolicy("https://a.glean.com", { features: { hitl: { enabled: false } } });
+    savePolicy("https://a.glean.com", { features: { metaTools: { enabled: false } } });
 
     const onDisk = JSON.parse(
       fs.readFileSync(path.join(dir, "policy-cache.json"), "utf-8"),

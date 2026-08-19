@@ -25142,7 +25142,6 @@ var CAPABILITY_POLICY_KEY = "com.glean.mcp/capabilityPolicy";
 var FEATURE_NAMES = [
   "toolPromotion",
   "metaTools",
-  "hitl",
   "fileArgs"
 ];
 
