@@ -118,11 +118,16 @@ export function policyRefusal(input: {
   // when deactivated, so testing features first would answer "metaTools is disabled"
   // for a plugin whose actual problem, and only remedy, is its version.
   if (decision.deactivated) {
+    // The remote's own upgrade text when it supplied one -- the design assigns
+    // upgradeRecommendation.message this job as well as the soft recommendation, since
+    // the remedy is an upgrade either way, and it may carry instructions we do not know.
+    const remedy =
+      decision.upgradeMessage ??
+      "Upgrade the Glean plugin, then call `setup` to confirm the connection.";
     return refuse(
       `[POLICY_DEACTIVATED]\n\nThis version of the Glean plugin is not supported by ` +
         `your Glean instance, so only \`setup\` is available and ${name} will not run. ` +
-        `Do not retry. Upgrade the Glean plugin, then call \`setup\` to confirm the ` +
-        `connection.`,
+        `Do not retry. ${remedy}`,
     );
   }
 

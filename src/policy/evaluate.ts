@@ -134,6 +134,7 @@ export function evaluate(input: EvaluateInput): Decision {
       features: allFeatures(false),
       showUpgrade: true,
       message: policy.message,
+      upgradeMessage: policy.plugin?.upgradeRecommendation?.message,
       reasons,
     };
   }
@@ -161,6 +162,7 @@ export function evaluate(input: EvaluateInput): Decision {
       versionState === "outdated-supported" &&
       policy.plugin?.upgradeRecommendation?.show === true,
     message: policy.message,
+    upgradeMessage: policy.plugin?.upgradeRecommendation?.message,
     reasons,
   };
 }

@@ -230,3 +230,53 @@ describe("tools/list_changed notification", () => {
     expect(server.sendToolListChanged).toHaveBeenCalledTimes(1);
   });
 });
+
+// The recommendation is computed on every exchange but has exactly one surface: the setup
+// tool's output. Without these, `showUpgrade` and the remote's upgrade text are values the
+// remote sets and no user ever sees -- which is what they were before this change.
+describe("policySummary", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "policy-summary-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  async function summaryAfter(policy: unknown) {
+    const { session } = await freshSession(dir);
+    session.initPolicySession(fakeServer() as never, () => {});
+    session.setPolicyServerUrl(URL_A);
+    session.recordPolicyFromResult(resultWith(policy), "tools/call(search)");
+    return session.policySummary().join("\n");
+  }
+
+  // Deliberately not asserting the upgrade or deactivation lines here. Both require
+  // versionState to be version-derived, and the build constant is absent under vitest, so
+  // pluginVersion() is {0.0.0, unknown} and no version rule ever fires through this
+  // module. Their inputs are covered where they ARE reachable: evaluate() carrying
+  // upgradeMessage (policy.test.ts) and the deactivation refusal consuming it
+  // (policy-enforce.test.ts). The remaining uncovered hop is this function's string
+  // assembly for those two branches.
+  it("reports the negotiated context and the resolved policy", async () => {
+    const summary = await summaryAfter({ features: { metaTools: { enabled: false } } });
+    expect(summary).toContain("Plugin version: 0.0.0 (source: unknown)");
+    expect(summary).toContain("Host: claude-code");
+    expect(summary).toContain("version unenforced");
+    expect(summary).toContain('"metaTools":false');
+  });
+
+  it("shows a session message as a notice", async () => {
+    const summary = await summaryAfter({ message: "Maintenance window at 2am UTC." });
+    expect(summary).toContain("Notice: Maintenance window at 2am UTC.");
+  });
+
+  it("says nothing about upgrades when the remote does not ask", async () => {
+    const summary = await summaryAfter({ features: { metaTools: { enabled: true } } });
+    expect(summary).not.toContain("Upgrade available");
+    expect(summary).not.toContain("Deactivated:");
+  });
+});

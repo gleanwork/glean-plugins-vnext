@@ -156,6 +156,54 @@ describe("deactivated", () => {
   });
 });
 
+// upgradeRecommendation.message does double duty per the design: the soft recommendation
+// AND the deactivation remedy, since an upgrade is the fix either way. Before this it was
+// accepted by the validator and then dropped, so a remote could write user-facing text
+// into the designated field and see nothing.
+describe("the remote's upgrade text", () => {
+  it("is used as the remedy in a deactivation refusal", () => {
+    const d = decision({
+      deactivated: true,
+      versionState: "below-minimum",
+      features: { toolPromotion: false, metaTools: false, fileArgs: false },
+      upgradeMessage: "Run `/plugin update glean-vnext` and restart Claude Code.",
+    });
+
+    const text = (refusal("find_skills", d)!.content[0] as { text: string }).text;
+    expect(text).toContain("Run `/plugin update glean-vnext`");
+  });
+
+  it("falls back to generic wording when the remote supplied none", () => {
+    const d = decision({
+      deactivated: true,
+      versionState: "blocked",
+      features: { toolPromotion: false, metaTools: false, fileArgs: false },
+    });
+
+    const text = (refusal("run_tool", d)!.content[0] as { text: string }).text;
+    expect(text).toContain("Upgrade the Glean plugin");
+  });
+
+  // A soft recommendation must not withdraw anything -- it is advice, not a gate.
+  it("changes nothing about the surface or the refusals", () => {
+    const d = decision({
+      versionState: "outdated-supported",
+      showUpgrade: true,
+      upgradeMessage: "1.4.0 is out.",
+    });
+
+    expect(names(d)).toEqual([
+      "find_skills",
+      "run_tool",
+      "setup",
+      "search",
+      "chat",
+    ]);
+    expect(refusal("search", d)).toBeUndefined();
+    expect(refusal("run_tool", d)).toBeUndefined();
+  });
+});
+
 describe("metaTools disabled", () => {
   const d = decision({ features: { ...allSupported, metaTools: false } });
 

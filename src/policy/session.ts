@@ -248,6 +248,22 @@ export function policySummary(): string[] {
   ];
   if (d) {
     lines.push(`Policy: version ${d.versionState}, features ${JSON.stringify(d.features)}`);
+    // The recommendation is only shown here. It is computed on every exchange, so
+    // without a surface it would be a value the remote sets and nobody ever sees.
+    // dailyCap/weeklyCap are not implemented yet, so this appears on every setup call.
+    if (d.deactivated) {
+      lines.push(
+        `Deactivated: only \`setup\` is available. ${
+          d.upgradeMessage ?? "Upgrade the Glean plugin to restore functionality."
+        }`,
+      );
+    } else if (d.showUpgrade) {
+      lines.push(
+        `Upgrade available: ${
+          d.upgradeMessage ?? "a newer version of the Glean plugin is available."
+        }`,
+      );
+    }
     if (d.message) lines.push(`Notice: ${d.message}`);
   } else {
     lines.push("Policy: not yet negotiated");

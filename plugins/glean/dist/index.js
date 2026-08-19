@@ -25351,6 +25351,7 @@ function evaluate(input) {
       features: allFeatures(false),
       showUpgrade: true,
       message: policy.message,
+      upgradeMessage: policy.plugin?.upgradeRecommendation?.message,
       reasons
     };
   }
@@ -25372,6 +25373,7 @@ function evaluate(input) {
     features,
     showUpgrade: versionState === "outdated-supported" && policy.plugin?.upgradeRecommendation?.show === true,
     message: policy.message,
+    upgradeMessage: policy.plugin?.upgradeRecommendation?.message,
     reasons
   };
 }
@@ -25597,6 +25599,37 @@ function recordPolicyFromResult(result, label) {
 function surfaceKey(d) {
   return JSON.stringify([d.deactivated, d.features]);
 }
+function decisionInForce() {
+  if (decision) return decision;
+  try {
+    const policy = cacheKeyUrl ? loadCachedPolicy(cacheKeyUrl) : void 0;
+    const request = lastRequest ?? negotiationRequest();
+    decision = evaluate({
+      pluginVersion: request.plugin.version,
+      versionSource: request.plugin.versionSource,
+      supportedFeatures: request.plugin.supportedFeatures,
+      policy
+    });
+    if (policy) {
+      logLine("policy.seeded-from-cache", {
+        versionState: decision.versionState,
+        deactivated: decision.deactivated,
+        features: decision.features
+      });
+    }
+    return decision;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logLine("policy.seed-failed", { msg });
+    decision = evaluate({
+      pluginVersion: "0.0.0",
+      versionSource: "unknown",
+      supportedFeatures: supportedFeatures(),
+      policy: void 0
+    });
+    return decision;
+  }
+}
 function policySummary() {
   const r = lastRequest;
   const d = decision;
@@ -25608,6 +25641,15 @@ function policySummary() {
   ];
   if (d) {
     lines.push(`Policy: version ${d.versionState}, features ${JSON.stringify(d.features)}`);
+    if (d.deactivated) {
+      lines.push(
+        `Deactivated: only \`setup\` is available. ${d.upgradeMessage ?? "Upgrade the Glean plugin to restore functionality."}`
+      );
+    } else if (d.showUpgrade) {
+      lines.push(
+        `Upgrade available: ${d.upgradeMessage ?? "a newer version of the Glean plugin is available."}`
+      );
+    }
     if (d.message) lines.push(`Notice: ${d.message}`);
   } else {
     lines.push("Policy: not yet negotiated");
@@ -26160,6 +26202,79 @@ import fs6 from "node:fs/promises";
 import os3 from "node:os";
 import path6 from "node:path";
 
+// src/policy/enforce.ts
+var SETUP_TOOL_NAME = "setup";
+var META_TOOL_NAMES = /* @__PURE__ */ new Set([
+  "find_skills",
+  "run_tool"
+]);
+function withoutFileArgs(tool) {
+  const schema = tool.inputSchema;
+  if (!schema?.properties || !("file_args" in schema.properties)) return tool;
+  const { file_args: _dropped, ...rest } = schema.properties;
+  return {
+    ...tool,
+    inputSchema: { ...schema, properties: rest }
+  };
+}
+function advertisedTools(input) {
+  const { decision: decision2, setupTool, findSkillsTool, runTool, promoted } = input;
+  if (decision2.deactivated) {
+    return {
+      tools: [setupTool],
+      withheld: [
+        findSkillsTool.name,
+        runTool.name,
+        ...promoted.map((t) => t.name)
+      ]
+    };
+  }
+  const tools = [];
+  const withheld = [];
+  if (decision2.features.metaTools) {
+    tools.push(
+      findSkillsTool,
+      decision2.features.fileArgs ? runTool : withoutFileArgs(runTool)
+    );
+  } else {
+    withheld.push(findSkillsTool.name, runTool.name);
+  }
+  tools.push(setupTool);
+  if (decision2.features.toolPromotion) {
+    tools.push(...promoted);
+  } else {
+    withheld.push(...promoted.map((t) => t.name));
+  }
+  return { tools, withheld };
+}
+function refuse(text) {
+  return { content: [{ type: "text", text }], isError: true };
+}
+function policyRefusal(input) {
+  const { name, decision: decision2, promoted } = input;
+  if (name === SETUP_TOOL_NAME) return void 0;
+  if (decision2.deactivated) {
+    const remedy = decision2.upgradeMessage ?? "Upgrade the Glean plugin, then call `setup` to confirm the connection.";
+    return refuse(
+      `[POLICY_DEACTIVATED]
+
+This version of the Glean plugin is not supported by your Glean instance, so only \`setup\` is available and ${name} will not run. Do not retry. ${remedy}`
+    );
+  }
+  if (META_TOOL_NAMES.has(name) && !decision2.features.metaTools) {
+    return refuse(
+      `${name} is disabled for your Glean instance by remote policy and will not run. Do not retry \u2014 this is not a transient failure. Call \`setup\` to see the policy currently in force.`
+    );
+  }
+  if (promoted.has(name) && !decision2.features.toolPromotion) {
+    return refuse(
+      `${name} is not available: Glean tool promotion is disabled for your instance by remote policy, so this call will not run. Do not retry. Call \`setup\` to see the policy currently in force.`
+    );
+  }
+  return void 0;
+}
+var FILE_ARGS_DISABLED_TEXT = "`file_args` is disabled for your Glean instance by remote policy, so no file was read and the tool was not executed. Retry `run_tool` with the values inline in `arguments` instead.";
+
 // src/tools/approval-args.ts
 import fs5 from "node:fs/promises";
 import path5 from "node:path";
@@ -26430,7 +26545,7 @@ function elicitationFailureText(mcpServer2, toolName, detail, elapsedMs, timeout
 
 It waited the full ${humanizeMs(timeoutMs)} without an answer. Either the approval prompt was shown and went unanswered, or it was never shown at all \u2014 this end cannot tell which. One possible cause, if no prompt appeared, is a known Cursor issue before version 3.15: a server-initiated approval prompt can be dropped silently, leaving nothing on screen to accept or dismiss. Ask the user whether they saw an approval prompt. If they did not, suggest checking Cursor's version and updating if it is below 3.15 \u2014 otherwise a retry may wait out the clock again.`;
 }
-async function handleRunTool(remoteClient, mcpServer2, skillsBaseDir, args) {
+async function handleRunTool(remoteClient, mcpServer2, skillsBaseDir, args, policy) {
   const serverId = args.server_id;
   const toolName = args.tool_name;
   if (typeof serverId !== "string" || typeof toolName !== "string") {
@@ -26442,6 +26557,12 @@ async function handleRunTool(remoteClient, mcpServer2, skillsBaseDir, args) {
     };
   }
   const toolMeta = await findToolJson(skillsBaseDir, toolName);
+  if (!policy.fileArgs && args.file_args !== void 0) {
+    return {
+      content: [{ type: "text", text: FILE_ARGS_DISABLED_TEXT }],
+      isError: true
+    };
+  }
   const baseArgs = args.arguments != null && typeof args.arguments === "object" ? args.arguments : {};
   let resolvedArgs;
   try {
@@ -26932,22 +27053,34 @@ var SETUP_TOOL = {
   }
 };
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const runTool = {
-    ...RUN_TOOL_TOOL,
-    annotations: runToolAnnotations(
-      process.env.ENABLE_HITL === "true",
-      !!server.getClientCapabilities()?.elicitation
-    )
-  };
-  const staticTools = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
   const serve = (state, dynamic) => {
+    const decision2 = decisionInForce();
+    const runTool = {
+      ...RUN_TOOL_TOOL,
+      annotations: runToolAnnotations(
+        process.env.ENABLE_HITL === "true",
+        !!server.getClientCapabilities()?.elicitation
+      )
+    };
+    const { tools, withheld } = advertisedTools({
+      decision: decision2,
+      setupTool: SETUP_TOOL,
+      findSkillsTool: FIND_SKILLS_TOOL,
+      runTool,
+      promoted: dynamic
+    });
+    const fromCatalog = new Set(dynamic.map((t) => t.name));
     logLine2("tools-list.served", {
-      static: staticTools.length,
-      dynamic: dynamic.length,
+      static: tools.filter((t) => !fromCatalog.has(t.name)).length,
+      dynamic: tools.filter((t) => fromCatalog.has(t.name)).length,
       names: dynamic.map((t) => t.name),
+      withheld,
+      deactivated: decision2.deactivated,
+      versionState: decision2.versionState,
+      features: decision2.features,
       state
     });
-    return { tools: [...staticTools, ...dynamic] };
+    return { tools };
   };
   const serverUrl = resolveServerUrl();
   if (!serverUrl) {
@@ -27112,6 +27245,11 @@ async function advanceSetup() {
     cachedRemoteTools = remoteTools;
     saveRemoteTools(serverUrl, remoteTools);
     const toolNames = remoteTools.map((t) => t.name).join(", ") || "(none)";
+    const decision2 = decisionInForce();
+    const closing = decision2.deactivated ? `This plugin version is not supported by your Glean instance, so only \`setup\` is available. Upgrade the Glean plugin to restore the rest.` : `You can now use ` + [
+      ...decision2.features.metaTools ? ["find_skills", "run_tool"] : [],
+      ...decision2.features.toolPromotion && remoteTools.length > 0 ? ["any of the listed remote tools"] : []
+    ].join(", ") + `.`;
     return {
       content: [
         {
@@ -27122,7 +27260,7 @@ Authenticated: yes
 Remote tools: ${toolNames}
 ${policySummary().join("\n")}
 
-You can now use find_skills, run_tool, and any of the listed remote tools.`
+` + closing
         }
       ]
     };
@@ -27147,6 +27285,21 @@ Try calling setup again to retry, or setup({reset:true}) to start over.`
 }
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args = {} } = request.params;
+  const decision2 = decisionInForce();
+  const refusal = policyRefusal({
+    name,
+    decision: decision2,
+    promoted: REMOTE_TOOLS_ALLOWLIST
+  });
+  if (refusal) {
+    logLine2("policy.refused", {
+      tool: name,
+      deactivated: decision2.deactivated,
+      versionState: decision2.versionState,
+      features: decision2.features
+    });
+    return refusal;
+  }
   if (REMOTE_TOOLS_ALLOWLIST.has(name)) {
     const serverUrl = resolveServerUrl();
     if (!serverUrl) {
@@ -27268,7 +27421,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       try {
         const skillsBaseDir = resolveSkillsBaseDir();
-        return await handleRunTool(remoteClient, server, skillsBaseDir, args);
+        return await handleRunTool(remoteClient, server, skillsBaseDir, args, {
+          fileArgs: decision2.features.fileArgs
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`run_tool: execution failed: ${msg}`);

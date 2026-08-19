@@ -43,11 +43,13 @@ import { resolveSessionId } from "./session-id.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
 import { pluginVersionString } from "./version.js";
 import {
+  decisionInForce,
   initPolicySession,
   policySummary,
   protocolVersion,
   setPolicyServerUrl,
 } from "./policy/session.js";
+import { advertisedTools, policyRefusal } from "./policy/enforce.js";
 
 function readEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -138,8 +140,10 @@ const server = new Server(
   { capabilities: { tools: { listChanged: true } } },
 );
 
-// Capability/policy negotiation. This reports the plugin's context to the remote and
-// records whatever policy comes back; it does not yet change what the plugin does.
+// Capability/policy negotiation. Reports the plugin's context to the remote, records the
+// policy that comes back, and — since this build enforces it — gates what `tools/list`
+// advertises and what `tools/call` will run. The gates themselves are pure functions in
+// ./policy/enforce.ts; the two handlers below only read the decision and apply them.
 initPolicySession(server, logLine);
 setPolicyServerUrl(resolveServerUrl());
 
@@ -305,30 +309,48 @@ const SETUP_TOOL: Tool = {
 };
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const runTool: Tool = {
-    ...RUN_TOOL_TOOL,
-    annotations: runToolAnnotations(
-      process.env.ENABLE_HITL === "true",
-      !!server.getClientCapabilities()?.elicitation,
-    ),
-  };
-  const staticTools: Tool[] = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
-
   // One structured line on every return path, so "why don't my tools appear?"
-  // is answerable from the log alone: `static` is constant, `names` lists the
-  // dynamic tools we actually surfaced (freshly fetched or served from cache),
-  // and `state` names the path we took. The allow-list only ever drops tools
-  // outside our fixed set, so a missing allow-listed name (e.g. `chat`) means
-  // the backend never returned it. Only tool *names*, counts and the state
-  // tag are logged — never argument values, which can carry PII/secrets.
+  // is answerable from the log alone: `names` lists the dynamic tools we actually
+  // surfaced (freshly fetched or served from cache), `withheld` names what policy
+  // removed, and `state` names the path we took. The allow-list only ever drops
+  // tools outside our fixed set, so a missing allow-listed name (e.g. `chat`)
+  // that policy did not withhold means the backend never returned it. Only tool
+  // *names*, counts and the state tag are logged — never argument values, which
+  // can carry PII/secrets.
+  //
+  // The decision is read HERE rather than at the top of the handler: on the `fetched`
+  // path the policy is recorded during the fetch `await`, so reading it earlier would
+  // apply a one-request-stale decision to a freshly fetched catalog.
   const serve = (state: string, dynamic: Tool[]): { tools: Tool[] } => {
+    const decision = decisionInForce();
+    const runTool: Tool = {
+      ...RUN_TOOL_TOOL,
+      annotations: runToolAnnotations(
+        process.env.ENABLE_HITL === "true",
+        !!server.getClientCapabilities()?.elicitation,
+      ),
+    };
+    const { tools, withheld } = advertisedTools({
+      decision,
+      setupTool: SETUP_TOOL,
+      findSkillsTool: FIND_SKILLS_TOOL,
+      runTool,
+      promoted: dynamic,
+    });
+    // `static` used to be a constant 3. It varies now, so derive it rather than assume:
+    // anything advertised that did not come from the remote catalog.
+    const fromCatalog = new Set(dynamic.map((t) => t.name));
     logLine("tools-list.served", {
-      static: staticTools.length,
-      dynamic: dynamic.length,
+      static: tools.filter((t) => !fromCatalog.has(t.name)).length,
+      dynamic: tools.filter((t) => fromCatalog.has(t.name)).length,
       names: dynamic.map((t) => t.name),
+      withheld,
+      deactivated: decision.deactivated,
+      versionState: decision.versionState,
+      features: decision.features,
       state,
     });
-    return { tools: [...staticTools, ...dynamic] };
+    return { tools };
   };
 
   // Pre-auth gate: tokens() is sync. When unauthenticated (or unconfigured)
@@ -542,6 +564,21 @@ async function advanceSetup(): Promise<CallToolResult> {
     cachedRemoteTools = remoteTools;
     saveRemoteTools(serverUrl, remoteTools);
     const toolNames = remoteTools.map((t) => t.name).join(", ") || "(none)";
+    // Derived from the decision rather than asserted. Naming find_skills and run_tool
+    // unconditionally would be wrong the moment policy withholds them, and actively
+    // misleading when the plugin is deactivated and only `setup` works.
+    const decision = decisionInForce();
+    const closing = decision.deactivated
+      ? `This plugin version is not supported by your Glean instance, so only ` +
+        `\`setup\` is available. Upgrade the Glean plugin to restore the rest.`
+      : `You can now use ` +
+        [
+          ...(decision.features.metaTools ? ["find_skills", "run_tool"] : []),
+          ...(decision.features.toolPromotion && remoteTools.length > 0
+            ? ["any of the listed remote tools"]
+            : []),
+        ].join(", ") +
+        `.`;
     return {
       content: [
         {
@@ -555,8 +592,7 @@ async function advanceSetup(): Promise<CallToolResult> {
             // missing version constant, or an unobserved MCP revision, visible per
             // install rather than only in logs.
             `${policySummary().join("\n")}\n\n` +
-            `You can now use find_skills, run_tool, and any of the listed ` +
-            `remote tools.`,
+            closing,
         },
       ],
     };
@@ -583,6 +619,30 @@ async function advanceSetup(): Promise<CallToolResult> {
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args = {} } = request.params;
+
+  // The gate. Advertisement is advisory: a host may re-fetch its tool list late or never,
+  // and a model can call a tool still in its context from an earlier list, so a tool
+  // withdrawn from tools/list stays reachable until it is refused here too.
+  //
+  // Placed above the allow-list branch because that is the only point covering all three
+  // lanes — promoted passthrough, find_skills, and run_tool each have their own entry
+  // below. `setup` is exempt inside policyRefusal, before the deactivation check, since it
+  // is the path by which a deactivation gets lifted.
+  const decision = decisionInForce();
+  const refusal = policyRefusal({
+    name,
+    decision,
+    promoted: REMOTE_TOOLS_ALLOWLIST,
+  });
+  if (refusal) {
+    logLine("policy.refused", {
+      tool: name,
+      deactivated: decision.deactivated,
+      versionState: decision.versionState,
+      features: decision.features,
+    });
+    return refusal;
+  }
 
   // Allow-listed remote tools (chat/search/read_document) — only valid once
   // setup has provided a server URL. Auth is handled by dispatchRemoteTool
@@ -727,7 +787,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       try {
         const skillsBaseDir = resolveSkillsBaseDir();
-        return await handleRunTool(remoteClient, server, skillsBaseDir, args);
+        return await handleRunTool(remoteClient, server, skillsBaseDir, args, {
+          fileArgs: decision.features.fileArgs,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`run_tool: execution failed: ${msg}`);

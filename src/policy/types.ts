@@ -66,6 +66,15 @@ export interface UpgradeRecommendation {
   show?: boolean;
   dailyCap?: number;
   weeklyCap?: number;
+  /**
+   * Text shown with a recommendation, and also the text used when version policy
+   * deactivates the plugin -- the remedy is an upgrade either way.
+   *
+   * The remote owns the wording, including whether to name a version. Nothing here
+   * interpolates `latestVersion` into it: a plugin that composed its own sentence would
+   * be second-guessing a message the remote wrote for its own users.
+   */
+  message?: string;
 }
 
 // Plugin-scoped rules are grouped under `plugin`; session-scoped policy stays at
@@ -127,6 +136,12 @@ export interface Decision {
   /** True when an upgrade recommendation should be surfaced this session. */
   showUpgrade: boolean;
   message?: string;
+  /**
+   * The remote's upgrade text, carried separately from `message` because they answer
+   * different questions: `message` is about this session, this is about the installed
+   * artifact. Used for the recommendation and for the deactivation refusal.
+   */
+  upgradeMessage?: string;
   /** Human-readable trail of why this decision came out the way it did. */
   reasons: string[];
 }

@@ -140,6 +140,77 @@ describe("version gating", () => {
   });
 });
 
+// The remote's upgrade text has one job in two places: the soft recommendation and the
+// remedy in a deactivation refusal. It was accepted by validatePolicy and then dropped
+// before reaching the Decision, so a remote could write user-facing text into the field
+// the design designates for it and have it vanish.
+describe("upgrade text", () => {
+  it("is carried out with a soft recommendation", () => {
+    const d = evaluate({
+      pluginVersion: "1.0.0",
+      versionSource: "build",
+      supportedFeatures: allSupported,
+      policy: {
+        plugin: {
+          latestVersion: "2.0.0",
+          upgradeRecommendation: { show: true, message: "2.0.0 adds Codex support." },
+        },
+      },
+    });
+    expect(d.showUpgrade).toBe(true);
+    expect(d.upgradeMessage).toBe("2.0.0 adds Codex support.");
+  });
+
+  it("is carried out when version policy deactivates the plugin", () => {
+    const d = evaluate({
+      pluginVersion: "0.1.0",
+      versionSource: "build",
+      supportedFeatures: allSupported,
+      policy: {
+        plugin: {
+          minimumSupportedVersion: "1.0.0",
+          upgradeRecommendation: { message: "Upgrade to 1.x; 0.x is end of life." },
+        },
+      },
+    });
+    expect(d.deactivated).toBe(true);
+    expect(d.upgradeMessage).toBe("Upgrade to 1.x; 0.x is end of life.");
+  });
+
+  // Distinct fields answering distinct questions: `message` is about this session,
+  // `upgradeMessage` about the installed artifact. Conflating them would mean a
+  // maintenance notice could be shown as upgrade instructions.
+  it("stays separate from the session message", () => {
+    const d = evaluate({
+      pluginVersion: "1.0.0",
+      versionSource: "build",
+      supportedFeatures: allSupported,
+      policy: {
+        message: "Maintenance window at 2am UTC.",
+        plugin: {
+          latestVersion: "2.0.0",
+          upgradeRecommendation: { show: true, message: "2.0.0 is out." },
+        },
+      },
+    });
+    expect(d.message).toBe("Maintenance window at 2am UTC.");
+    expect(d.upgradeMessage).toBe("2.0.0 is out.");
+  });
+
+  it("is absent when the remote sends no upgrade text", () => {
+    const d = evaluate({
+      pluginVersion: "1.0.0",
+      versionSource: "build",
+      supportedFeatures: allSupported,
+      policy: {
+        plugin: { latestVersion: "2.0.0", upgradeRecommendation: { show: true } },
+      },
+    });
+    expect(d.showUpgrade).toBe(true);
+    expect(d.upgradeMessage).toBeUndefined();
+  });
+});
+
 describe("no-policy compatibility path", () => {
   it("enables everything supported and applies no version rule", () => {
     const d = evaluate({
