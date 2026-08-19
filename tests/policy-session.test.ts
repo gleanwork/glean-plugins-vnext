@@ -150,6 +150,43 @@ describe("decisionInForce", () => {
     expect(session.decisionInForce().features.metaTools).toBe(true);
   });
 
+  // Two levels of omission, deliberately different:
+  //
+  //   a feature omitted INSIDE a policy  -> no opinion, so enabled
+  //   the policy object omitted entirely -> silence, so the cache stands
+  //
+  // The first depends on savePolicy REPLACING the cached entry rather than merging into
+  // it, so every policy is evaluated as a complete statement of intent. Turning that into
+  // a merge would make restrictions sticky and leave a remote unable to lift one at all.
+  it("lets a later policy lift a restriction by omitting the feature", async () => {
+    const { session } = await freshSession(dir);
+    session.initPolicySession(fakeServer() as never, () => {});
+    session.setPolicyServerUrl(URL_A);
+
+    session.recordPolicyFromResult(
+      resultWith({ features: { metaTools: { enabled: false } } }),
+      "tools/list",
+    );
+    expect(session.decisionInForce().features.metaTools).toBe(false);
+
+    // Names only toolPromotion; says nothing at all about metaTools.
+    session.recordPolicyFromResult(
+      resultWith({ features: { toolPromotion: { enabled: false } } }),
+      "tools/list",
+    );
+
+    const f = session.decisionInForce().features;
+    expect(f.metaTools).toBe(true);
+    expect(f.toolPromotion).toBe(false);
+
+    // And the same must hold once the CACHE is what answers, not the incoming policy.
+    // evaluate() runs on the response's policy, so the two assertions above pass even if
+    // savePolicy merged rather than replaced — the merge would only surface here, or on a
+    // later process start. This is the assertion that actually pins replace-not-merge.
+    session.recordPolicyFromResult({ content: [] }, "tools/call(search)");
+    expect(session.decisionInForce().features.metaTools).toBe(true);
+  });
+
   it("takes the compatibility path when no policy was ever received", async () => {
     const { session } = await freshSession(dir);
     session.initPolicySession(fakeServer() as never, () => {});
