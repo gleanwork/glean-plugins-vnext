@@ -6,6 +6,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
+import { FILE_ARGS_DISABLED_TEXT } from "../policy/enforce.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
 import { resolveSessionId } from "../session-id.js";
 
@@ -341,11 +342,22 @@ export function elicitationFailureText(
   );
 }
 
+/**
+ * The policy-controlled features this handler implements.
+ *
+ * Required rather than optional: an omitted argument would silently mean "enabled", and
+ * the typechecker is the only thing that can stop a new call site forgetting it.
+ */
+export interface RunToolPolicy {
+  fileArgs: boolean;
+}
+
 export async function handleRunTool(
   remoteClient: Client,
   mcpServer: Server,
   skillsBaseDir: string,
   args: Record<string, unknown>,
+  policy: RunToolPolicy,
 ): Promise<CallToolResult> {
   const serverId = args.server_id;
   const toolName = args.tool_name;
@@ -363,6 +375,21 @@ export async function handleRunTool(
   // file_args JSON-parsing (object/array params) and its requires_approval
   // drives the HITL gate. Both paths must see it regardless of ENABLE_HITL.
   const toolMeta = await findToolJson(skillsBaseDir, toolName);
+
+  // Refuse before resolveFileArgs, not alongside it. That function reads model-supplied
+  // absolute paths off the user's disk, so a disabled feature has to mean the read does
+  // not happen -- "advertised without file_args but still reading files" would make the
+  // feature inert in name only.
+  //
+  // Refusing rather than ignoring the argument: silently dropping input the model
+  // supplied invites it to retry the same call, so the text says to inline the values.
+  // A call that passes no file_args is unaffected.
+  if (!policy.fileArgs && args.file_args !== undefined) {
+    return {
+      content: [{ type: "text", text: FILE_ARGS_DISABLED_TEXT }],
+      isError: true,
+    };
+  }
 
   // Resolve file_args up front so the approval prompt shows the COMPLETE input
   // (file-sourced values included, not just the inline `arguments`), and so an

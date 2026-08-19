@@ -14,6 +14,12 @@ import {
   buildCompactArgs,
   formatArgumentsForFile,
 } from "../src/tools/approval-args.js";
+import type { RunToolPolicy } from "../src/tools/run-tool.js";
+
+// The decision every install resolves to today, since production returns no policy.
+// Passed explicitly at each call site rather than defaulted, so a case that means to
+// exercise a disabled feature has to say so.
+const ALL_ON: RunToolPolicy = { fileArgs: true };
 
 describe("resolveFileArgs", () => {
   let tmpDir: string;
@@ -323,7 +329,7 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: false });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(server.elicitInput).not.toHaveBeenCalled();
     expect(remote.callTool).toHaveBeenCalledTimes(1);
@@ -335,7 +341,7 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: false });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(server.elicitInput).not.toHaveBeenCalled();
     expect(remote.callTool).toHaveBeenCalledTimes(1);
@@ -352,7 +358,7 @@ describe("handleRunTool (HITL)", () => {
     });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     // Cursor is no longer excluded: it gets readOnlyHint like every other
     // elicitation-capable host, so this prompt is the only approval gate.
@@ -377,7 +383,7 @@ describe("handleRunTool (HITL)", () => {
     await handleRunTool(remote, server, tmpDir, {
       ...baseArgs,
       arguments: { project: "ENG", summary: "ship it" },
-    });
+    }, ALL_ON);
 
     const message = elicit.mock.calls[0][0].message as string;
     expect(message).toContain("Action: jirasearch");
@@ -396,7 +402,7 @@ describe("handleRunTool (HITL)", () => {
     await handleRunTool(remote, server, tmpDir, {
       ...baseArgs,
       arguments: { project: "ENG" },
-    });
+    }, ALL_ON);
 
     const message = elicit.mock.calls[0][0].message as string;
     expect(message).toContain("Action: jirasearch");
@@ -424,7 +430,7 @@ describe("handleRunTool (HITL)", () => {
     });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
     const text = (result.content[0] as { text: string }).text;
 
     expect(result.isError).toBe(true);
@@ -453,7 +459,7 @@ describe("handleRunTool (HITL)", () => {
     });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
     const text = (result.content[0] as { text: string }).text;
 
     expect(text).toContain("cannot tell which");
@@ -484,7 +490,7 @@ describe("handleRunTool (HITL)", () => {
     });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
     const text = (result.content[0] as { text: string }).text;
 
     expect(result.isError).toBe(true);
@@ -506,10 +512,70 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true, elicit });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect((result.content[0] as { text: string }).text).not.toContain("3.15");
     expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  // fileArgs disabled by remote policy. The refusal lives here rather than at the call
+  // funnel because resolveFileArgs reads model-supplied absolute paths off the user's
+  // disk: an inert feature has to mean the read does not happen.
+  it("rejects file_args when policy disables the feature", async () => {
+    vi.stubEnv("ENABLE_HITL", "false");
+    const remote = makeRemote();
+    const server = makeServer({ elicitation: false });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: false });
+
+    const result = await handleRunTool(
+      remote,
+      server,
+      tmpDir,
+      { ...baseArgs, file_args: { body: "/tmp/whatever.md" } },
+      { fileArgs: false },
+    );
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain(
+      "`file_args` is disabled",
+    );
+    expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  // Proves the refusal short-circuits BEFORE any disk access: the path does not exist,
+  // so a guard placed after resolveFileArgs would surface a "cannot read" FileArgsError
+  // instead. That difference is the whole point of where the check sits.
+  it("rejects without touching the filesystem", async () => {
+    vi.stubEnv("ENABLE_HITL", "false");
+    const remote = makeRemote();
+    const server = makeServer({ elicitation: false });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: false });
+
+    const result = await handleRunTool(
+      remote,
+      server,
+      tmpDir,
+      { ...baseArgs, file_args: { body: path.join(tmpDir, "does-not-exist.md") } },
+      { fileArgs: false },
+    );
+
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("`file_args` is disabled");
+    expect(text).not.toContain("cannot read");
+  });
+
+  it("runs normally when policy disables file_args but the call passes none", async () => {
+    vi.stubEnv("ENABLE_HITL", "false");
+    const remote = makeRemote();
+    const server = makeServer({ elicitation: false });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: false });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, {
+      fileArgs: false,
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
 
   it("treats a spec-compliant cancel as a cancel, not a failure", async () => {
@@ -523,7 +589,7 @@ describe("handleRunTool (HITL)", () => {
     });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
     const text = (result.content[0] as { text: string }).text;
 
     expect(text).toContain("cancelled by the user");
@@ -542,7 +608,7 @@ describe("handleRunTool (HITL)", () => {
       description: "Search Jira issues",
     });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     const [params, options] = elicit.mock.calls[0];
     expect(params.message).toContain("Action: jirasearch");
@@ -565,8 +631,8 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true, elicit, request });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     // Ping fired exactly once for this server, and it is a ping.
     expect(request).toHaveBeenCalledTimes(1);
@@ -582,7 +648,7 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true, request });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: false });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(request).not.toHaveBeenCalled();
   });
@@ -595,7 +661,7 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true, elicit });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(elicit.mock.calls[0][1].timeout).toBe(5000);
   });
@@ -610,7 +676,7 @@ describe("handleRunTool (HITL)", () => {
       const elicit = vi.fn().mockResolvedValue({ action: "accept" });
       const server = makeServer({ elicitation: true, elicit });
 
-      await handleRunTool(remote, server, tmpDir, baseArgs);
+      await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
       expect(elicit.mock.calls[0][1].timeout).toBe(300_000);
     }
@@ -623,7 +689,7 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true, elicit });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(remote.callTool).not.toHaveBeenCalled();
     expect((result.content[0] as { text: string }).text).toContain("declined");
@@ -636,7 +702,7 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true, elicit });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(remote.callTool).not.toHaveBeenCalled();
     expect(result.isError).toBe(true);
@@ -657,7 +723,7 @@ describe("handleRunTool (HITL)", () => {
       server_id: "s",
       tool_name: "create_doc",
       arguments: { title: "Report", body: bigBody },
-    });
+    }, ALL_ON);
 
     const message = elicit.mock.calls[0][0].message as string;
     expect(message).toContain("Action: create_doc");
@@ -690,7 +756,7 @@ describe("handleRunTool (HITL)", () => {
       tool_name: "create_doc",
       arguments: { title: "Doc" },
       file_args: { body: bodyFile },
-    });
+    }, ALL_ON);
 
     const message = elicit.mock.calls[0][0].message as string;
     expect(message).toContain("TITLE: Doc");
@@ -714,7 +780,7 @@ describe("handleRunTool (HITL)", () => {
       tool_name: "save_agent",
       arguments: {},
       file_args: { spec: specFile },
-    });
+    }, ALL_ON);
 
     const call = remote.callTool.mock.calls[0][0];
     expect(call.name).toBe("run_tool");
@@ -736,7 +802,7 @@ describe("handleRunTool (HITL)", () => {
       tool_name: "create_doc",
       arguments: {},
       file_args: { body: "/no/such/abs/path.md" },
-    });
+    }, ALL_ON);
 
     expect(result.isError).toBe(true);
     expect(elicit).not.toHaveBeenCalled(); // no prompt for unreadable input
@@ -753,7 +819,7 @@ describe("handleRunTool (HITL)", () => {
     const elicit = vi.fn().mockResolvedValue({ action: "accept" });
     const server = makeServer({ elicitation: true, elicit });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(elicit).not.toHaveBeenCalled();
     expect(remote.callTool).toHaveBeenCalledTimes(1);
@@ -769,7 +835,7 @@ describe("handleRunTool (HITL)", () => {
     const elicit = vi.fn().mockResolvedValue({ action: "accept" });
     const server = makeServer({ elicitation: true, elicit });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(elicit).toHaveBeenCalledTimes(1);
     expect(remote.callTool).toHaveBeenCalledTimes(1);
@@ -785,7 +851,7 @@ describe("handleRunTool (HITL)", () => {
     const elicit = vi.fn().mockResolvedValue({ action: "accept" });
     const server = makeServer({ elicitation: true, elicit });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(elicit).toHaveBeenCalledTimes(1);
   });
@@ -801,7 +867,7 @@ describe("handleRunTool (HITL)", () => {
     const elicit = vi.fn().mockResolvedValue({ action: "accept" });
     const server = makeServer({ elicitation: true, elicit });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(elicit).toHaveBeenCalledTimes(1); // gate preserved for THIS session
   });
