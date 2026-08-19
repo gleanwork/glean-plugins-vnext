@@ -360,6 +360,50 @@ describe("handleRunTool (HITL)", () => {
     expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
 
+  // Cursor renders the tool name and arguments itself, directly above the prompt, so
+  // its message is only the review ask. This branch was unreachable while Cursor was
+  // excluded from the gate — restoring the gate makes it live again, and these two
+  // tests exist so it is not mistaken for dead code a second time.
+  it("asks Cursor to review what it already renders, without repeating it", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, {
+      ...baseArgs,
+      arguments: { project: "ENG", summary: "ship it" },
+    });
+
+    const message = elicit.mock.calls[0][0].message as string;
+    expect(message).toContain("shown above");
+    expect(message).not.toContain("Action:");
+    expect(message).not.toContain("ENG");
+  });
+
+  it("spells out action and arguments for a host that does not render them", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, {
+      ...baseArgs,
+      arguments: { project: "ENG" },
+    });
+
+    const message = elicit.mock.calls[0][0].message as string;
+    expect(message).toContain("Action: jirasearch");
+    expect(message).toContain("ENG");
+    expect(message).not.toContain("shown above");
+  });
+
   // Cursor's pre-3.15 bug can drop the prompt, so the request burns the whole
   // timeout. Its version cannot be checked (clientInfo reports a hardcoded
   // "1.0.0"), so the note keys off that duration instead.
