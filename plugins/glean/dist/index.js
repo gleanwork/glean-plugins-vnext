@@ -25128,7 +25128,7 @@ var StreamableHTTPClientTransport = class {
 };
 
 // src/version.ts
-var BUILD_VERSION = true ? "0.2.46" : void 0;
+var BUILD_VERSION = true ? "0.2.47" : void 0;
 function pluginVersion() {
   if (BUILD_VERSION) return { version: BUILD_VERSION, source: "build" };
   return { version: "0.0.0", source: "unknown" };
@@ -25520,6 +25520,7 @@ var loggedLabels = /* @__PURE__ */ new Set();
 var lastRequest;
 var cacheKeyUrl;
 var protocolVersion = new ProtocolVersionObserver();
+var TOOLS_LIST_LABEL = "tools/list";
 function initPolicySession(server2, log) {
   mcpServer = server2;
   logLine = log;
@@ -25568,7 +25569,8 @@ function recordPolicyFromResult(result, label) {
     supportedFeatures: request.plugin.supportedFeatures,
     policy
   });
-  const changed = !decision || JSON.stringify([decision.deactivated, decision.features]) !== JSON.stringify([next.deactivated, next.features]);
+  const previous = decision;
+  const changed = !previous || surfaceKey(previous) !== surfaceKey(next);
   decision = next;
   const firstForLabel = !loggedLabels.has(label);
   loggedLabels.add(label);
@@ -25582,6 +25584,18 @@ function recordPolicyFromResult(result, label) {
       reasons: next.reasons
     });
   }
+  if (changed && previous && label !== TOOLS_LIST_LABEL) {
+    logLine("policy.surface-changed", {
+      label,
+      from: { deactivated: previous.deactivated, features: previous.features },
+      to: { deactivated: next.deactivated, features: next.features }
+    });
+    mcpServer?.sendToolListChanged().catch(() => {
+    });
+  }
+}
+function surfaceKey(d) {
+  return JSON.stringify([d.deactivated, d.features]);
 }
 function policySummary() {
   const r = lastRequest;
@@ -26650,7 +26664,7 @@ async function fetchAllowedRemoteTools(remoteClient) {
       ...cursor ? { cursor } : {},
       ...negotiationMeta()
     });
-    recordPolicyFromResult(page, "tools/list");
+    recordPolicyFromResult(page, TOOLS_LIST_LABEL);
     for (const tool of page.tools) {
       if (!REMOTE_TOOLS_ALLOWLIST.has(tool.name)) continue;
       collected.push({

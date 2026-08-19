@@ -1,6 +1,6 @@
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
-import { hostIdentityFromHandshake, buildNegotiationRequest } from "./context.js";
+import { hostIdentityFromHandshake, buildNegotiationRequest, supportedFeatures } from "./context.js";
 import { classifyResult, metaFor } from "./negotiate.js";
 import { evaluate } from "./evaluate.js";
 import { loadCachedPolicy, savePolicy } from "./cache.js";
@@ -16,10 +16,10 @@ type LogFn = (label: string, detail?: Record<string, unknown>) => void;
  * later change needs -- the resolved decision, the `_meta` to attach -- have one
  * obvious home.
  *
- * This module reports context and records the resolved policy. It does not enforce
- * anything: nothing here changes which tools are advertised or which calls succeed.
- * Enforcement is a separate change, deliberately, so the exchange can be observed in
- * production before it is allowed to alter behaviour.
+ * This module owns the decision's lifecycle: it reports context, records the policy a
+ * response carried, and resolves the decision now in force. It does not itself withhold
+ * or refuse anything -- the gates are pure functions in ./enforce.ts, applied by the
+ * handlers in index.ts.
  */
 let mcpServer: Server | undefined;
 let logLine: LogFn = () => {};
@@ -36,6 +36,11 @@ let lastRequest: NegotiationRequest | undefined;
 let cacheKeyUrl: string | undefined;
 
 export const protocolVersion = new ProtocolVersionObserver();
+
+// The label recordPolicyFromResult receives for a tools/list exchange. Exported so the
+// caller and the notification guard cannot drift apart on a string literal — the guard
+// depends on distinguishing that path from tools/call.
+export const TOOLS_LIST_LABEL = "tools/list";
 
 export function initPolicySession(server: Server, log: LogFn): void {
   mcpServer = server;
@@ -120,10 +125,9 @@ export function recordPolicyFromResult(result: unknown, label: string): void {
     policy,
   });
 
+  const previous = decision;
   const changed =
-    !decision ||
-    JSON.stringify([decision.deactivated, decision.features]) !==
-      JSON.stringify([next.deactivated, next.features]);
+    !previous || surfaceKey(previous) !== surfaceKey(next);
   decision = next;
 
   // Log on a change, and once per label per process.
@@ -148,11 +152,88 @@ export function recordPolicyFromResult(result: unknown, label: string): void {
       reasons: next.reasons,
     });
   }
+
+  // Tell the host to re-fetch, but only from the tools/call path and only once a
+  // previous decision existed.
+  //
+  // Not from tools/list: there the response IS the update -- the host has just asked and
+  // is about to receive the freshly filtered surface, so a notification would only make
+  // it ask again for what it already holds, and notify -> tools/list -> resolve ->
+  // notify would be a cycle. A policy arriving on a tools/call response is the case that
+  // needs this, because the surface changed and the host has no reason to re-fetch.
+  //
+  // Not on the first decision either: `!previous` counts as changed, so without that
+  // guard every process's first gated call would notify, costing a host tools/list and a
+  // remote round-trip for every user in a world where no policy exists. The stale-list
+  // window on a first call is closed by the refusal, which is the real gate anyway.
+  if (changed && previous && label !== TOOLS_LIST_LABEL) {
+    logLine("policy.surface-changed", {
+      label,
+      from: { deactivated: previous.deactivated, features: previous.features },
+      to: { deactivated: next.deactivated, features: next.features },
+    });
+    mcpServer?.sendToolListChanged().catch(() => {
+      // Transport not connected, or the host does not support the notification.
+      // Harmless: the next tools/list is correct, and calls are refused regardless.
+    });
+  }
 }
 
-/** The policy currently in force, or undefined before the first exchange. */
-export function currentDecision(): Decision | undefined {
-  return decision;
+// The fields that determine what the agent can reach. Reasons and messages churn between
+// otherwise-equivalent responses without changing the surface, and every spurious
+// notification costs a host tools/list and therefore a remote round-trip.
+function surfaceKey(d: Decision): string {
+  return JSON.stringify([d.deactivated, d.features]);
+}
+
+/**
+ * The decision now in force, seeded from the cached policy on first read.
+ *
+ * A fresh process has no decision until a remote exchange happens, and `tools/list` does
+ * not always reach the remote -- the unconfigured, unauthenticated and connect-error
+ * paths all return before any negotiation. Treating that as "no policy, everything on"
+ * would mean a cached deactivation, or a cached `metaTools: false`, was silently undone
+ * by every process start, which is exactly what the design forbids.
+ *
+ * So the first read evaluates the cached policy and memoizes the result. The cache is
+ * touched once per process, never per gated call: `_meta` rides every remote request, so
+ * a process that talks to the remote refreshes its own decision constantly and needs no
+ * re-read. With no configured URL there is nothing to key by, which yields the
+ * all-supported decision.
+ *
+ * Never throws. A failure here would break every tool call, and for a feature that is
+ * inert for every install today, failing open is the only defensible direction.
+ */
+export function decisionInForce(): Decision {
+  if (decision) return decision;
+  try {
+    const policy = cacheKeyUrl ? loadCachedPolicy(cacheKeyUrl) : undefined;
+    const request = lastRequest ?? negotiationRequest();
+    decision = evaluate({
+      pluginVersion: request.plugin.version,
+      versionSource: request.plugin.versionSource,
+      supportedFeatures: request.plugin.supportedFeatures,
+      policy,
+    });
+    if (policy) {
+      logLine("policy.seeded-from-cache", {
+        versionState: decision.versionState,
+        deactivated: decision.deactivated,
+        features: decision.features,
+      });
+    }
+    return decision;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logLine("policy.seed-failed", { msg });
+    decision = evaluate({
+      pluginVersion: "0.0.0",
+      versionSource: "unknown",
+      supportedFeatures: supportedFeatures(),
+      policy: undefined,
+    });
+    return decision;
+  }
 }
 
 /** For `setup` output: what was reported, and what came back. */

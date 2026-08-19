@@ -6,7 +6,11 @@ import {
   createRemoteClient,
   type RemoteClientOptions,
 } from "../remote-client.js";
-import { negotiationMeta, recordPolicyFromResult } from "../policy/session.js";
+import {
+  TOOLS_LIST_LABEL,
+  negotiationMeta,
+  recordPolicyFromResult,
+} from "../policy/session.js";
 
 // Remote tools promoted to first-class local tools once setup completes.
 // Anything the remote MCP server exposes that is not in this set is dropped
@@ -66,7 +70,7 @@ export async function fetchAllowedRemoteTools(
       ...(cursor ? { cursor } : {}),
       ...negotiationMeta(),
     });
-    recordPolicyFromResult(page, "tools/list");
+    recordPolicyFromResult(page, TOOLS_LIST_LABEL);
     for (const tool of page.tools) {
       if (!REMOTE_TOOLS_ALLOWLIST.has(tool.name)) continue;
       collected.push({
