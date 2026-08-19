@@ -280,3 +280,68 @@ describe("policySummary", () => {
     expect(summary).not.toContain("Deactivated:");
   });
 });
+
+// dailyCap/weeklyCap are tolerated rather than rejected -- the design has the remote send
+// them for forward compatibility and only `show` needs honouring in v0. Tolerating them
+// silently is the problem: a remote setting dailyCap: 1 and seeing the recommendation on
+// every setup has no way to learn why. So it is stated once, in the log.
+describe("unenforced display caps", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "policy-caps-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  async function record(policy: unknown) {
+    const { session } = await freshSession(dir);
+    const labels: string[] = [];
+    session.initPolicySession(fakeServer() as never, (l) => labels.push(l));
+    session.setPolicyServerUrl(URL_A);
+    session.recordPolicyFromResult(resultWith(policy), "tools/call(search)");
+    return { session, labels };
+  }
+
+  it("says so when the remote sets a cap", async () => {
+    const { labels } = await record({
+      plugin: { upgradeRecommendation: { show: true, dailyCap: 1 } },
+    });
+    expect(labels).toContain("policy.caps-not-enforced");
+  });
+
+  it("still accepts the policy rather than calling it malformed", async () => {
+    const { labels } = await record({
+      plugin: { upgradeRecommendation: { show: true, weeklyCap: 3 } },
+    });
+    // Tolerated, not rejected: no malformed, and not reported as an unknown key either.
+    expect(labels).not.toContain("policy.malformed");
+    expect(labels).not.toContain("policy.unknown-keys");
+  });
+
+  it("says nothing when the remote sets no cap", async () => {
+    const { labels } = await record({
+      plugin: { upgradeRecommendation: { show: true } },
+    });
+    expect(labels).not.toContain("policy.caps-not-enforced");
+  });
+
+  // Policy rides every remote response, so an unconditional log here would be one line
+  // per tool call for the life of the process.
+  it("says it once per process, not once per exchange", async () => {
+    const { session, labels } = await record({
+      plugin: { upgradeRecommendation: { show: true, dailyCap: 1 } },
+    });
+
+    session.recordPolicyFromResult(
+      resultWith({ plugin: { upgradeRecommendation: { show: true, dailyCap: 1 } } }),
+      "tools/call(chat)",
+    );
+
+    expect(labels.filter((l) => l === "policy.caps-not-enforced")).toHaveLength(1);
+  });
+});
+

@@ -25555,6 +25555,7 @@ function recordPolicyFromResult(result, label) {
       if (outcome.unknownKeys.length > 0) {
         logLine("policy.unknown-keys", { label, keys: outcome.unknownKeys });
       }
+      reportUnenforcedCaps(outcome.policy);
       break;
     case "malformed":
       logLine("policy.malformed", { label, reason: outcome.reason });
@@ -25598,6 +25599,16 @@ function recordPolicyFromResult(result, label) {
 }
 function surfaceKey(d) {
   return JSON.stringify([d.deactivated, d.features]);
+}
+var capsReported = false;
+function reportUnenforcedCaps(policy) {
+  if (capsReported) return;
+  const rec = policy.plugin?.upgradeRecommendation;
+  const dailyCap = rec?.dailyCap;
+  const weeklyCap = rec?.weeklyCap;
+  if (dailyCap === void 0 && weeklyCap === void 0) return;
+  capsReported = true;
+  logLine("policy.caps-not-enforced", { dailyCap, weeklyCap });
 }
 function decisionInForce() {
   if (decision) return decision;

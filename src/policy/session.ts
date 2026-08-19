@@ -107,6 +107,7 @@ export function recordPolicyFromResult(result: unknown, label: string): void {
       if (outcome.unknownKeys.length > 0) {
         logLine("policy.unknown-keys", { label, keys: outcome.unknownKeys });
       }
+      reportUnenforcedCaps(outcome.policy);
       break;
     case "malformed":
       logLine("policy.malformed", { label, reason: outcome.reason });
@@ -186,6 +187,30 @@ function surfaceKey(d: Decision): string {
   return JSON.stringify([d.deactivated, d.features]);
 }
 
+// Whether this process has already said the caps are inert.
+let capsReported = false;
+
+/**
+ * Say once that display caps are accepted but not honoured.
+ *
+ * `dailyCap`/`weeklyCap` are deliberately tolerated rather than rejected: the design has
+ * the remote send them for forward compatibility, and only `show` needs honouring in v0.
+ * But a remote that sets `dailyCap: 1` and then sees the recommendation on every `setup`
+ * has no way to learn why, and "read the plugin source" is not an answer. Frequency
+ * capping also has nothing to cap yet — `setup` is the only surface and it is
+ * user-initiated, so rate-limiting the answer to a question the user just asked would be
+ * wrong. Once per process, and only when a remote actually sets one.
+ */
+function reportUnenforcedCaps(policy: PolicyResponse): void {
+  if (capsReported) return;
+  const rec = policy.plugin?.upgradeRecommendation;
+  const dailyCap = rec?.dailyCap;
+  const weeklyCap = rec?.weeklyCap;
+  if (dailyCap === undefined && weeklyCap === undefined) return;
+  capsReported = true;
+  logLine("policy.caps-not-enforced", { dailyCap, weeklyCap });
+}
+
 /**
  * The decision now in force, seeded from the cached policy on first read.
  *
@@ -250,7 +275,9 @@ export function policySummary(): string[] {
     lines.push(`Policy: version ${d.versionState}, features ${JSON.stringify(d.features)}`);
     // The recommendation is only shown here. It is computed on every exchange, so
     // without a surface it would be a value the remote sets and nobody ever sees.
-    // dailyCap/weeklyCap are not implemented yet, so this appears on every setup call.
+    // Shown on every setup call: dailyCap/weeklyCap are accepted but not enforced
+    // (see reportUnenforcedCaps), and capping a user-initiated answer would be wrong
+    // anyway.
     if (d.deactivated) {
       lines.push(
         `Deactivated: only \`setup\` is available. ${
