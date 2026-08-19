@@ -35,8 +35,15 @@ const BUILD_VERSION: string | undefined =
 /**
  * The version this build reports, plus whether it is trustworthy.
  *
- * `source: "build"` in every shipped release; `source: "unknown"` only for a dev run
- * or a broken build, where the placeholder version must not be treated as real.
+ * `source: "build"` in every bundle produced by scripts/build.mjs, which fails rather
+ * than emitting one without the constant, and now also asserts the substitution landed
+ * in the output.
+ *
+ * `source: "unknown"` is therefore not a broken-bundle case — it is the path taken when
+ * the code runs without having been bundled at all: `npm run dev` and any other tsx
+ * entry, where esbuild never applied the define. Reachable in development, unreachable
+ * in anything shipped. Callers skip version-dependent behaviour rather than treat the
+ * placeholder as real, which is what makes a dev run enforce no version policy.
  */
 export function pluginVersion(): ResolvedVersion {
   if (BUILD_VERSION) return { version: BUILD_VERSION, source: "build" };
