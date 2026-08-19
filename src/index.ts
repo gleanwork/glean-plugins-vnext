@@ -47,7 +47,6 @@ import { resolveSessionId } from "./session-id.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
 import { pluginVersionString } from "./version.js";
 import {
-  clearPolicyCache,
   initPolicySession,
   policySummary,
   protocolVersion,
@@ -752,8 +751,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clearRemoteTools();
         oauthProvider = undefined;
         cachedRemoteTools = [];
+        // The cached POLICY deliberately survives reset. Only a valid policy replaces
+        // it, so a user-invokable reset must not become a way to drop a cached
+        // deactivation or version block — the remote may be unreachable afterwards,
+        // in which case there is nothing to refresh it from. Re-keying is enough:
+        // the cache is keyed by remote URL, so a different instance never inherits it.
         setPolicyServerUrl(undefined);
-        clearPolicyCache();
         logLine("setup.reset");
         // Fire-and-forget — tools list is shorter without the dynamic
         // surface; the host should re-fetch on its next idle cycle.

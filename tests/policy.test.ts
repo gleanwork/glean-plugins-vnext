@@ -5,7 +5,7 @@ import path from "node:path";
 import { evaluate } from "../src/policy/evaluate.js";
 import { classifyResult, validatePolicy } from "../src/policy/negotiate.js";
 import { CAPABILITY_POLICY_KEY } from "../src/policy/key.js";
-import { clearCache, loadCached, savePolicy } from "../src/policy/cache.js";
+import { loadCached, savePolicy } from "../src/policy/cache.js";
 
 const allSupported = {
   toolPromotion: true,
@@ -262,17 +262,25 @@ describe("policy cache", () => {
     });
   });
 
-  // Reset must clear every URL, matching clearRemoteTools() on the same path. A
-  // per-URL clear here would leave the two cache files disagreeing about what
-  // "reset" cleared — the pairing is what keeps two separate stores consistent.
-  it("clears every URL when called with no argument", () => {
+  // Reset clears the server URL, credentials and tools cache, but NOT this. A cached
+  // policy can carry a deactivation or a version block, so a user-invokable way to
+  // discard it would be a way to shed one — and the remote may be unreachable
+  // afterwards, with nothing to re-fetch from. Hence no clear function at all; a
+  // future one would reintroduce exactly that.
+  it("exposes no way to discard a cached policy", async () => {
+    const mod = await import("../src/policy/cache.js");
+    expect(Object.keys(mod).sort()).toEqual(["loadCached", "savePolicy"]);
+  });
+
+  // Design: "A response without a policy object does not update or erase the
+  // corresponding cache entry."
+  it("keeps the cached policy when a later response carries none", () => {
     savePolicy("https://a.glean.com", { features: { hitl: { enabled: false } } });
-    savePolicy("https://b.glean.com", { features: { hitl: { enabled: false } } });
 
-    clearCache();
-
-    expect(loadCached("https://a.glean.com").policy).toBeUndefined();
-    expect(loadCached("https://b.glean.com").policy).toBeUndefined();
+    // A no-policy round writes nothing, so the entry is untouched.
+    expect(loadCached("https://a.glean.com").policy).toEqual({
+      features: { hitl: { enabled: false } },
+    });
   });
 
   // tools/list belongs to remote-tools-cache-store.ts. Caching it here too would

@@ -25414,15 +25414,6 @@ function savePolicy(serverUrl, policy) {
   };
   writeAll(all);
 }
-function clearCache(serverUrl) {
-  if (!serverUrl) {
-    writeAll({});
-    return;
-  }
-  const all = readAll();
-  delete all[serverUrl];
-  writeAll(all);
-}
 
 // src/policy/protocol-version.ts
 var ProtocolVersionObserver = class {
@@ -25517,10 +25508,6 @@ function initPolicySession(server2, log) {
 }
 function setPolicyServerUrl(url2) {
   cacheKeyUrl = url2;
-}
-function clearPolicyCache() {
-  clearCache();
-  decision = void 0;
 }
 function negotiationRequest() {
   const host = hostIdentityFromHandshake(
@@ -27260,7 +27247,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         oauthProvider = void 0;
         cachedRemoteTools = [];
         setPolicyServerUrl(void 0);
-        clearPolicyCache();
         logLine2("setup.reset");
         server.sendToolListChanged().catch(() => {
         });

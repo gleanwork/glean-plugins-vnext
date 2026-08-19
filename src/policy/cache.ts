@@ -63,12 +63,13 @@ export function savePolicy(serverUrl: string, policy: PolicyResponse): void {
   writeAll(all);
 }
 
-export function clearCache(serverUrl?: string): void {
-  if (!serverUrl) {
-    writeAll({});
-    return;
-  }
-  const all = readAll();
-  delete all[serverUrl];
-  writeAll(all);
-}
+// There is deliberately no clear function. Only a valid policy replaces a cached
+// policy, and nothing removes one — including `setup({reset})`, which clears the
+// server URL, credentials, and tools cache. A cached policy may carry a deactivation
+// or a version block, so any local way to discard it is a way to shed one, and the
+// remote may be unreachable afterwards with nothing to re-fetch from. The design makes
+// the same point about process starts: a fresh plugin with no connection is not a
+// licence to ignore a cached policy, or every restart would silently undo it.
+//
+// Switching instances needs no clear either: entries are keyed by remote URL, so a
+// different instance simply reads a different (absent) entry.
