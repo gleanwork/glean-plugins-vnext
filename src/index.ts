@@ -20,11 +20,7 @@ import {
   closeCallbackServer,
 } from "./auth-callback-server.js";
 import { handleFindSkills } from "./tools/find-skills.js";
-import {
-  handleRunTool,
-  isCursorClient,
-  runToolAnnotations,
-} from "./tools/run-tool.js";
+import { handleRunTool, runToolAnnotations } from "./tools/run-tool.js";
 import { evictStaleSkills } from "./skill-writer.js";
 import {
   loadServerUrl,
@@ -314,7 +310,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     annotations: runToolAnnotations(
       process.env.ENABLE_HITL === "true",
       !!server.getClientCapabilities()?.elicitation,
-      isCursorClient(server),
     ),
   };
   const staticTools: Tool[] = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];

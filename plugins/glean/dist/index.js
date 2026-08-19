@@ -25128,7 +25128,7 @@ var StreamableHTTPClientTransport = class {
 };
 
 // src/version.ts
-var BUILD_VERSION = true ? "0.2.45" : void 0;
+var BUILD_VERSION = true ? "0.2.46" : void 0;
 function pluginVersion() {
   if (BUILD_VERSION) return { version: BUILD_VERSION, source: "build" };
   return { version: "0.0.0", source: "unknown" };
@@ -26363,10 +26363,7 @@ async function findToolJson(skillsBaseDir, toolName) {
 function isCursorClient(mcpServer2) {
   return (mcpServer2.getClientVersion()?.name ?? "").toLowerCase().startsWith("cursor");
 }
-async function buildApprovalMessage(mcpServer2, toolName, args) {
-  if (isCursorClient(mcpServer2)) {
-    return `Review the tool and arguments shown above, click on Submit to allow and Cancel to deny.`;
-  }
+async function buildApprovalMessage(toolName, args) {
   const { lines, needsFile } = buildCompactArgs(args);
   const message = [
     `Action: ${toolName}`,
@@ -26404,6 +26401,22 @@ async function currentPermissionMode() {
     return null;
   }
 }
+function humanizeMs(ms) {
+  const seconds = Math.round(ms / 1e3);
+  if (seconds < 120) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+function elicitationFailureText(mcpServer2, toolName, detail, elapsedMs, timeoutMs) {
+  const base = `Action ${toolName} was not approved \u2014 the approval request failed (${detail}). The action was NOT executed.`;
+  const waitedFullTimeout = elapsedMs >= timeoutMs * 0.9;
+  if (!waitedFullTimeout || !isCursorClient(mcpServer2)) {
+    return `${base} Ask the user to confirm, then retry.`;
+  }
+  return `${base}
+
+It waited the full ${humanizeMs(timeoutMs)} without an answer. Either the approval prompt was shown and went unanswered, or it was never shown at all \u2014 this end cannot tell which. One possible cause, if no prompt appeared, is a known Cursor issue before version 3.15: a server-initiated approval prompt can be dropped silently, leaving nothing on screen to accept or dismiss. Ask the user whether they saw an approval prompt. If they did not, suggest checking Cursor's version and updating if it is below 3.15 \u2014 otherwise a retry may wait out the clock again.`;
+}
 async function handleRunTool(remoteClient, mcpServer2, skillsBaseDir, args) {
   const serverId = args.server_id;
   const toolName = args.tool_name;
@@ -26434,16 +26447,13 @@ async function handleRunTool(remoteClient, mcpServer2, skillsBaseDir, args) {
     throw err;
   }
   const hitlEnabled = process.env.ENABLE_HITL === "true";
-  if (hitlEnabled && toolMeta?.requires_approval && !isCursorClient(mcpServer2) && mcpServer2.getClientCapabilities()?.elicitation) {
+  if (hitlEnabled && toolMeta?.requires_approval && mcpServer2.getClientCapabilities()?.elicitation) {
     const bypass = await currentPermissionMode() === "bypassPermissions";
     if (!bypass) {
-      const message = await buildApprovalMessage(
-        mcpServer2,
-        toolName,
-        resolvedArgs
-      );
+      const message = await buildApprovalMessage(toolName, resolvedArgs);
       const timeout = hitlTimeoutMs();
       primeElicitationCancellation(mcpServer2);
+      const startedAt = Date.now();
       try {
         const result = await mcpServer2.elicitInput(
           {
@@ -26468,7 +26478,13 @@ async function handleRunTool(remoteClient, mcpServer2, skillsBaseDir, args) {
           content: [
             {
               type: "text",
-              text: `Action ${toolName} was not approved \u2014 the approval request failed (${detail}). The action was NOT executed. Ask the user to confirm, then retry.`
+              text: elicitationFailureText(
+                mcpServer2,
+                toolName,
+                detail,
+                Date.now() - startedAt,
+                timeout
+              )
             }
           ],
           isError: true
@@ -26489,8 +26505,8 @@ function buildRemoteArgs(serverId, toolName, resolvedArgs) {
     arguments: resolvedArgs
   };
 }
-function runToolAnnotations(enableHitl, clientSupportsElicitation, isCursor) {
-  return enableHitl && clientSupportsElicitation && !isCursor ? { readOnlyHint: true } : void 0;
+function runToolAnnotations(enableHitl, clientSupportsElicitation) {
+  return enableHitl && clientSupportsElicitation ? { readOnlyHint: true } : void 0;
 }
 
 // src/url-config-store.ts
@@ -26907,8 +26923,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     ...RUN_TOOL_TOOL,
     annotations: runToolAnnotations(
       process.env.ENABLE_HITL === "true",
-      !!server.getClientCapabilities()?.elicitation,
-      isCursorClient(server)
+      !!server.getClientCapabilities()?.elicitation
     )
   };
   const staticTools = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
