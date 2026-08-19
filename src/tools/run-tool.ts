@@ -188,9 +188,8 @@ async function findToolJson(
 }
 
 // A stdio server's only client signal is clientInfo.name; Cursor reports
-// "cursor-vscode". Two uses: Cursor renders tool name and arguments itself, so its
-// approval prompt is shorter (buildApprovalMessage), and a request that waits out
-// the clock offers its version as a possible cause (elicitationFailureText).
+// "cursor-vscode". Used to offer Cursor's version as a possible cause when an
+// approval request waits out the clock (see elicitationFailureText).
 export function isCursorClient(mcpServer: Server): boolean {
   return (mcpServer.getClientVersion()?.name ?? "")
     .toLowerCase()
@@ -201,18 +200,18 @@ export function isCursorClient(mcpServer: Server): boolean {
 // elicitation prompts. Kept short (a few lines) so the Accept/Decline buttons
 // stay in view; full argument detail spills to a file when it can't fit.
 //
-// Cursor is the exception, and deliberately so: it renders the tool name and
-// arguments itself, directly above the prompt, so repeating them here would
-// duplicate what is already on screen. Its prompt only needs the review ask.
+// Every host gets the same text, Cursor included. Cursor was an exception for good
+// reason until recently: it rendered the tool and its arguments itself, directly above
+// the prompt, so its message was only a review ask — "Review the tool and arguments
+// shown above". As of August 2026 Cursor no longer renders them (confirmed by
+// screenshot), which left that message pointing at nothing on screen. The shared text
+// names the action and arguments itself, so it cannot go stale that way. Re-introducing
+// a host-specific short form means first confirming that host still displays the
+// arguments somewhere.
 async function buildApprovalMessage(
-  mcpServer: Server,
   toolName: string,
   args: unknown,
 ): Promise<string> {
-  if (isCursorClient(mcpServer)) {
-    return `Review the tool and arguments shown above, click on Submit to allow and Cancel to deny.`;
-  }
-
   const { lines, needsFile } = buildCompactArgs(args);
   // Indent argument lines under "Arguments:" so the structural labels stay
   // distinct from values; keys are uppercased (in compactArgLine) so a key
@@ -415,11 +414,7 @@ export async function handleRunTool(
     // gate. Only bypassPermissions is skipped (deliberately narrow).
     const bypass = (await currentPermissionMode()) === "bypassPermissions";
     if (!bypass) {
-      const message = await buildApprovalMessage(
-        mcpServer,
-        toolName,
-        resolvedArgs,
-      );
+      const message = await buildApprovalMessage(toolName, resolvedArgs);
       const timeout = hitlTimeoutMs();
 
       // Make a dummy empty request to burn JSON-RPC request id 0

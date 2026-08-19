@@ -360,11 +360,10 @@ describe("handleRunTool (HITL)", () => {
     expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
 
-  // Cursor renders the tool name and arguments itself, directly above the prompt, so
-  // its message is only the review ask. This branch was unreachable while Cursor was
-  // excluded from the gate — restoring the gate makes it live again, and these two
-  // tests exist so it is not mistaken for dead code a second time.
-  it("asks Cursor to review what it already renders, without repeating it", async () => {
+  // Cursor used to render the tool and its arguments itself, so its prompt was only a
+  // review ask pointing at them. It stopped doing that (confirmed by screenshot, Aug
+  // 2026), so it now gets the same self-describing text as every other host.
+  it("spells out action and arguments for Cursor too, since it no longer shows them", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
     const elicit = vi.fn().mockResolvedValue({ action: "accept" });
@@ -381,9 +380,10 @@ describe("handleRunTool (HITL)", () => {
     });
 
     const message = elicit.mock.calls[0][0].message as string;
-    expect(message).toContain("shown above");
-    expect(message).not.toContain("Action:");
-    expect(message).not.toContain("ENG");
+    expect(message).toContain("Action: jirasearch");
+    expect(message).toContain("ENG");
+    // Would point at something Cursor no longer draws.
+    expect(message).not.toContain("shown above");
   });
 
   it("spells out action and arguments for a host that does not render them", async () => {
