@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { homedir } from "node:os";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { writeFileAtomicSync } from "./atomic-write.js";
 
 const CACHE_FILENAME = "remote-tools-cache.json";
 const DIR_MODE = 0o700;
@@ -40,11 +41,7 @@ function writeStore(store: ToolsCacheFile): void {
   const dir = path.dirname(filePath);
   fs.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
   fs.chmodSync(dir, DIR_MODE);
-  fs.writeFileSync(filePath, JSON.stringify(store, null, 2), {
-    encoding: "utf-8",
-    mode: FILE_MODE,
-  });
-  fs.chmodSync(filePath, FILE_MODE);
+  writeFileAtomicSync(filePath, JSON.stringify(store, null, 2), FILE_MODE);
 }
 
 export function loadRemoteTools(serverUrl: string): Tool[] {

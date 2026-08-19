@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { writeFileAtomicSync } from "../atomic-write.js";
 import type { PolicyResponse } from "./types.js";
 
 // The last VALID policy, keyed by remote URL so switching instances does not
@@ -40,7 +41,7 @@ function writeAll(data: PolicyCacheFile): void {
   const file = cachePath();
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(file, JSON.stringify(data, null, 2), { mode: 0o600 });
+    writeFileAtomicSync(file, JSON.stringify(data, null, 2), 0o600);
   } catch {
     // A cache that cannot be written degrades to in-session-only behavior, which
     // is a worse experience but never a wrong policy decision.
