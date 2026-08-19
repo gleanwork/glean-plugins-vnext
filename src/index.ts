@@ -46,6 +46,12 @@ import {
 import { resolveSessionId } from "./session-id.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
 import { pluginVersionString } from "./version.js";
+import {
+  initPolicySession,
+  policySummary,
+  protocolVersion,
+  setPolicyServerUrl,
+} from "./policy/session.js";
 
 function readEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -106,10 +112,15 @@ try {
   /* ignore */
 }
 
+// Every line carries the pid. Hosts spawn and reap this server on their own schedule,
+// and several processes can be alive at once writing to this one shared log, so without
+// a pid an interleaved log cannot be split back into per-process histories — and
+// whether two lines came from one process or two is exactly the question that arises
+// when in-memory state (the negotiated decision, the session id) appears inconsistent.
 function logLine(label: string, detail?: Record<string, unknown>): void {
   const ts = new Date().toISOString();
   const suffix = detail ? ` ${JSON.stringify(detail)}` : "";
-  const line = `${ts} ${label}${suffix}\n`;
+  const line = `${ts} [${process.pid}] ${label}${suffix}\n`;
   try {
     fs.appendFileSync(LOG_PATH, line, { mode: 0o600 });
     fs.chmodSync(LOG_PATH, 0o600);
@@ -130,6 +141,11 @@ const server = new Server(
   { name: "glean", version: pluginVersionString() },
   { capabilities: { tools: { listChanged: true } } },
 );
+
+// Capability/policy negotiation. This reports the plugin's context to the remote and
+// records whatever policy comes back; it does not yet change what the plugin does.
+initPolicySession(server, logLine);
+setPolicyServerUrl(resolveServerUrl());
 
 let oauthProvider: GleanOAuthClientProvider | undefined;
 
@@ -539,7 +555,11 @@ async function advanceSetup(): Promise<CallToolResult> {
             `Glean setup is complete.\n` +
             `Server URL: ${serverUrl}\n` +
             `Authenticated: yes\n` +
-            `Remote tools: ${toolNames}\n\n` +
+            `Remote tools: ${toolNames}\n` +
+            // Surfacing the negotiated context here is what makes a build with a
+            // missing version constant, or an unobserved MCP revision, visible per
+            // install rather than only in logs.
+            `${policySummary().join("\n")}\n\n` +
             `You can now use find_skills, run_tool, and any of the listed ` +
             `remote tools.`,
         },
@@ -736,6 +756,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clearRemoteTools();
         oauthProvider = undefined;
         cachedRemoteTools = [];
+        // The cached POLICY deliberately survives reset. Only a valid policy replaces
+        // it, so a user-invokable reset must not become a way to drop a cached
+        // deactivation or version block — the remote may be unreachable afterwards,
+        // in which case there is nothing to refresh it from. Re-keying is enough:
+        // the cache is keyed by remote URL, so a different instance never inherits it.
+        setPolicyServerUrl(undefined);
         logLine("setup.reset");
         // Fire-and-forget — tools list is shorter without the dynamic
         // surface; the host should re-fetch on its next idle cycle.
@@ -815,6 +841,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clearCredentials();
         oauthProvider = undefined;
         cachedRemoteTools = loadRemoteTools(normalized);
+        // Re-key the policy cache: a different instance must not inherit the previous
+        // instance's policy.
+        setPolicyServerUrl(normalized);
         logLine("setup.configured", { serverUrl: normalized });
         // Fall through to advanceSetup, which will now find URL ✓ and try
         // to drive auth + tool fetch in the same call.
@@ -841,7 +870,10 @@ async function main() {
     logLine("evict-stale-skills.failed", { msg });
   }
 
-  const transport = new StdioServerTransport();
+  // Wrap the transport so the negotiated MCP revision can be observed: the SDK settles
+  // it internally during `initialize` and exposes no server-side accessor for the
+  // result. `Transport` is a plain interface, so this needs no subclassing.
+  const transport = protocolVersion.wrap(new StdioServerTransport());
   await server.connect(transport);
 }
 

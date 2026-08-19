@@ -115,10 +115,16 @@ describe("callRemoteTool", () => {
     const result = await callRemoteTool(fakeClient, "some_tool", { a: 1 });
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].params).toEqual({
+    // Every outgoing tools/call now carries the negotiation payload under the
+    // vendor-prefixed `_meta` key, so assert the call's own fields explicitly and
+    // check the envelope separately rather than pinning the whole object.
+    expect(calls[0].params).toMatchObject({
       name: "some_tool",
       arguments: { a: 1 },
     });
+    expect(
+      (calls[0].params as { _meta?: Record<string, unknown> })._meta,
+    ).toHaveProperty("com.glean.mcp/capabilityPolicy");
     expect(calls[0].options).toEqual({ timeout: 12345 });
     expect(result.content).toEqual([{ type: "text", text: "ok" }]);
   });
