@@ -45,6 +45,7 @@ import {
 } from "./tools/remote-passthrough.js";
 import { resolveSessionId } from "./session-id.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
+import { pluginVersionString } from "./version.js";
 
 function readEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -126,7 +127,7 @@ function resolveSkillsBaseDir(): string {
 }
 
 const server = new Server(
-  { name: "glean", version: "1.0.0" },
+  { name: "glean", version: pluginVersionString() },
   { capabilities: { tools: { listChanged: true } } },
 );
 
