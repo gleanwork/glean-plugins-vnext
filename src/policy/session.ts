@@ -3,7 +3,7 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { hostIdentityFromHandshake, buildNegotiationRequest } from "./context.js";
 import { classifyResult, metaFor } from "./negotiate.js";
 import { evaluate } from "./evaluate.js";
-import { loadCached, savePolicy } from "./cache.js";
+import { clearCache, loadCached, savePolicy } from "./cache.js";
 import { ProtocolVersionObserver } from "./protocol-version.js";
 import type { Decision, NegotiationRequest, PolicyResponse } from "./types.js";
 
@@ -42,6 +42,20 @@ export function initPolicySession(server: Server, log: LogFn): void {
 /** Called whenever the configured server URL is resolved or changed. */
 export function setPolicyServerUrl(url: string | undefined): void {
   cacheKeyUrl = url;
+}
+
+/**
+ * Discard every cached policy, for `setup({reset})`.
+ *
+ * Deliberately global, with no URL argument, to match clearRemoteTools() on the same
+ * path: reset wipes the tools cache for every URL, and a per-URL policy clear here
+ * would leave the two stores disagreeing about what "reset" cleared. The two caches
+ * are separate files, so nothing but this pairing keeps them consistent — a new clear
+ * path has to touch both.
+ */
+export function clearPolicyCache(): void {
+  clearCache();
+  decision = undefined;
 }
 
 /**

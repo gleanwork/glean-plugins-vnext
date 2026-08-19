@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { evaluate } from "../src/policy/evaluate.js";
 import { classifyResult, validatePolicy } from "../src/policy/negotiate.js";
 import { CAPABILITY_POLICY_KEY } from "../src/policy/key.js";
+import { clearCache, loadCached, savePolicy } from "../src/policy/cache.js";
 
 const allSupported = {
   toolPromotion: true,
@@ -230,5 +234,58 @@ describe("unknown-key reporting", () => {
     expect(v.ok).toBe(true);
     if (!v.ok) return;
     expect(v.unknownKeys).toEqual([]);
+  });
+});
+
+describe("policy cache", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "policy-cache-test-"));
+    vi.stubEnv("PLUGIN_DATA_DIR", dir);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    vi.unstubAllEnvs();
+  });
+
+  it("keys by remote URL so switching instances cannot cross-contaminate", () => {
+    savePolicy("https://a.glean.com", { features: { hitl: { enabled: false } } });
+    savePolicy("https://b.glean.com", { features: { hitl: { enabled: true } } });
+
+    expect(loadCached("https://a.glean.com").policy).toEqual({
+      features: { hitl: { enabled: false } },
+    });
+    expect(loadCached("https://b.glean.com").policy).toEqual({
+      features: { hitl: { enabled: true } },
+    });
+  });
+
+  // Reset must clear every URL, matching clearRemoteTools() on the same path. A
+  // per-URL clear here would leave the two cache files disagreeing about what
+  // "reset" cleared — the pairing is what keeps two separate stores consistent.
+  it("clears every URL when called with no argument", () => {
+    savePolicy("https://a.glean.com", { features: { hitl: { enabled: false } } });
+    savePolicy("https://b.glean.com", { features: { hitl: { enabled: false } } });
+
+    clearCache();
+
+    expect(loadCached("https://a.glean.com").policy).toBeUndefined();
+    expect(loadCached("https://b.glean.com").policy).toBeUndefined();
+  });
+
+  // tools/list belongs to remote-tools-cache-store.ts. Caching it here too would
+  // shadow a live subsystem and let the two disagree about which surface goes with
+  // which policy.
+  it("stores policy only, never a tools list", () => {
+    savePolicy("https://a.glean.com", { features: { hitl: { enabled: false } } });
+
+    const entry = loadCached("https://a.glean.com") as Record<string, unknown>;
+    expect(Object.keys(entry).sort()).toEqual(["policy", "updatedAt"]);
+  });
+
+  it("returns an empty entry for an unknown URL rather than throwing", () => {
+    expect(loadCached("https://never-seen.glean.com")).toEqual({});
   });
 });

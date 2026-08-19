@@ -47,6 +47,7 @@ import { resolveSessionId } from "./session-id.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
 import { pluginVersionString } from "./version.js";
 import {
+  clearPolicyCache,
   initPolicySession,
   policySummary,
   protocolVersion,
@@ -752,6 +753,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         oauthProvider = undefined;
         cachedRemoteTools = [];
         setPolicyServerUrl(undefined);
+        clearPolicyCache();
         logLine("setup.reset");
         // Fire-and-forget — tools list is shorter without the dynamic
         // surface; the host should re-fetch on its next idle cycle.

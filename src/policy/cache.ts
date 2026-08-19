@@ -3,17 +3,18 @@ import path from "node:path";
 import os from "node:os";
 import type { PolicyResponse } from "./types.js";
 
-// Two independently-updated cache entries, keyed by remote URL so switching
-// instances does not cross-contaminate:
+// The last VALID policy, keyed by remote URL so switching instances does not
+// cross-contaminate. It survives a response that carried no policy and survives a
+// malformed one; only a valid policy replaces it.
 //
-//   policy     - the last VALID policy. Survives a response that carried no
-//                policy and survives a malformed one; only a valid policy
-//                replaces it.
-//   toolsList  - the last successful tools/list result, replayed when the remote
-//                is unreachable so the advertised surface does not vanish.
+// tools/list is deliberately NOT cached here, even though the design pairs a cached
+// policy with a cached surface for the unreachable case. remote-tools-cache-store.ts
+// already owns that: it is typed as Tool[] rather than unknown, and is wired into the
+// startup, setup, and instance-switch paths. A second copy here would shadow a live
+// subsystem, and the two could then disagree about which surface belongs with which
+// policy. Anything replaying a cached surface reads it from there.
 interface CacheEntry {
   policy?: PolicyResponse;
-  toolsList?: unknown;
   updatedAt?: string;
 }
 
@@ -57,17 +58,6 @@ export function savePolicy(serverUrl: string, policy: PolicyResponse): void {
   all[serverUrl] = {
     ...entry,
     policy,
-    updatedAt: new Date().toISOString(),
-  };
-  writeAll(all);
-}
-
-export function saveToolsList(serverUrl: string, toolsList: unknown): void {
-  const all = readAll();
-  const entry = all[serverUrl] ?? {};
-  all[serverUrl] = {
-    ...entry,
-    toolsList,
     updatedAt: new Date().toISOString(),
   };
   writeAll(all);
