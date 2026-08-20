@@ -1,5 +1,18 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "timeout": 90,
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/capture-inventory.mjs\" --host=claude"
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "mcp__.*glean.*run_tool",

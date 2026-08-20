@@ -28,6 +28,16 @@ export interface ConfiguredServer {
 export interface ConfiguredServers {
   source: InventorySource;
   servers?: ConfiguredServer[];
+  /**
+   * How many servers were found but withheld by the Glean-only filter.
+   *
+   * Reported as a bare count because the excluded entries are exactly the ones that
+   * must not be named -- a third party's server name or hostname is the disclosure the
+   * filter exists to prevent. The count still tells the remote that filtering happened,
+   * which is the difference between "this user has one Glean server" and "we could only
+   * confirm one of the servers this user has".
+   */
+  withheld?: number;
 }
 
 /** The host block of the request, as observed from the MCP handshake. */
