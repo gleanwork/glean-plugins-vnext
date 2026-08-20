@@ -273,13 +273,41 @@ async function runCli(candidates, args, cwd) {
   return { ok: false };
 }
 
+/**
+ * Leave a trace that this ran, and how it ended.
+ *
+ * Without it the hook is invisible: it writes a capture or it writes nothing, so "the host
+ * never fired me" and "I fired and bailed" look identical from the server side -- and that
+ * is exactly the question when a host's hook support is unconfirmed. The server-side reader
+ * reports its own reasons in detail; leaving the writer mute made the pair asymmetric.
+ *
+ * Shares the server's log file, since that is where anyone diagnosing this is already
+ * looking. Appends only, like the server does, and carries no paths and no server names --
+ * a count is enough, and the log outlives the capture it describes.
+ */
+function logHook(detail) {
+  try {
+    const line = `${new Date().toISOString()} [${process.pid}] inventory-hook ${JSON.stringify(detail)}\n`;
+    fs.mkdirSync(dataDir(), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(path.join(dataDir(), "glean-server.log"), line, { mode: 0o600 });
+  } catch {
+    // Diagnostics must never be the reason a hook fails.
+  }
+}
+
 async function main() {
-  if (hostArg !== "claude" && hostArg !== "codex") return;
+  // Logged before the host check so an unrecognized --host is still visible. Nothing here
+  // depends on the payload, which may not have been read yet.
+  if (hostArg !== "claude" && hostArg !== "codex") {
+    logHook({ outcome: "unknown-host" });
+    return;
+  }
 
   let payload = {};
   try {
     payload = JSON.parse(readStdin());
   } catch {
+    logHook({ host: hostArg, outcome: "unreadable-payload" });
     return;
   }
 
@@ -288,7 +316,16 @@ async function main() {
     .slice(0, 64);
   // Without a session id there is no key the server would look under, so a capture
   // could only be written somewhere nothing reads.
-  if (!sessionId) return;
+  if (!sessionId) {
+    // The failure a host that names its identifier differently would produce, so it is
+    // called out rather than folded into a generic bail.
+    logHook({
+      host: hostArg,
+      outcome: "no-session-id",
+      payloadKeys: Object.keys(payload).sort(),
+    });
+    return;
+  }
 
   // The CLIs are directory-sensitive, so the session's cwd is passed explicitly rather
   // than inherited from wherever the hook happened to be spawned. Within one project
@@ -308,6 +345,7 @@ async function main() {
   // absolute binary path, which on a normal install contains the user's name.
   if (outcome.reason) {
     writeCache(sessionId, { source: "unavailable", reason: outcome.reason });
+    logHook({ host: hostArg, outcome: outcome.reason });
     return;
   }
 
@@ -329,6 +367,7 @@ async function main() {
   }
 
   writeCache(sessionId, { source: "host-cli", servers, withheld });
+  logHook({ host: hostArg, outcome: "host-cli", servers: servers.length, withheld });
 }
 
 /**
