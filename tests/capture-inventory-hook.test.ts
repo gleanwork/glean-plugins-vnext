@@ -491,6 +491,55 @@ describe("the hook and the server agree on where the capture lives", () => {
   });
 });
 
+// The capture holds server names and URLs, so its permissions are part of the filter's
+// job, not housekeeping. They also degrade silently: `mode` on writeFileSync and mkdirSync
+// applies only on creation and is masked by umask, so a wrong umask or a pre-existing
+// directory loosens them with nothing to notice.
+describe("how the capture is written", () => {
+  it("writes 0600 into a 0700 directory and leaves no temp behind", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "inv-perm-"));
+    const dataDir = path.join(root, "data");
+    // Pre-created wide open, so a mkdir that only passes `mode` would not tighten it.
+    await fs.mkdir(path.join(dataDir, "inventory"), { recursive: true, mode: 0o777 });
+    await fs.chmod(path.join(dataDir, "inventory"), 0o777);
+
+    const hook = path.join(root, "capture-inventory.mjs");
+    await fs.copyFile(HOOK_SOURCE, hook);
+    const fakeCli = path.join(root, "fake-codex");
+    await fs.writeFile(
+      fakeCli,
+      `#!/bin/sh\nprintf '%s' '[{"name":"glean_default","auth_status":"oauth","transport":{"type":"streamable_http","url":"https://acme-be.glean.com/mcp"}}]'\n`,
+      { mode: 0o755 },
+    );
+
+    await new Promise<void>((resolve) => {
+      const child = spawn(process.execPath, [hook, "--host=codex"], {
+        env: {
+          CLAUDE_PLUGIN_DATA: dataDir,
+          CODEX_EXECPATH: fakeCli,
+          PATH: path.join(root, "no-such-bin"),
+          HOME: root,
+        },
+        stdio: ["pipe", "ignore", "ignore"],
+      });
+      child.stdin.end(JSON.stringify({ session_id: "perm-1", cwd: root }));
+      child.on("close", () => resolve());
+    });
+
+    const invDir = path.join(dataDir, "inventory");
+    const fileMode = (await fs.stat(path.join(invDir, "perm-1.json"))).mode & 0o777;
+    const dirMode = (await fs.stat(invDir)).mode & 0o777;
+    expect(fileMode).toBe(0o600);
+    expect(dirMode).toBe(0o700);
+
+    // Nothing else in the directory: no stray file, and no temp, since the write is a
+    // plain one -- a per-session filename with a single writer has no race to guard.
+    expect(await fs.readdir(invDir)).toEqual(["perm-1.json"]);
+
+    await fs.rm(root, { recursive: true, force: true });
+  });
+});
+
 describe("hook preconditions", () => {
   it("writes nothing without a session id to key by", async () => {
     const { cache } = await runHook({

@@ -44,10 +44,6 @@ function seed(dir: string, sessionId: string, body: unknown) {
   );
 }
 
-// Carries `cwd` on purpose. The hook used to record the capture's working directory and no
-// longer does -- a path is filesystem layout, and /Users/<name>/... carries a username --
-// so a file written by an older build still has it. That must be tolerated and dropped,
-// not rejected: refusing it would turn a removed field into an outage on upgrade.
 const VALID = {
   source: "host-cli",
   servers: [
@@ -55,7 +51,6 @@ const VALID = {
     { name: "glean-local", authStatus: "unknown" },
   ],
   withheld: 2,
-  cwd: "/Users/someone/acme-migration",
   capturedAt: "2026-08-20T00:00:00Z",
 };
 
@@ -86,10 +81,12 @@ describe("loadCachedInventory", () => {
   });
 
   // Only the fields the contract defines reach the payload. capturedAt is local
-  // bookkeeping, and cwd is a path an older build left behind -- neither belongs in a
-  // negotiation request.
+  // bookkeeping; `cwd` is a path an earlier build recorded and this one does not, so a
+  // file left by that build still carries it. It has to be tolerated and dropped rather
+  // than rejected -- refusing a removed field would turn it into an outage on upgrade --
+  // and dropped rather than forwarded, because a path is filesystem layout.
   it("passes through only the contract's fields", async () => {
-    seed(dir, "sess-1", VALID);
+    seed(dir, "sess-1", { ...VALID, cwd: "/Users/someone/acme-migration" });
     const { loadCachedInventory } = await freshCache(dir);
 
     const result = loadCachedInventory();

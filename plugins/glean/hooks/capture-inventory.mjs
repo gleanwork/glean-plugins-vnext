@@ -331,20 +331,36 @@ async function main() {
   writeCache(sessionId, { source: "host-cli", servers, withheld });
 }
 
-/** Written via temp+rename so the server never reads a half-written file. */
+/**
+ * Write the capture.
+ *
+ * A plain write, not the temp-and-rename dance src/atomic-write.ts does for the stores.
+ * Those files are shared: several processes read and modify them, so a torn write there
+ * discards every entry until something rewrites it. This one is written exactly once, by
+ * one process, under a filename keyed to the session -- there is no second writer to race.
+ *
+ * The remaining window is a reader catching the truncate: `writeFileSync` truncates before
+ * writing, and the server does read while a session is starting. That costs one request,
+ * which reports `capture-invalid` and recovers on the next one, for a field that is
+ * optional by contract. Not worth a temp file and its cleanup.
+ */
 function writeCache(sessionId, body) {
   const dir = path.join(dataDir(), "inventory");
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // mkdirSync applies `mode` only to directories it creates, and umask can mask it, so an
+  // existing directory could otherwise stay world-readable. The capture holds server names
+  // and URLs, which is exactly what the filter exists to keep narrow.
+  fs.chmodSync(dir, 0o700);
+
   const file = path.join(dir, `${sessionId}.json`);
-  const tmp = `${file}.${process.pid}.tmp`;
-  const payload = JSON.stringify(
-    { ...body, capturedAt: new Date().toISOString() },
-    null,
-    2,
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ ...body, capturedAt: new Date().toISOString() }, null, 2),
+    { encoding: "utf-8", mode: 0o600 },
   );
-  fs.writeFileSync(tmp, payload, { encoding: "utf-8", mode: 0o600 });
-  // Same filesystem, so the rename is atomic.
-  fs.renameSync(tmp, file);
+  // Same reason as the directory: `mode` applies on creation only, and SessionStart fires
+  // again on resume, rewriting an existing file.
+  fs.chmodSync(file, 0o600);
 }
 
 try {
