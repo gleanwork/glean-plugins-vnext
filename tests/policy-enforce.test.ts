@@ -3,6 +3,7 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   advertisedTools,
   policyRefusal,
+  setupClosingLine,
   withoutFileArgs,
 } from "../src/policy/enforce.js";
 import { evaluate } from "../src/policy/evaluate.js";
@@ -316,5 +317,76 @@ describe("withoutFileArgs", () => {
 
   it("is a no-op for a tool that never had file_args", () => {
     expect(withoutFileArgs(findSkillsTool)).toBe(findSkillsTool);
+  });
+});
+
+// setup's closing sentence is the only place a user or a model is TOLD what it may call,
+// and it had no coverage while it was assembled inline in index.ts -- which is how it came
+// to contradict the advertised surface. The contract asserted here is agreement: whatever
+// this sentence names, advertisedTools() serves.
+describe("setupClosingLine", () => {
+  const promoted = ["search", "chat"];
+
+  it("names the meta tools and the promoted tools when policy allows both", () => {
+    expect(setupClosingLine({ decision: decision(), promoted })).toBe(
+      "You can now use find_skills, run_tool, search, chat.",
+    );
+  });
+
+  // The defect this change fixes: setup printed the remote's catalog, so a withheld
+  // feature produced a sentence naming tools the very next call would refuse. Asserted
+  // against the gate as well, so the sentence and the served surface cannot drift.
+  it("omits the promoted tools when toolPromotion is off, and says nothing about them", () => {
+    const d = decision({ features: { ...allSupported, toolPromotion: false } });
+
+    const line = setupClosingLine({ decision: d, promoted });
+
+    expect(line).toBe("You can now use find_skills, run_tool.");
+    for (const name of promoted) {
+      expect(line).not.toContain(name);
+      expect(names(d)).not.toContain(name);
+    }
+  });
+
+  it("omits the meta tools when metaTools is off", () => {
+    const d = decision({ features: { ...allSupported, metaTools: false } });
+
+    const line = setupClosingLine({ decision: d, promoted });
+
+    expect(line).toBe("You can now use search, chat.");
+    expect(names(d)).not.toContain("find_skills");
+    expect(names(d)).not.toContain("run_tool");
+  });
+
+  // A remote that promotes nothing differs from one whose promotion was withheld, and
+  // neither may leave a dangling reference to a list setup no longer prints.
+  it("names only the meta tools when the remote promotes nothing", () => {
+    expect(setupClosingLine({ decision: decision(), promoted: [] })).toBe(
+      "You can now use find_skills, run_tool.",
+    );
+  });
+
+  it("says only setup is available when policy disables both features", () => {
+    const line = setupClosingLine({
+      decision: decision({
+        features: { ...allSupported, metaTools: false, toolPromotion: false },
+      }),
+      promoted,
+    });
+
+    // Not "You can now use ." -- the empty join is the failure this branch exists for.
+    expect(line).toContain("only `setup` is available");
+    expect(line).not.toContain("You can now use");
+  });
+
+  it("tells a deactivated install to upgrade rather than listing tools", () => {
+    const line = setupClosingLine({
+      decision: decision({ deactivated: true }),
+      promoted,
+    });
+
+    expect(line).toContain("not supported by your Glean instance");
+    expect(line).toContain("Upgrade the Glean plugin");
+    expect(line).not.toContain("find_skills");
   });
 });

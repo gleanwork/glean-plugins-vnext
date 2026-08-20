@@ -155,3 +155,45 @@ export const FILE_ARGS_DISABLED_TEXT =
   "`file_args` is disabled for your Glean instance by remote policy, so no file was " +
   "read and the tool was not executed. Retry `run_tool` with the values inline in " +
   "`arguments` instead.";
+
+/**
+ * The closing sentence of `setup`: exactly what the caller may invoke right now.
+ *
+ * There used to be two lists here, and they disagreed the moment policy withheld
+ * anything -- `setup` printed the remote's whole catalog ("Remote tools: search, chat,
+ * ...") and then closed with "You can now use find_skills, run_tool". A model reading
+ * that has been handed names it may call, most of which are not advertised and would be
+ * refused on call. The remote's catalog is the remote's business, so it is gone and this
+ * is the single authoritative list.
+ *
+ * Every clause is derived rather than asserted, because every one of them moves:
+ * `metaTools` and `toolPromotion` are policy, and deactivation withdraws all of it.
+ * Meta-tool names come from META_TOOL_NAMES so this cannot drift from what
+ * advertisedTools() actually serves.
+ */
+export function setupClosingLine(input: {
+  decision: Decision;
+  promoted: readonly string[];
+}): string {
+  const { decision, promoted } = input;
+  if (decision.deactivated) {
+    return (
+      `This plugin version is not supported by your Glean instance, so only ` +
+      `\`${SETUP_TOOL_NAME}\` is available. Upgrade the Glean plugin to restore the rest.`
+    );
+  }
+  const usable = [
+    ...(decision.features.metaTools ? [...META_TOOL_NAMES] : []),
+    ...(decision.features.toolPromotion ? promoted : []),
+  ];
+  // Reachable without deactivation: a policy may disable metaTools and toolPromotion
+  // together, which leaves `setup` as the only callable tool. Without this branch the
+  // sentence degrades to "You can now use ."
+  if (usable.length === 0) {
+    return (
+      `Remote policy has disabled the tools this plugin provides, so only ` +
+      `\`${SETUP_TOOL_NAME}\` is available.`
+    );
+  }
+  return `You can now use ${usable.join(", ")}.`;
+}
