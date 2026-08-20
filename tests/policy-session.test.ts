@@ -214,9 +214,14 @@ describe("decisionInForce", () => {
     const seen: boolean[] = [];
 
     for (const label of ["tools/list", "tools/call(search)", "tools/list", "tools/call(chat)"]) {
+      const isList = label === "tools/list";
       session.recordPolicyFromResult(
-        label === "tools/list" ? resultWith(policy) : { content: [] },
+        isList ? resultWith(policy) : { content: [] },
         label,
+        // Mirrors the real handlers: a host-requested list suppresses the notification,
+        // a tool call does not. Without this the test would exercise a combination that
+        // never occurs in production.
+        isList ? { hostReceivingList: true } : undefined,
       );
       seen.push(session.decisionInForce().features.metaTools);
     }
@@ -289,7 +294,28 @@ describe("tools/list_changed notification", () => {
   // The response to a tools/list IS the update -- the host asked and is about to receive
   // the filtered surface. Notifying would make it ask again, and notify -> list ->
   // resolve -> notify is a cycle.
-  it("never notifies from the tools/list path, even on a change", async () => {
+  // The suppression is about whether the HOST is receiving the surface, not about which
+  // remote method produced it. When it asked for the list, the response is the update, and
+  // notifying would make it ask again -- notify -> list -> resolve -> notify is a cycle.
+  it("does not notify when the host is receiving the list it asked for", async () => {
+    const { session, server } = await armed();
+
+    session.recordPolicyFromResult(
+      resultWith({ features: { metaTools: { enabled: false } } }),
+      "tools/list",
+      { hostReceivingList: true },
+    );
+
+    expect(server.sendToolListChanged).not.toHaveBeenCalled();
+  });
+
+  // The regression this replaced a label check for. `setup` fetches the remote catalog
+  // through the same helper, so it carries the same "tools/list" label -- but the host is
+  // receiving setup's text, not a tool list. Keying suppression off the label therefore
+  // left the host holding a stale list with nothing to prompt a refresh. Observed against
+  // a real remote: setup learned toolPromotion: true and the promoted tools stayed
+  // invisible until some later unrelated list.
+  it("notifies when setup learns a surface change, despite the tools/list label", async () => {
     const { session, server } = await armed();
 
     session.recordPolicyFromResult(
@@ -297,7 +323,7 @@ describe("tools/list_changed notification", () => {
       "tools/list",
     );
 
-    expect(server.sendToolListChanged).not.toHaveBeenCalled();
+    expect(server.sendToolListChanged).toHaveBeenCalledTimes(1);
   });
 
   it("does not notify when only advisory fields differ", async () => {
