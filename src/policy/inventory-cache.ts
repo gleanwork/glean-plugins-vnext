@@ -34,19 +34,21 @@ interface InventoryCacheFile {
   /** The hook's own reason for having nothing, when source is `unavailable`. */
   reason?: unknown;
   /**
-   * Where the capture ran. Recorded for diagnosis only, never compared.
+   * When the capture ran. A timestamp, and deliberately the only context recorded.
    *
+   * The capture's working directory would be the other obvious thing to keep, because
    * `claude mcp list` is directory-sensitive in a way that surprised us: within one
    * project the server SET is stable, but per-server approval state is not -- the same
-   * `glean_default` reports "Connected" from a repo root and "Pending approval" from a
+   * server reports "Connected" from a repo root and "Pending approval" from a
    * subdirectory. So a capture taken in the wrong directory yields a correct list with
-   * wrong statuses, which is invisible without knowing where it ran.
+   * wrong statuses.
    *
-   * Not used to invalidate: the hook's cwd and this process's cwd are both pinned at
-   * session start, so comparing them would add nothing the session key already gives,
-   * and the statuses captured are the ones describing this session's own connections.
+   * It is still not recorded. A path is filesystem layout -- `/Users/<name>/...` carries
+   * a username, and project directory names carry customers' -- which is the same reason
+   * a stdio server's launch path is used for identification and then discarded. And the
+   * mismatch it would have diagnosed is one the session key already prevents, since the
+   * hook's cwd and this process's cwd are both pinned at session start.
    */
-  cwd?: unknown;
   capturedAt?: unknown;
 }
 

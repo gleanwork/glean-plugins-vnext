@@ -266,10 +266,7 @@ describe("claude mcp list capture", () => {
     });
     // The one recognized line is discarded with the rest, and the marker names why so a
     // format shift is diagnosable rather than merely absent.
-    expect(cache).toMatchObject({
-      source: "unavailable",
-      reason: "cli-output-invalid",
-    });
+    expect(cache?.reason).toBe("cli-output-invalid");
     expect(cache?.servers).toBeUndefined();
   });
 
@@ -285,25 +282,29 @@ describe("claude mcp list capture", () => {
   // not find the CLI" need different fixes and used to look identical.
   it("records that the CLI could not be run", async () => {
     const { cache, raw } = await runHook({ host: "claude" });
-    expect(cache).toMatchObject({
-      source: "unavailable",
-      reason: "cli-unavailable",
-    });
+    expect(cache?.reason).toBe("cli-unavailable");
     // Never the exec error: it carries an absolute binary path, and on a normal install
-    // that path contains the user's name.
+    // that path contains the user's name. Nor the working directory.
     expect(raw).not.toContain("ENOENT");
     expect(raw).not.toContain("EACCES");
     expect(raw).not.toContain("fake-cli");
+    expect(raw).not.toContain(os.tmpdir());
   });
 
-  it("records the session's cwd it was handed, not its own", async () => {
-    const { cache, projectDir } = await runHook({
+  // The working directory is passed to the CLI, because the output depends on it, and then
+  // NOT recorded. A path is filesystem layout: /Users/<name>/... carries a username and
+  // project directory names carry customers'. Same reason a stdio server's launch path is
+  // used for identification and discarded.
+  it("writes no filesystem path of any kind", async () => {
+    const { cache, raw, projectDir } = await runHook({
       host: "claude",
       cliOutput: CLAUDE_REAL,
     });
-    // The hook runs from the plugin cache but must record where the SESSION is, because
-    // that is the directory the statuses describe.
-    expect(cache?.cwd).toBe(projectDir);
+
+    expect(cache?.cwd).toBeUndefined();
+    expect(raw).not.toContain(projectDir);
+    expect(raw).not.toContain(os.homedir());
+    expect(raw).not.toContain(os.tmpdir());
   });
 });
 
@@ -381,10 +382,7 @@ describe("codex mcp list capture", () => {
     // Valid JSON of the wrong shape, which is a validation failure rather than a parse
     // failure -- the same wire reason, because the remote cannot act on the difference,
     // and the log keeps it.
-    expect(cache).toMatchObject({
-      source: "unavailable",
-      reason: "cli-output-invalid",
-    });
+    expect(cache?.reason).toBe("cli-output-invalid");
   });
 });
 

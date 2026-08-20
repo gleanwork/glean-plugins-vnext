@@ -44,6 +44,10 @@ function seed(dir: string, sessionId: string, body: unknown) {
   );
 }
 
+// Carries `cwd` on purpose. The hook used to record the capture's working directory and no
+// longer does -- a path is filesystem layout, and /Users/<name>/... carries a username --
+// so a file written by an older build still has it. That must be tolerated and dropped,
+// not rejected: refusing it would turn a removed field into an outage on upgrade.
 const VALID = {
   source: "host-cli",
   servers: [
@@ -51,7 +55,7 @@ const VALID = {
     { name: "glean-local", authStatus: "unknown" },
   ],
   withheld: 2,
-  cwd: "/repo",
+  cwd: "/Users/someone/acme-migration",
   capturedAt: "2026-08-20T00:00:00Z",
 };
 
@@ -81,20 +85,20 @@ describe("loadCachedInventory", () => {
     });
   });
 
-  // cwd and capturedAt are written for whoever is diagnosing a surprising status by
-  // hand. Letting them into the payload would put fields in a negotiation request that
-  // the contract does not define, and a working directory is a filesystem detail.
-  it("does not pass the diagnostic fields through to the payload", async () => {
+  // Only the fields the contract defines reach the payload. capturedAt is local
+  // bookkeeping, and cwd is a path an older build left behind -- neither belongs in a
+  // negotiation request.
+  it("passes through only the contract's fields", async () => {
     seed(dir, "sess-1", VALID);
     const { loadCachedInventory } = await freshCache(dir);
 
-    expect(Object.keys(loadCachedInventory()).sort()).toEqual([
-      "servers",
-      "source",
-      "withheld",
-    ]);
+    const result = loadCachedInventory();
+    expect(Object.keys(result).sort()).toEqual(["servers", "source", "withheld"]);
+    expect(JSON.stringify(result)).not.toContain("acme-migration");
   });
 
+  // The one case asserting the exact shape, so a stray `servers` or `withheld` alongside
+  // an unavailable result would be caught somewhere. The rest name only the code.
   it("is unavailable when no capture has happened", async () => {
     const { loadCachedInventory } = await freshCache(dir);
     expect(loadCachedInventory()).toEqual({
@@ -110,28 +114,19 @@ describe("loadCachedInventory", () => {
     const { loadCachedInventory } = await freshCache(dir, "sess-1");
     // Indistinguishable from never having captured, and correctly so: this session has
     // no capture of its own, whatever other sessions did.
-    expect(loadCachedInventory()).toEqual({
-      source: "unavailable",
-      reason: "capture-pending",
-    });
+    expect(loadCachedInventory().reason).toBe("capture-pending");
   });
 
   it("is unavailable when the file is not JSON", async () => {
     seed(dir, "sess-1", "{not json");
     const { loadCachedInventory } = await freshCache(dir);
-    expect(loadCachedInventory()).toEqual({
-      source: "unavailable",
-      reason: "capture-invalid",
-    });
+    expect(loadCachedInventory().reason).toBe("capture-invalid");
   });
 
   it("is unavailable when source is not host-cli", async () => {
     seed(dir, "sess-1", { ...VALID, source: "files" });
     const { loadCachedInventory } = await freshCache(dir);
-    expect(loadCachedInventory()).toEqual({
-      source: "unavailable",
-      reason: "capture-invalid",
-    });
+    expect(loadCachedInventory().reason).toBe("capture-invalid");
   });
 
   // All-or-nothing, the same rule the hook applies to CLI output: a truncated inventory
@@ -143,19 +138,15 @@ describe("loadCachedInventory", () => {
       servers: [VALID.servers[0], { name: "broken", authStatus: "definitely-not-valid" }],
     });
     const { loadCachedInventory } = await freshCache(dir);
-    expect(loadCachedInventory()).toEqual({
-      source: "unavailable",
-      reason: "capture-invalid",
-    });
+    // Not a one-server inventory: the good entry goes with the bad one.
+    expect(loadCachedInventory().reason).toBe("capture-invalid");
+    expect(loadCachedInventory().servers).toBeUndefined();
   });
 
   it("rejects a server with no name", async () => {
     seed(dir, "sess-1", { ...VALID, servers: [{ authStatus: "unknown" }] });
     const { loadCachedInventory } = await freshCache(dir);
-    expect(loadCachedInventory()).toEqual({
-      source: "unavailable",
-      reason: "capture-invalid",
-    });
+    expect(loadCachedInventory().reason).toBe("capture-invalid");
   });
 
   // The file is written by a separate process which may be a different plugin version,
@@ -192,12 +183,9 @@ describe("loadCachedInventory", () => {
   // The hook writes a negative marker when it ran and came back with nothing, which is
   // what separates "the hook never fired" from "the hook fired and the CLI was missing".
   it("surfaces the reason the hook recorded", async () => {
-    seed(dir, "sess-1", { source: "unavailable", reason: "cli-unavailable", cwd: "/repo" });
+    seed(dir, "sess-1", { source: "unavailable", reason: "cli-unavailable" });
     const { loadCachedInventory } = await freshCache(dir);
-    expect(loadCachedInventory()).toEqual({
-      source: "unavailable",
-      reason: "cli-unavailable",
-    });
+    expect(loadCachedInventory().reason).toBe("cli-unavailable");
   });
 
   // The reason goes onto the wire, and the file is untrusted input like everything else

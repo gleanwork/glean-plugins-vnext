@@ -384,7 +384,7 @@ async function main() {
   // wire and in the log. Only enumerated codes are written: an exec error would carry an
   // absolute binary path, which on a normal install contains the user's name.
   if (outcome.reason) {
-    writeCache(sessionId, { source: "unavailable", reason: outcome.reason, cwd });
+    writeCache(sessionId, { source: "unavailable", reason: outcome.reason });
     return;
   }
 
@@ -409,7 +409,7 @@ async function main() {
     );
   }
 
-  writeCache(sessionId, { source: "host-cli", servers, withheld, cwd });
+  writeCache(sessionId, { source: "host-cli", servers, withheld });
 }
 
 /** Written via temp+rename so the server never reads a half-written file. */
