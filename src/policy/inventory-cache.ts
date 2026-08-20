@@ -124,11 +124,13 @@ function inventoryDir(): string {
  * are, on Claude Code, which the HITL permission-mode marker has relied on in production
  * for as long as it has existed.
  *
+ * Confirmed equal on Claude Code, by observation rather than by contract: a capture written
+ * by the hook appeared under exactly the key this side computed.
+ *
  * Codex is the open case: its variable is named for a *thread* while its hook payload field
  * is named for a session, and the two have not been confirmed equal. If they differ, the
  * capture lands under a key nothing reads, so `describeMiss` below reports what was looked
- * for and whether anything else is present -- which turns that from an invisible failure
- * into an obvious one.
+ * for and whether anything else is present.
  */
 function sessionKey(): string {
   return resolveSessionId()
@@ -137,12 +139,18 @@ function sessionKey(): string {
 }
 
 /**
- * Why there is no capture for this session, in enough detail to tell the two causes apart.
+ * Why there is no capture for this session, in enough detail to narrow the cause.
  *
- * "The hook has not run yet" and "the hook ran and keyed the file differently" are the same
- * absence on disk. Counting the captures under other keys separates them: on a host where
- * the hook demonstrably ran, a miss alongside another capture is a key mismatch and nothing
- * else. The keys themselves are not logged, only how many there are.
+ * Counting the captures under other keys separates "nothing has ever captured here" from
+ * "something captured, but not under my key". The first rules out the hook running at all
+ * on this host, which is the question worth answering for a host whose hook support is
+ * unconfirmed.
+ *
+ * It does NOT prove a key mismatch on its own. A second concurrent session whose own
+ * capture has not landed yet looks exactly the same, and hosts do run several plugin
+ * processes at once -- observed with three live at once on Claude Code. The count is
+ * conclusive only when one session is running, which is the situation someone diagnosing
+ * this would arrange deliberately. The keys themselves are not logged, only how many.
  */
 function describeMiss(code: string | undefined): InventoryDiagnostic {
   const diagnostic: InventoryDiagnostic = {

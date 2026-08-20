@@ -121,7 +121,7 @@ describe("loadCachedInventory", () => {
   // Codex names its variable for a thread and its hook field for a session, and the two are
   // unconfirmed. If they ever differ the capture lands under a key nothing reads, so the
   // miss has to be distinguishable from "the hook has not run yet".
-  it("shows a key mismatch rather than an ordinary absence", async () => {
+  it("distinguishes a capture under another key from none at all", async () => {
     seed(dir, "the-hook-used-this-key", VALID);
     const { loadCachedInventory, lastInventoryDiagnostic } = await freshCache(
       dir,
@@ -132,8 +132,10 @@ describe("loadCachedInventory", () => {
     expect(lastInventoryDiagnostic()).toEqual({
       detail: "no capture file",
       sessionKey: "the-server-wants-this-key",
-      // A capture exists, under another key. On a host where the hook demonstrably ran,
-      // that combination is a mismatch and nothing else.
+      // Narrows the cause without proving it. A second concurrent session whose own capture
+      // has not landed yet produces the same count -- observed on Claude Code, which ran
+      // three plugin processes at once. What it does rule out is the hook never having run
+      // on this host at all, which is the question for a host whose support is unconfirmed.
       otherCaptures: 1,
     });
   });
