@@ -85,6 +85,9 @@ export interface InventoryDiagnostic {
   badType?: string;
   badValue?: string;
   bytes?: number;
+  /** The session key looked for, and how many captures exist under other keys. */
+  sessionKey?: string;
+  otherCaptures?: number;
 }
 
 let lastDiagnostic: InventoryDiagnostic | undefined;
@@ -103,10 +106,57 @@ export function lastInventoryDiagnostic(): InventoryDiagnostic | undefined {
  * run for real and the result read back through here.
  */
 export function inventoryCachePath(): string {
-  const sessionId = resolveSessionId()
+  return path.join(inventoryDir(), `${sessionKey()}.json`);
+}
+
+function inventoryDir(): string {
+  return path.join(hostSharedDataDir(), "inventory");
+}
+
+/**
+ * The filename the capture is keyed by.
+ *
+ * The two sides reach this value by different routes, which is the one part of this
+ * mechanism that is assumed rather than enforced. The hook is handed `session_id` by the
+ * host on stdin; this process reads GLEAN_SESSION_ID, which start.mjs sets from the host's
+ * own variable (CLAUDE_CODE_SESSION_ID, or CODEX_THREAD_ID on Codex). Nothing makes the
+ * host's hook payload and the host's environment variable the same identifier -- they just
+ * are, on Claude Code, which the HITL permission-mode marker has relied on in production
+ * for as long as it has existed.
+ *
+ * Codex is the open case: its variable is named for a *thread* while its hook payload field
+ * is named for a session, and the two have not been confirmed equal. If they differ, the
+ * capture lands under a key nothing reads, so `describeMiss` below reports what was looked
+ * for and whether anything else is present -- which turns that from an invisible failure
+ * into an obvious one.
+ */
+function sessionKey(): string {
+  return resolveSessionId()
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .slice(0, 64);
-  return path.join(hostSharedDataDir(), "inventory", `${sessionId}.json`);
+}
+
+/**
+ * Why there is no capture for this session, in enough detail to tell the two causes apart.
+ *
+ * "The hook has not run yet" and "the hook ran and keyed the file differently" are the same
+ * absence on disk. Counting the captures under other keys separates them: on a host where
+ * the hook demonstrably ran, a miss alongside another capture is a key mismatch and nothing
+ * else. The keys themselves are not logged, only how many there are.
+ */
+function describeMiss(code: string | undefined): InventoryDiagnostic {
+  const diagnostic: InventoryDiagnostic = {
+    detail: code === "ENOENT" ? "no capture file" : `unreadable (${code ?? "unknown"})`,
+    sessionKey: sessionKey(),
+  };
+  try {
+    diagnostic.otherCaptures = fs
+      .readdirSync(inventoryDir())
+      .filter((name) => name.endsWith(".json")).length;
+  } catch {
+    // No directory at all, which is the ordinary case before any capture has happened.
+  }
+  return diagnostic;
 }
 
 function unavailable(
@@ -146,9 +196,7 @@ export function loadCachedInventory(): ConfiguredServers {
     // Overwhelmingly ENOENT: no capture yet, which is the ordinary state early in a
     // session and the permanent one on a host that runs no hooks.
     const code = (err as { code?: string })?.code;
-    return unavailable("capture-pending", {
-      detail: code === "ENOENT" ? "no capture file" : `unreadable (${code ?? "unknown"})`,
-    });
+    return unavailable("capture-pending", describeMiss(code));
   }
 
   let parsed: InventoryCacheFile;

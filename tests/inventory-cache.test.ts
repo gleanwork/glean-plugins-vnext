@@ -114,6 +114,38 @@ describe("loadCachedInventory", () => {
     expect(loadCachedInventory().reason).toBe("capture-pending");
   });
 
+  // The one failure this mechanism cannot rule out by construction. The hook is handed
+  // `session_id` by the host on stdin; this side reads GLEAN_SESSION_ID, which the launcher
+  // sets from the host's own variable. Nothing guarantees those are the same identifier --
+  // they are on Claude Code, where the HITL marker has depended on it in production, but
+  // Codex names its variable for a thread and its hook field for a session, and the two are
+  // unconfirmed. If they ever differ the capture lands under a key nothing reads, so the
+  // miss has to be distinguishable from "the hook has not run yet".
+  it("shows a key mismatch rather than an ordinary absence", async () => {
+    seed(dir, "the-hook-used-this-key", VALID);
+    const { loadCachedInventory, lastInventoryDiagnostic } = await freshCache(
+      dir,
+      "the-server-wants-this-key",
+    );
+
+    expect(loadCachedInventory().reason).toBe("capture-pending");
+    expect(lastInventoryDiagnostic()).toEqual({
+      detail: "no capture file",
+      sessionKey: "the-server-wants-this-key",
+      // A capture exists, under another key. On a host where the hook demonstrably ran,
+      // that combination is a mismatch and nothing else.
+      otherCaptures: 1,
+    });
+  });
+
+  it("reports no other captures when the hook simply has not run", async () => {
+    const { loadCachedInventory, lastInventoryDiagnostic } = await freshCache(dir);
+    loadCachedInventory();
+
+    // Absent rather than zero: the directory does not exist, so there was nothing to count.
+    expect(lastInventoryDiagnostic()?.otherCaptures).toBeUndefined();
+  });
+
   it("is unavailable when the file is not JSON", async () => {
     seed(dir, "sess-1", "{not json");
     const { loadCachedInventory } = await freshCache(dir);

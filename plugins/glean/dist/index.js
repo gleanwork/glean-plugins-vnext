@@ -25189,8 +25189,24 @@ function lastInventoryDiagnostic() {
   return lastDiagnostic;
 }
 function inventoryCachePath() {
-  const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
-  return path2.join(hostSharedDataDir(), "inventory", `${sessionId}.json`);
+  return path2.join(inventoryDir(), `${sessionKey()}.json`);
+}
+function inventoryDir() {
+  return path2.join(hostSharedDataDir(), "inventory");
+}
+function sessionKey() {
+  return resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
+}
+function describeMiss(code) {
+  const diagnostic = {
+    detail: code === "ENOENT" ? "no capture file" : `unreadable (${code ?? "unknown"})`,
+    sessionKey: sessionKey()
+  };
+  try {
+    diagnostic.otherCaptures = fs.readdirSync(inventoryDir()).filter((name) => name.endsWith(".json")).length;
+  } catch {
+  }
+  return diagnostic;
 }
 function unavailable(reason, diagnostic) {
   lastDiagnostic = diagnostic;
@@ -25202,9 +25218,7 @@ function loadCachedInventory() {
     raw = fs.readFileSync(inventoryCachePath(), "utf-8");
   } catch (err) {
     const code = err?.code;
-    return unavailable("capture-pending", {
-      detail: code === "ENOENT" ? "no capture file" : `unreadable (${code ?? "unknown"})`
-    });
+    return unavailable("capture-pending", describeMiss(code));
   }
   let parsed;
   try {
