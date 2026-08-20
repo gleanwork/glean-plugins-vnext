@@ -57,9 +57,14 @@ export function augmentSchemaForLocal(schema: unknown): ToolInputSchema {
  * each surviving tool with its input schema augmented for local exposure.
  *
  * Walks pagination cursors to exhaustion in case the remote ever paginates.
+ *
+ * `hostReceivingList` must be true only when the caller is answering a host `tools/list`.
+ * Setup calls this too, and there the host is receiving setup's text rather than a tool
+ * list, so a surface-changing policy learned here has to notify.
  */
 export async function fetchAllowedRemoteTools(
   remoteClient: Client,
+  { hostReceivingList = false }: { hostReceivingList?: boolean } = {},
 ): Promise<Tool[]> {
   const collected: Tool[] = [];
   let cursor: string | undefined;
@@ -70,7 +75,7 @@ export async function fetchAllowedRemoteTools(
       ...(cursor ? { cursor } : {}),
       ...negotiationMeta(),
     });
-    recordPolicyFromResult(page, TOOLS_LIST_LABEL);
+    recordPolicyFromResult(page, TOOLS_LIST_LABEL, { hostReceivingList });
     for (const tool of page.tools) {
       if (!REMOTE_TOOLS_ALLOWLIST.has(tool.name)) continue;
       collected.push({

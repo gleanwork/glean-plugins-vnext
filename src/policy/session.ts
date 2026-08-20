@@ -38,9 +38,10 @@ let cacheKeyUrl: string | undefined;
 
 export const protocolVersion = new ProtocolVersionObserver();
 
-// The label recordPolicyFromResult receives for a tools/list exchange. Exported so the
-// caller and the notification guard cannot drift apart on a string literal — the guard
-// depends on distinguishing that path from tools/call.
+// The label recordPolicyFromResult receives for a tools/list exchange, shared by the
+// tools/list handler and by setup's own catalog fetch. Exported so both spell it the same
+// way in the log. The notification guard deliberately does NOT key off it -- see
+// RecordPolicyOptions.hostReceivingList, which is what distinguishes those two callers.
 export const TOOLS_LIST_LABEL = "tools/list";
 
 export function initPolicySession(server: Server, log: LogFn): void {
@@ -108,6 +109,19 @@ export function negotiationMeta(): { _meta: Record<string, unknown> } {
   return metaFor(negotiationRequest());
 }
 
+export interface RecordPolicyOptions {
+  /**
+   * True only when the host requested this tool list and is about to receive the surface
+   * this decision produces. It suppresses the re-fetch notification, because the response
+   * itself is the update.
+   *
+   * An explicit flag rather than a label check: `setup` fetches the catalog through the
+   * same helper and carries the same label, but the host is receiving setup's text, so it
+   * does need telling.
+   */
+  hostReceivingList?: boolean;
+}
+
 /**
  * Record the policy carried on a remote response, if any.
  *
@@ -137,7 +151,11 @@ export function negotiationMeta(): { _meta: Record<string, unknown> } {
  * clearing-by-silence is exactly what makes the flicker possible -- and it makes this
  * agree with the unreachable path, which already retains the cached policy.
  */
-export function recordPolicyFromResult(result: unknown, label: string): void {
+export function recordPolicyFromResult(
+  result: unknown,
+  label: string,
+  { hostReceivingList = false }: RecordPolicyOptions = {},
+): void {
   // No configured remote yet means nothing to key the cache by, and no exchange to
   // record. Silent no-op rather than an error: this runs on every remote call.
   const serverUrl = cacheKeyUrl;
@@ -210,20 +228,25 @@ export function recordPolicyFromResult(result: unknown, label: string): void {
     });
   }
 
-  // Tell the host to re-fetch, but only from the tools/call path and only once a
-  // previous decision existed.
+  // Tell the host to re-fetch when the reachable surface changed under it.
   //
-  // Not from tools/list: there the response IS the update -- the host has just asked and
-  // is about to receive the freshly filtered surface, so a notification would only make
-  // it ask again for what it already holds, and notify -> tools/list -> resolve ->
-  // notify would be a cycle. A policy arriving on a tools/call response is the case that
-  // needs this, because the surface changed and the host has no reason to re-fetch.
+  // Suppressed for exactly one case: the host asked for the list and is about to receive
+  // the freshly filtered surface, so a notification would make it ask again for what it
+  // already holds, and notify -> tools/list -> resolve -> notify would be a cycle. That
+  // is what `hostReceivingList` means, and it is passed by the tools/list handler alone.
+  //
+  // It deliberately is NOT inferred from the label. `setup` fetches the remote catalog
+  // through the same helper and therefore carries the same `tools/list` label, but the
+  // host is receiving setup's text, not a tool list -- so a policy that changes the
+  // surface during setup used to leave the host holding a stale list with nothing to
+  // prompt a refresh. Observed against a real remote: setup learned `toolPromotion: true`
+  // and the promoted tools stayed invisible until the next unrelated list.
   //
   // Not on the first decision either: `!previous` counts as changed, so without that
   // guard every process's first gated call would notify, costing a host tools/list and a
   // remote round-trip for every user in a world where no policy exists. The stale-list
   // window on a first call is closed by the refusal, which is the real gate anyway.
-  if (changed && previous && label !== TOOLS_LIST_LABEL) {
+  if (changed && previous && !hostReceivingList) {
     logLine("policy.surface-changed", {
       label,
       from: { deactivated: previous.deactivated, features: previous.features },

@@ -384,7 +384,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   }
 
   try {
-    const remoteTools = await fetchAllowedRemoteTools(remoteClient);
+    // The host asked for this list and is about to receive it, so any policy learned here
+    // needs no notification -- this response IS the update.
+    const remoteTools = await fetchAllowedRemoteTools(remoteClient, {
+      hostReceivingList: true,
+    });
     cachedRemoteTools = remoteTools;
     saveRemoteTools(serverUrl, remoteTools);
     return serve("fetched", remoteTools);

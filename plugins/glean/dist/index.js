@@ -25128,7 +25128,7 @@ var StreamableHTTPClientTransport = class {
 };
 
 // src/version.ts
-var BUILD_VERSION = true ? "0.2.49" : void 0;
+var BUILD_VERSION = true ? "0.2.50" : void 0;
 function pluginVersion() {
   if (BUILD_VERSION) return { version: BUILD_VERSION, source: "build" };
   return { version: "0.0.0", source: "unknown" };
@@ -25708,7 +25708,7 @@ function reportInventoryGap(inventory2) {
 function negotiationMeta() {
   return metaFor(negotiationRequest());
 }
-function recordPolicyFromResult(result, label) {
+function recordPolicyFromResult(result, label, { hostReceivingList = false } = {}) {
   const serverUrl = cacheKeyUrl;
   if (!serverUrl) return;
   const outcome = classifyResult(result);
@@ -25756,7 +25756,7 @@ function recordPolicyFromResult(result, label) {
       reasons: next.reasons
     });
   }
-  if (changed && previous && label !== TOOLS_LIST_LABEL) {
+  if (changed && previous && !hostReceivingList) {
     logLine("policy.surface-changed", {
       label,
       from: { deactivated: previous.deactivated, features: previous.features },
@@ -26938,7 +26938,7 @@ function augmentSchemaForLocal(schema) {
     required: required2
   };
 }
-async function fetchAllowedRemoteTools(remoteClient) {
+async function fetchAllowedRemoteTools(remoteClient, { hostReceivingList = false } = {}) {
   const collected = [];
   let cursor;
   do {
@@ -26946,7 +26946,7 @@ async function fetchAllowedRemoteTools(remoteClient) {
       ...cursor ? { cursor } : {},
       ...negotiationMeta()
     });
-    recordPolicyFromResult(page, TOOLS_LIST_LABEL);
+    recordPolicyFromResult(page, TOOLS_LIST_LABEL, { hostReceivingList });
     for (const tool of page.tools) {
       if (!REMOTE_TOOLS_ALLOWLIST.has(tool.name)) continue;
       collected.push({
@@ -27263,7 +27263,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     return serve("connect-error", cachedRemoteTools);
   }
   try {
-    const remoteTools = await fetchAllowedRemoteTools(remoteClient);
+    const remoteTools = await fetchAllowedRemoteTools(remoteClient, {
+      hostReceivingList: true
+    });
     cachedRemoteTools = remoteTools;
     saveRemoteTools(serverUrl, remoteTools);
     return serve("fetched", remoteTools);
