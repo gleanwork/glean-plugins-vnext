@@ -32,9 +32,6 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-// Only hosts under Glean's own domain are trusted without reference to configuration.
-const GLEAN_HOST_SUFFIXES = [".glean.com"];
-
 // How long the whole capture may take. The CLI spawns and health-checks every
 // configured server on Claude Code, so this scales with server count and network
 // latency; the hook is declared async so the wait costs the session nothing.
@@ -64,58 +61,6 @@ function dataDir() {
   return process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), ".glean");
 }
 
-/**
- * The marketplace/plugin this script is installed under, e.g.
- * "glean-vnext@glean-plugins-vnext", or undefined when it is not running from a plugin
- * cache at all (a dev checkout).
- *
- * Derived from this file's own path rather than an env var: it works identically on
- * every host, and it is the thing being compared against, so reading it from the
- * environment would let the environment decide what counts as ours.
- */
-function provenanceOf(...candidates) {
-  for (const candidate of candidates) {
-    if (typeof candidate !== "string" || !candidate) continue;
-    const parts = candidate.split(/[\\/]/);
-    const cacheAt = parts.lastIndexOf("cache");
-    if (cacheAt === -1 || parts[cacheAt - 1] !== "plugins") continue;
-    const marketplace = parts[cacheAt + 1];
-    const plugin = parts[cacheAt + 2];
-    // Deliberately NOT including the version: a second installed version of the same
-    // plugin is still ours.
-    if (marketplace && plugin) return `${plugin}@${marketplace}`;
-  }
-  return undefined;
-}
-
-const ownProvenance = provenanceOf(process.argv[1]);
-
-/**
- * The host of the remote this plugin is configured against.
- *
- * Read from the same file the server writes (url-config-store.ts) so the allowed set is
- * derived from the customer's own deployment rather than a hardcoded list -- which is
- * what makes a white-labeled instance work with no plugin release. Absent before setup
- * has ever run, in which case only *.glean.com is trusted.
- */
-function configuredHost() {
-  const raw = (() => {
-    try {
-      const file = path.join(dataDir(), "mcp-server-url.json");
-      const parsed = JSON.parse(fs.readFileSync(file, "utf-8"));
-      return typeof parsed?.serverUrl === "string" ? parsed.serverUrl : undefined;
-    } catch {
-      return undefined;
-    }
-  })();
-  if (!raw) return undefined;
-  try {
-    return new URL(raw).hostname.toLowerCase();
-  } catch {
-    return undefined;
-  }
-}
-
 /** Origin plus path only: query and fragment can carry tokens. */
 function safeUrl(raw) {
   try {
@@ -127,17 +72,18 @@ function safeUrl(raw) {
 }
 
 /**
- * Whether a URL belongs to Glean.
+ * Whether a URL is one of Glean's own.
  *
- * Matches the EXACT host, never the registrable domain. Reducing mcp.acme.com to
- * acme.com would admit every unrelated server a customer runs on their own domain,
- * turning the privacy control into a leak -- and doing it correctly would need a
- * public-suffix list. So this under-reports: a customer running several white-labeled
- * hosts has only the configured one recognized. That is the correct direction of
- * failure. A missing entry costs the remote some visibility; a wrongly included one
- * discloses a customer's internal estate.
+ * Glean's own domain only, for v0. Admitting the host the plugin is configured against
+ * would additionally cover white-labeled deployments, but it admits everything else
+ * sharing that host too: a customer fronting several MCP servers off one gateway under
+ * different paths would have the unrelated ones reported, origin and path. Matching the
+ * exact host does not help there, because it is the same host.
+ *
+ * So the trade runs one way. Under-reporting a white-labeled instance costs the remote
+ * some visibility; over-reporting discloses a customer's internal estate.
  */
-function isGleanUrl(target, knownHost) {
+function isGleanUrl(target) {
   if (typeof target !== "string") return false;
   let host;
   try {
@@ -145,27 +91,7 @@ function isGleanUrl(target, knownHost) {
   } catch {
     return false;
   }
-  if (knownHost && host === knownHost) return true;
-  return host === "glean.com" || GLEAN_HOST_SUFFIXES.some((s) => host.endsWith(s));
-}
-
-/**
- * Whether a stdio server is one of ours, judged by where it launches from.
- *
- * A stdio server exposes no URL, so it cannot be matched the way a remote one is. But
- * plugin-provided servers launch out of plugins/cache/<marketplace>/<plugin>/, so a
- * server launching from the same marketplace/plugin tree as this hook is our own
- * plugin -- a positive identification, not a guess. Reporting it discloses only that
- * the Glean plugin is installed, which the remote already knows because it is talking
- * to it.
- *
- * Names are deliberately not consulted. This machine has a Codex server called
- * `glean-local`, which is genuinely ours, and a customer directory called `gleanwork/`
- * would be just as good a match while belonging to someone else entirely.
- */
-function isOurPlugin(...launchPaths) {
-  if (!ownProvenance) return false;
-  return provenanceOf(...launchPaths) === ownProvenance;
+  return host === "glean.com" || host.endsWith(".glean.com");
 }
 
 // ------------------------------------------------------------------ Claude Code
@@ -217,11 +143,10 @@ function parseClaudeMcpLine(line) {
 
   return {
     name: name.trim(),
-    remote: Boolean(transport),
-    // For a remote server this is a URL; for a stdio one it is the launch command,
-    // which is used for the provenance check and then discarded. A launch path is never
-    // reported: it would disclose filesystem layout for no policy benefit.
-    target,
+    // Only a remote server can be confirmed as Glean's, so the stdio target -- a launch
+    // command -- is not carried past this point. It would disclose filesystem layout for
+    // no policy benefit.
+    url: transport ? target : undefined,
     status,
   };
 }
@@ -254,8 +179,7 @@ async function claudeMcpList(cwd) {
     if (!parsed) return { reason: "cli-output-invalid" };
     rows.push({
       name: parsed.name,
-      url: parsed.remote ? safeUrl(parsed.target) : undefined,
-      launchPath: parsed.remote ? undefined : parsed.target,
+      url: parsed.url ? safeUrl(parsed.url) : undefined,
       authStatus: claudeAuthStatus(parsed.status),
     });
   }
@@ -320,7 +244,6 @@ async function codexMcpList(cwd) {
     return {
       name: String(server?.name ?? ""),
       url: transport.url ? safeUrl(transport.url) : undefined,
-      launchPath: transport.url ? undefined : transport.cwd || transport.command,
       authStatus: codexAuthStatus(server?.auth_status),
     };
   });
@@ -388,25 +311,21 @@ async function main() {
     return;
   }
 
-  const knownHost = configuredHost();
   const servers = [];
   let withheld = 0;
   for (const row of outcome.rows) {
-    const keep = row.url
-      ? isGleanUrl(row.url, knownHost)
-      : isOurPlugin(row.launchPath);
-    if (!keep || !row.name) {
+    // A stdio server exposes no URL, so it can never be confirmed as Glean's and is
+    // always withheld -- including this plugin's own entry. Reporting ours would add
+    // nothing: `plugin.id` and `plugin.version` in the same request already say the
+    // plugin is here, and the remote is talking to it.
+    if (!row.url || !row.name || !isGleanUrl(row.url)) {
       withheld += 1;
       continue;
     }
-    // Built field by field. The rows above already drop everything else, and this is
-    // the second place that is true, so a field added to a row cannot become a field in
-    // the payload by accident.
-    servers.push(
-      row.url
-        ? { name: row.name, url: row.url, authStatus: row.authStatus }
-        : { name: row.name, authStatus: row.authStatus },
-    );
+    // Built field by field. The rows above already drop everything else, and this is the
+    // second place that is true, so a field added to a row cannot become a field in the
+    // payload by accident.
+    servers.push({ name: row.name, url: row.url, authStatus: row.authStatus });
   }
 
   writeCache(sessionId, { source: "host-cli", servers, withheld });

@@ -40,6 +40,7 @@ import {
   type DispatchContext,
 } from "./tools/remote-passthrough.js";
 import { resolveSessionId } from "./session-id.js";
+import { serverDataDir } from "./data-dir.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
 import { pluginVersionString } from "./version.js";
 import {
@@ -97,8 +98,7 @@ const AUTH_REDIRECT_TO_SETUP_TEXT =
   "(no arguments) to sign in to Glean, then retry this tool.";
 
 function resolveLogPath(): string {
-  const base = process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
-  return path.join(base, "glean-server.log");
+  return path.join(serverDataDir(), "glean-server.log");
 }
 
 const LOG_PATH = resolveLogPath();

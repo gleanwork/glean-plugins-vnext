@@ -1,8 +1,8 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 import { resolveSessionId } from "../session-id.js";
+import { hostSharedDataDir } from "../data-dir.js";
 import type {
   AuthStatus,
   ConfiguredServer,
@@ -97,19 +97,16 @@ export function lastInventoryDiagnostic(): InventoryDiagnostic | undefined {
 /**
  * Path to the per-session inventory the SessionStart hook writes.
  *
- * This resolution MUST match the hook's exactly, the same coupling
- * `permissionModeMarkerPath()` in ../tools/run-tool.ts already carries: the hook is a
- * separate process that never sees the server-only PLUGIN_DATA_DIR start.mjs derives,
- * so both sides key off CLAUDE_PLUGIN_DATA, falling back to ~/.glean. Under start.mjs
- * PLUGIN_DATA_DIR resolves to this same directory.
+ * Both halves of this path have to agree with a separate process: see hostSharedDataDir()
+ * in ../data-dir.js for the directory, and the same session-id sanitization is repeated in
+ * the hook. The agreement is pinned by a test rather than by this comment -- the hook is
+ * run for real and the result read back through here.
  */
 export function inventoryCachePath(): string {
-  const base =
-    process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), ".glean");
   const sessionId = resolveSessionId()
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .slice(0, 64);
-  return path.join(base, "inventory", `${sessionId}.json`);
+  return path.join(hostSharedDataDir(), "inventory", `${sessionId}.json`);
 }
 
 function unavailable(

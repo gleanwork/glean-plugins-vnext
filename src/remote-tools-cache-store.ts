@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { homedir } from "node:os";
+import { serverDataDir } from "./data-dir.js";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { writeFileAtomicSync } from "./atomic-write.js";
 
@@ -8,12 +8,8 @@ const CACHE_FILENAME = "remote-tools-cache.json";
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 
-function resolveCacheDir(): string {
-  return process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
-}
-
 function cacheFile(): string {
-  return path.join(resolveCacheDir(), CACHE_FILENAME);
+  return path.join(serverDataDir(), CACHE_FILENAME);
 }
 
 interface ToolsCacheEntry {

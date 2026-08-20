@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -27,11 +27,13 @@ interface Options {
   host: string;
   /** Text the stubbed CLI prints. Omit to stub a CLI that cannot run at all. */
   cliOutput?: string;
-  /** Stored server URL, as `setup` would have written it. */
+  /**
+   * Stored server URL, as `setup` would have written it. The hook no longer reads it --
+   * that is the point of the test that sets it, which fails the moment someone
+   * reintroduces configured-host matching.
+   */
   configuredUrl?: string;
   sessionId?: string | null;
-  /** Install the hook outside a plugin cache, so it has no provenance of its own. */
-  devCheckout?: boolean;
 }
 
 /**
@@ -49,20 +51,7 @@ async function runHook(options: Options): Promise<Run> {
   const dataDir = path.join(root, "data");
   await fs.mkdir(dataDir, { recursive: true });
 
-  // Installed under a plugin-cache-shaped path, because that is what the hook reads its
-  // own provenance from. The version differs from the fixtures' on purpose: matching is
-  // at the marketplace/plugin level, so a second installed version is still ours.
-  const hookDir = options.devCheckout
-    ? path.join(root, "checkout", "hooks")
-    : path.join(
-        root,
-        "plugins",
-        "cache",
-        "glean-plugins-vnext",
-        "glean-vnext",
-        "9.9.9",
-        "hooks",
-      );
+  const hookDir = path.join(root, "hooks");
   await fs.mkdir(hookDir, { recursive: true });
   const hook = path.join(hookDir, "capture-inventory.mjs");
   await fs.copyFile(HOOK_SOURCE, hook);
@@ -128,8 +117,8 @@ printf '%s' '${payload}'
 }
 
 // Recorded from a real `claude mcp list`, including the preamble and blank line. Three
-// servers: our own plugin (stdio, identified by launch path), a Glean remote (by URL),
-// and an unrelated stdio server that must be withheld.
+// servers: our own plugin and an unrelated tool, both stdio and both withheld, plus one
+// Glean remote that is reported.
 const CLAUDE_REAL = [
   "Checking MCP server health\u2026",
   "",
@@ -196,26 +185,28 @@ const CODEX_REAL = JSON.stringify([
 ]);
 
 describe("claude mcp list capture", () => {
-  it("reports our plugin by launch path and the Glean remote by URL", async () => {
+  // Only the remote Glean server is reported. Both stdio entries are withheld, including
+  // this plugin's own: a stdio server exposes no URL and so can never be confirmed, and
+  // reporting ours would add nothing the request's own plugin block does not already say.
+  it("reports the Glean remote and withholds every stdio server", async () => {
     const { cache } = await runHook({ host: "claude", cliOutput: CLAUDE_REAL });
 
     expect(cache).toMatchObject({
       source: "host-cli",
       servers: [
-        { name: "plugin:glean-vnext:glean", authStatus: "authenticated" },
         {
           name: "glean_default",
           url: "https://scio-prod-be.glean.com/mcp/default",
           authStatus: "authenticated",
         },
       ],
-      withheld: 1,
+      withheld: 2,
     });
   });
 
-  // A stdio entry has a launch path, and the path is what identifies it -- but reporting
-  // the path would disclose filesystem layout for no policy benefit, so it is used and
-  // discarded.
+  // A stdio entry's target is a launch command, and it is dropped at parse time rather
+  // than carried and filtered later: a path discloses filesystem layout for no policy
+  // benefit, and the surest way not to leak it is never to hold it.
   it("never reports a launch path", async () => {
     const { raw } = await runHook({ host: "claude", cliOutput: CLAUDE_REAL });
     expect(raw).not.toContain("start.mjs");
@@ -309,21 +300,21 @@ describe("claude mcp list capture", () => {
 });
 
 describe("codex mcp list capture", () => {
-  it("reports both Glean servers and withholds the rest", async () => {
+  // `glean-local` in this fixture is a real server on the machine this was recorded from,
+  // genuinely Glean's, and still withheld: it is stdio. The name is never consulted.
+  it("reports only the Glean remote, withholding three stdio servers", async () => {
     const { cache } = await runHook({ host: "codex", cliOutput: CODEX_REAL });
 
     expect(cache).toMatchObject({
       source: "host-cli",
       servers: [
-        // stdio, so no URL -- identified by launching from our own plugin tree.
-        { name: "glean-local", authStatus: "unknown" },
         {
           name: "glean_default",
           url: "https://scio-prod-be.glean.com/mcp/default",
           authStatus: "unauthenticated",
         },
       ],
-      withheld: 2,
+      withheld: 3,
     });
   });
 
@@ -394,32 +385,26 @@ describe("the Glean-only filter", () => {
       { name, auth_status: "oauth", transport: { type: "streamable_http", url } },
     ]);
 
-  it("admits the exact host the plugin is configured against", async () => {
-    const { cache } = await runHook({
-      host: "codex",
-      configuredUrl: "https://mcp.acme.com/glean/mcp",
-      cliOutput: remote("white-labeled", "https://mcp.acme.com/glean/mcp"),
-    });
-    expect(cache?.servers).toHaveLength(1);
-  });
-
-  // Reducing mcp.acme.com to acme.com would admit every unrelated server the customer
-  // runs on their own domain, turning the privacy control into a leak.
-  it("does not admit a sibling host on the same domain", async () => {
-    const { cache } = await runHook({
-      host: "codex",
-      configuredUrl: "https://mcp.acme.com/glean/mcp",
-      cliOutput: remote("payroll", "https://other.acme.com/mcp"),
-    });
-    expect(cache).toMatchObject({ servers: [], withheld: 1 });
-  });
-
-  it("admits Glean's own domain with no configuration at all", async () => {
+  it("admits Glean's own domain", async () => {
     const { cache } = await runHook({
       host: "codex",
       cliOutput: remote("glean_default", "https://anything-be.glean.com/mcp"),
     });
     expect(cache?.servers).toHaveLength(1);
+  });
+
+  // A white-labeled deployment on the customer's own domain is NOT admitted, even though
+  // the plugin could read its configured URL and match on it. That would also admit
+  // anything else fronted off the same host under a different path, and a corporate
+  // gateway multiplexing several MCP servers is entirely ordinary. Under-reporting is the
+  // side to fail on.
+  it("does not admit a customer domain, even the configured one", async () => {
+    const { cache } = await runHook({
+      host: "codex",
+      configuredUrl: "https://mcp.acme.com/glean/mcp",
+      cliOutput: remote("white-labeled", "https://mcp.acme.com/glean/mcp"),
+    });
+    expect(cache).toMatchObject({ servers: [], withheld: 1 });
   });
 
   it("is not fooled by a lookalike domain", async () => {
@@ -430,58 +415,79 @@ describe("the Glean-only filter", () => {
     expect(cache).toMatchObject({ servers: [], withheld: 1 });
   });
 
-  // The name is never consulted, only the launch path. A directory called `gleanwork/`
-  // would otherwise be as good a match as our own plugin cache.
-  it("withholds a Glean-sounding stdio server from outside our plugin tree", async () => {
+  // The name is never consulted, only the URL. Otherwise a directory or a server label
+  // containing "glean" would be as good as proof.
+  it("withholds a Glean-sounding stdio server", async () => {
     const { cache } = await runHook({
       host: "codex",
       cliOutput: JSON.stringify([
         {
           name: "glean-totally-legit",
           auth_status: "unsupported",
-          transport: {
-            type: "stdio",
-            command: "node",
-            cwd: "/Users/someone/gleanwork/not-a-plugin",
-          },
+          transport: { type: "stdio", command: "node", cwd: "/Users/someone/gleanwork" },
         },
       ]),
     });
     expect(cache).toMatchObject({ servers: [], withheld: 1 });
   });
+});
 
-  it("withholds a stdio server from a different plugin's cache", async () => {
-    const { cache } = await runHook({
-      host: "codex",
-      cliOutput: JSON.stringify([
-        {
-          name: "someone-else",
-          auth_status: "unsupported",
-          transport: {
-            type: "stdio",
-            command: "node",
-            cwd: "/Users/someone/.codex/plugins/cache/other-market/other-plugin/1.0.0/.",
-          },
+// The one piece of duplication that cannot be removed. This hook is unbundled ESM the host
+// spawns directly, while the read side is compiled into dist/, so the two independently
+// compute the same path from the same environment variable. A divergence would be silent --
+// the hook writing somewhere nothing ever looks -- so rather than a comment asserting they
+// match, this runs the real hook and reads the result back through the real read path.
+describe("the hook and the server agree on where the capture lives", () => {
+  it("finds a capture the hook actually wrote", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "inv-agree-"));
+    const hookDir = path.join(root, "hooks");
+    await fs.mkdir(hookDir, { recursive: true });
+    const hook = path.join(hookDir, "capture-inventory.mjs");
+    await fs.copyFile(HOOK_SOURCE, hook);
+
+    const fakeCli = path.join(root, "fake-codex");
+    const payload = JSON.stringify([
+      {
+        name: "glean_default",
+        auth_status: "oauth",
+        transport: { type: "streamable_http", url: "https://acme-be.glean.com/mcp" },
+      },
+    ]);
+    await fs.writeFile(
+      fakeCli,
+      `#!/bin/sh\nprintf '%s' '${payload}'\n`,
+      { mode: 0o755 },
+    );
+
+    // Only CLAUDE_PLUGIN_DATA is set, because that is the only variable the hook can see.
+    await new Promise<void>((resolve) => {
+      const child = spawn(process.execPath, [hook, "--host=codex"], {
+        env: {
+          CLAUDE_PLUGIN_DATA: root,
+          CODEX_EXECPATH: fakeCli,
+          PATH: path.join(root, "no-such-bin"),
+          HOME: root,
         },
-      ]),
-    });
-    expect(cache).toMatchObject({ servers: [], withheld: 1 });
-  });
-
-  // Running from a source checkout there is no plugin cache to compare against, so no
-  // stdio server can be positively identified. Under-reporting is the right direction.
-  it("confirms no stdio server when it has no provenance of its own", async () => {
-    const { cache } = await runHook({
-      host: "claude",
-      devCheckout: true,
-      cliOutput: CLAUDE_REAL,
+        stdio: ["pipe", "ignore", "ignore"],
+      });
+      child.stdin.end(JSON.stringify({ session_id: "agree-1", cwd: root }));
+      child.on("close", () => resolve());
     });
 
-    // The remote is still matched by URL; both stdio entries are withheld.
-    expect(cache).toMatchObject({
-      servers: [{ name: "glean_default" }],
-      withheld: 2,
+    // Read back through the module that resolves its own path, with no shared constant
+    // between the two sides.
+    vi.resetModules();
+    vi.stubEnv("CLAUDE_PLUGIN_DATA", root);
+    vi.stubEnv("GLEAN_SESSION_ID", "agree-1");
+    const { loadCachedInventory } = await import("../src/policy/inventory-cache.js");
+
+    expect(loadCachedInventory()).toMatchObject({
+      source: "host-cli",
+      servers: [{ name: "glean_default", url: "https://acme-be.glean.com/mcp" }],
     });
+
+    vi.unstubAllEnvs();
+    await fs.rm(root, { recursive: true, force: true });
   });
 });
 

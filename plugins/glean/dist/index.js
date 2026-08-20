@@ -3236,8 +3236,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path11) {
-      let input = path11;
+    function removeDotSegments(path12) {
+      let input = path12;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3489,8 +3489,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path11, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path11 && path11 !== "/" ? path11 : void 0;
+        const [path12, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path12 && path12 !== "/" ? path12 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -6973,17 +6973,17 @@ var require_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path11) {
-      const ctrl = callVisitor(key, node, visitor, path11);
+    function visit_(key, node, visitor, path12) {
+      const ctrl = callVisitor(key, node, visitor, path12);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path11, ctrl);
-        return visit_(key, ctrl, visitor, path11);
+        replaceNode(key, path12, ctrl);
+        return visit_(key, ctrl, visitor, path12);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path11 = Object.freeze(path11.concat(node));
+          path12 = Object.freeze(path12.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path11);
+            const ci = visit_(i, node.items[i], visitor, path12);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -6994,13 +6994,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path11 = Object.freeze(path11.concat(node));
-          const ck = visit_("key", node.key, visitor, path11);
+          path12 = Object.freeze(path12.concat(node));
+          const ck = visit_("key", node.key, visitor, path12);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path11);
+          const cv = visit_("value", node.value, visitor, path12);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -7021,17 +7021,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path11) {
-      const ctrl = await callVisitor(key, node, visitor, path11);
+    async function visitAsync_(key, node, visitor, path12) {
+      const ctrl = await callVisitor(key, node, visitor, path12);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path11, ctrl);
-        return visitAsync_(key, ctrl, visitor, path11);
+        replaceNode(key, path12, ctrl);
+        return visitAsync_(key, ctrl, visitor, path12);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path11 = Object.freeze(path11.concat(node));
+          path12 = Object.freeze(path12.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path11);
+            const ci = await visitAsync_(i, node.items[i], visitor, path12);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -7042,13 +7042,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path11 = Object.freeze(path11.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path11);
+          path12 = Object.freeze(path12.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path12);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path11);
+          const cv = await visitAsync_("value", node.value, visitor, path12);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -7075,23 +7075,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path11) {
+    function callVisitor(key, node, visitor, path12) {
       if (typeof visitor === "function")
-        return visitor(key, node, path11);
+        return visitor(key, node, path12);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path11);
+        return visitor.Map?.(key, node, path12);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path11);
+        return visitor.Seq?.(key, node, path12);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path11);
+        return visitor.Pair?.(key, node, path12);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path11);
+        return visitor.Scalar?.(key, node, path12);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path11);
+        return visitor.Alias?.(key, node, path12);
       return void 0;
     }
-    function replaceNode(key, path11, node) {
-      const parent = path11[path11.length - 1];
+    function replaceNode(key, path12, node) {
+      const parent = path12[path12.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -7701,10 +7701,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path11, value) {
+    function collectionFromPath(schema, path12, value) {
       let v = value;
-      for (let i = path11.length - 1; i >= 0; --i) {
-        const k = path11[i];
+      for (let i = path12.length - 1; i >= 0; --i) {
+        const k = path12[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -7723,7 +7723,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path11) => path11 == null || typeof path11 === "object" && !!path11[Symbol.iterator]().next().done;
+    var isEmptyPath = (path12) => path12 == null || typeof path12 === "object" && !!path12[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -7753,11 +7753,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path11, value) {
-        if (isEmptyPath(path11))
+      addIn(path12, value) {
+        if (isEmptyPath(path12))
           this.add(value);
         else {
-          const [key, ...rest] = path11;
+          const [key, ...rest] = path12;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -7771,8 +7771,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path11) {
-        const [key, ...rest] = path11;
+      deleteIn(path12) {
+        const [key, ...rest] = path12;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -7786,8 +7786,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path11, keepScalar) {
-        const [key, ...rest] = path11;
+      getIn(path12, keepScalar) {
+        const [key, ...rest] = path12;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -7805,8 +7805,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path11) {
-        const [key, ...rest] = path11;
+      hasIn(path12) {
+        const [key, ...rest] = path12;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -7816,8 +7816,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path11, value) {
-        const [key, ...rest] = path11;
+      setIn(path12, value) {
+        const [key, ...rest] = path12;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -10332,9 +10332,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path11, value) {
+      addIn(path12, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path11, value);
+          this.contents.addIn(path12, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -10409,14 +10409,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path11) {
-        if (Collection.isEmptyPath(path11)) {
+      deleteIn(path12) {
+        if (Collection.isEmptyPath(path12)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path11) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path12) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -10431,10 +10431,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path11, keepScalar) {
-        if (Collection.isEmptyPath(path11))
+      getIn(path12, keepScalar) {
+        if (Collection.isEmptyPath(path12))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path11, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path12, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -10445,10 +10445,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path11) {
-        if (Collection.isEmptyPath(path11))
+      hasIn(path12) {
+        if (Collection.isEmptyPath(path12))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path11) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path12) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -10465,13 +10465,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path11, value) {
-        if (Collection.isEmptyPath(path11)) {
+      setIn(path12, value) {
+        if (Collection.isEmptyPath(path12)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path11), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path12), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path11, value);
+          this.contents.setIn(path12, value);
         }
       }
       /**
@@ -12431,9 +12431,9 @@ var require_cst_visit = __commonJS({
     visit.BREAK = BREAK;
     visit.SKIP = SKIP;
     visit.REMOVE = REMOVE;
-    visit.itemAtPath = (cst, path11) => {
+    visit.itemAtPath = (cst, path12) => {
       let item = cst;
-      for (const [field, index] of path11) {
+      for (const [field, index] of path12) {
         const tok = item?.[field];
         if (tok && "items" in tok) {
           item = tok.items[index];
@@ -12442,23 +12442,23 @@ var require_cst_visit = __commonJS({
       }
       return item;
     };
-    visit.parentCollection = (cst, path11) => {
-      const parent = visit.itemAtPath(cst, path11.slice(0, -1));
-      const field = path11[path11.length - 1][0];
+    visit.parentCollection = (cst, path12) => {
+      const parent = visit.itemAtPath(cst, path12.slice(0, -1));
+      const field = path12[path12.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path11, item, visitor) {
-      let ctrl = visitor(item, path11);
+    function _visit(path12, item, visitor) {
+      let ctrl = visitor(item, path12);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path11.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path12.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -12469,10 +12469,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item, path11);
+            ctrl = ctrl(item, path12);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item, path11) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item, path12) : ctrl;
     }
     exports.visit = visit;
   }
@@ -14466,10 +14466,10 @@ function mergeDefs(...defs) {
 function cloneDef(schema) {
   return mergeDefs(schema._zod.def);
 }
-function getElementAtPath(obj, path11) {
-  if (!path11)
+function getElementAtPath(obj, path12) {
+  if (!path12)
     return obj;
-  return path11.reduce((acc, key) => acc?.[key], obj);
+  return path12.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -14878,11 +14878,11 @@ function explicitlyAborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path11, issues) {
+function prefixIssues(path12, issues) {
   return issues.map((iss) => {
     var _a3;
     (_a3 = iss).path ?? (_a3.path = []);
-    iss.path.unshift(path11);
+    iss.path.unshift(path12);
     return iss;
   });
 }
@@ -15029,16 +15029,16 @@ function flattenError(error2, mapper = (issue2) => issue2.message) {
 }
 function formatError(error2, mapper = (issue2) => issue2.message) {
   const fieldErrors = { _errors: [] };
-  const processError = (error3, path11 = []) => {
+  const processError = (error3, path12 = []) => {
     for (const issue2 of error3.issues) {
       if (issue2.code === "invalid_union" && issue2.errors.length) {
-        issue2.errors.map((issues) => processError({ issues }, [...path11, ...issue2.path]));
+        issue2.errors.map((issues) => processError({ issues }, [...path12, ...issue2.path]));
       } else if (issue2.code === "invalid_key") {
-        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
       } else if (issue2.code === "invalid_element") {
-        processError({ issues: issue2.issues }, [...path11, ...issue2.path]);
+        processError({ issues: issue2.issues }, [...path12, ...issue2.path]);
       } else {
-        const fullpath = [...path11, ...issue2.path];
+        const fullpath = [...path12, ...issue2.path];
         if (fullpath.length === 0) {
           fieldErrors._errors.push(mapper(issue2));
         } else {
@@ -22982,9 +22982,9 @@ var StdioServerTransport = class {
 };
 
 // src/index.ts
-import path10 from "node:path";
+import path11 from "node:path";
 import fs10 from "node:fs";
-import { homedir as homedir4, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/experimental/tasks/client.js
 var ExperimentalClientTasks = class {
@@ -25147,8 +25147,7 @@ var FEATURE_NAMES = [
 
 // src/policy/inventory-cache.ts
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+import path2 from "node:path";
 
 // src/session-id.ts
 import { randomUUID } from "node:crypto";
@@ -25162,6 +25161,17 @@ function resolveSessionId() {
     fallbackSessionId = randomUUID();
   }
   return fallbackSessionId;
+}
+
+// src/data-dir.ts
+import { homedir } from "node:os";
+import path from "node:path";
+var DEFAULT_DIR = ".glean";
+function serverDataDir() {
+  return process.env.PLUGIN_DATA_DIR || path.join(homedir(), DEFAULT_DIR);
+}
+function hostSharedDataDir() {
+  return process.env.CLAUDE_PLUGIN_DATA || path.join(homedir(), DEFAULT_DIR);
 }
 
 // src/policy/inventory-cache.ts
@@ -25179,9 +25189,8 @@ function lastInventoryDiagnostic() {
   return lastDiagnostic;
 }
 function inventoryCachePath() {
-  const base = process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), ".glean");
   const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
-  return path.join(base, "inventory", `${sessionId}.json`);
+  return path2.join(hostSharedDataDir(), "inventory", `${sessionId}.json`);
 }
 function unavailable(reason, diagnostic) {
   lastDiagnostic = diagnostic;
@@ -25507,16 +25516,15 @@ function evaluate(input) {
 
 // src/policy/cache.ts
 import fs3 from "node:fs";
-import path3 from "node:path";
-import os2 from "node:os";
+import path4 from "node:path";
 
 // src/atomic-write.ts
 import fs2 from "node:fs";
-import path2 from "node:path";
+import path3 from "node:path";
 function writeFileAtomicSync(filePath, data, mode) {
-  const tmpPath = path2.join(
-    path2.dirname(filePath),
-    `.${path2.basename(filePath)}.${process.pid}.tmp`
+  const tmpPath = path3.join(
+    path3.dirname(filePath),
+    `.${path3.basename(filePath)}.${process.pid}.tmp`
   );
   try {
     fs2.writeFileSync(tmpPath, data, { encoding: "utf-8", mode });
@@ -25533,8 +25541,7 @@ function writeFileAtomicSync(filePath, data, mode) {
 
 // src/policy/cache.ts
 function cachePath() {
-  const base = process.env.PLUGIN_DATA_DIR || path3.join(os2.homedir(), ".glean");
-  return path3.join(base, "policy-cache.json");
+  return path4.join(serverDataDir(), "policy-cache.json");
 }
 function readAll() {
   try {
@@ -25547,7 +25554,7 @@ function readAll() {
 function writeAll(data) {
   const file = cachePath();
   try {
-    fs3.mkdirSync(path3.dirname(file), { recursive: true, mode: 448 });
+    fs3.mkdirSync(path4.dirname(file), { recursive: true, mode: 448 });
     writeFileAtomicSync(file, JSON.stringify(data, null, 2), 384);
   } catch {
   }
@@ -26044,16 +26051,12 @@ function closeCallbackServer() {
 
 // src/token-store.ts
 import fs4 from "node:fs";
-import path4 from "node:path";
-import { homedir } from "node:os";
+import path5 from "node:path";
 var CREDENTIALS_FILENAME = "mcp-credentials.json";
 var DIR_MODE = 448;
 var FILE_MODE = 384;
-function resolveCredentialsDir() {
-  return process.env.PLUGIN_DATA_DIR || path4.join(homedir(), ".glean");
-}
 function credentialsFile() {
-  return path4.join(resolveCredentialsDir(), CREDENTIALS_FILENAME);
+  return path5.join(serverDataDir(), CREDENTIALS_FILENAME);
 }
 function loadCredentials() {
   try {
@@ -26066,7 +26069,7 @@ function loadCredentials() {
 function saveCredentials(tokens, clientInfo) {
   try {
     const filePath = credentialsFile();
-    const dir = path4.dirname(filePath);
+    const dir = path5.dirname(filePath);
     fs4.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
     fs4.chmodSync(dir, DIR_MODE);
     const data = { tokens, clientInfo };
@@ -26221,10 +26224,10 @@ var GleanOAuthClientProvider = class {
 // src/skill-writer.ts
 var import_yaml = __toESM(require_dist2(), 1);
 import fs5 from "node:fs/promises";
-import path5 from "node:path";
+import path6 from "node:path";
 function isInsideDir(filePath, dir) {
-  const resolved = path5.resolve(filePath);
-  return resolved.startsWith(path5.resolve(dir) + path5.sep);
+  const resolved = path6.resolve(filePath);
+  return resolved.startsWith(path6.resolve(dir) + path6.sep);
 }
 function parseFrontmatter(content) {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -26257,7 +26260,7 @@ async function evictStaleSkills(baseDir, maxAgeMs, log, now = Date.now()) {
   await Promise.all(
     entries.map(async (entry) => {
       if (!entry.isDirectory()) return;
-      const skillDir = path5.resolve(baseDir, entry.name);
+      const skillDir = path6.resolve(baseDir, entry.name);
       if (!isInsideDir(skillDir, baseDir)) return;
       try {
         const stat = await fs5.stat(skillDir);
@@ -26275,7 +26278,7 @@ async function evictStaleSkills(baseDir, maxAgeMs, log, now = Date.now()) {
 async function writeSkillsToDisk(skills, baseDir) {
   const index = [];
   for (const [skillName, fileMap] of Object.entries(skills)) {
-    const skillDir = path5.resolve(baseDir, skillName);
+    const skillDir = path6.resolve(baseDir, skillName);
     if (!isInsideDir(skillDir, baseDir)) {
       continue;
     }
@@ -26283,11 +26286,11 @@ async function writeSkillsToDisk(skills, baseDir) {
     await fs5.mkdir(skillDir, { recursive: true });
     const writtenFiles = [];
     for (const [filePath, content] of Object.entries(fileMap)) {
-      const fullPath = path5.resolve(skillDir, filePath);
+      const fullPath = path6.resolve(skillDir, filePath);
       if (!isInsideDir(fullPath, skillDir)) {
         continue;
       }
-      await fs5.mkdir(path5.dirname(fullPath), { recursive: true });
+      await fs5.mkdir(path6.dirname(fullPath), { recursive: true });
       const text = typeof content === "string" ? content : JSON.stringify(content);
       await fs5.writeFile(fullPath, text, "utf-8");
       writtenFiles.push(fullPath);
@@ -26358,8 +26361,7 @@ async function handleFindSkills(remoteClient, skillsBaseDir, args) {
 
 // src/tools/run-tool.ts
 import fs7 from "node:fs/promises";
-import os4 from "node:os";
-import path7 from "node:path";
+import path8 from "node:path";
 
 // src/policy/enforce.ts
 var SETUP_TOOL_NAME = "setup";
@@ -26436,8 +26438,8 @@ var FILE_ARGS_DISABLED_TEXT = "`file_args` is disabled for your Glean instance b
 
 // src/tools/approval-args.ts
 import fs6 from "node:fs/promises";
-import path6 from "node:path";
-import os3 from "node:os";
+import path7 from "node:path";
+import os from "node:os";
 var maxArgSectionLines = 8;
 var maxApprovalArgChars = 120;
 function safeJson(value) {
@@ -26509,11 +26511,11 @@ function formatArgumentsForFile(toolName, args) {
   return out.join("\n");
 }
 async function writeApprovalArgsFile(toolName, args) {
-  const base = process.env.PLUGIN_DATA_DIR || process.env.CLAUDE_PLUGIN_DATA || os3.tmpdir();
+  const base = process.env.PLUGIN_DATA_DIR || process.env.CLAUDE_PLUGIN_DATA || os.tmpdir();
   const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
-  const dir = path6.join(base, "glean-approvals", sessionId);
+  const dir = path7.join(base, "glean-approvals", sessionId);
   await fs6.mkdir(dir, { recursive: true });
-  const file = path6.join(dir, "glean-approval-args.md");
+  const file = path7.join(dir, "glean-approval-args.md");
   await fs6.writeFile(file, formatArgumentsForFile(toolName, args), "utf-8");
   return file;
 }
@@ -26564,7 +26566,7 @@ async function resolveFileArgs(fileArgs, baseArgs, inputSchema) {
         `file_args.${argName} must be a non-empty string path`
       );
     }
-    if (!path7.isAbsolute(filePathRaw)) {
+    if (!path8.isAbsolute(filePathRaw)) {
       throw new FileArgsError(
         `file_args.${argName} must be an absolute path; got "${filePathRaw}"`
       );
@@ -26619,7 +26621,7 @@ async function findToolJson(skillsBaseDir, toolName) {
     const skillDirs = await fs7.readdir(skillsBaseDir, { withFileTypes: true });
     for (const dir of skillDirs) {
       if (!dir.isDirectory()) continue;
-      const toolPath = path7.join(skillsBaseDir, dir.name, "tools", `${toolName}.json`);
+      const toolPath = path8.join(skillsBaseDir, dir.name, "tools", `${toolName}.json`);
       try {
         const content = await fs7.readFile(toolPath, "utf-8");
         return JSON.parse(content);
@@ -26659,9 +26661,8 @@ function primeElicitationCancellation(mcpServer2) {
   });
 }
 function permissionModeMarkerPath() {
-  const base = process.env.CLAUDE_PLUGIN_DATA || path7.join(os4.homedir(), ".glean");
   const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
-  return path7.join(base, "glean-hitl-mode", `${sessionId}.json`);
+  return path8.join(hostSharedDataDir(), "glean-hitl-mode", `${sessionId}.json`);
 }
 async function currentPermissionMode() {
   try {
@@ -26788,16 +26789,12 @@ function runToolAnnotations(enableHitl, clientSupportsElicitation) {
 
 // src/url-config-store.ts
 import fs8 from "node:fs";
-import path8 from "node:path";
-import { homedir as homedir2 } from "node:os";
+import path9 from "node:path";
 var CONFIG_FILENAME = "mcp-server-url.json";
 var DIR_MODE2 = 448;
 var FILE_MODE2 = 384;
-function resolveConfigDir() {
-  return process.env.PLUGIN_DATA_DIR || path8.join(homedir2(), ".glean");
-}
 function configFile() {
-  return path8.join(resolveConfigDir(), CONFIG_FILENAME);
+  return path9.join(serverDataDir(), CONFIG_FILENAME);
 }
 function loadServerUrl() {
   try {
@@ -26811,7 +26808,7 @@ function loadServerUrl() {
 }
 function saveServerUrl(url2) {
   const filePath = configFile();
-  const dir = path8.dirname(filePath);
+  const dir = path9.dirname(filePath);
   fs8.mkdirSync(dir, { recursive: true, mode: DIR_MODE2 });
   fs8.chmodSync(dir, DIR_MODE2);
   const data = { serverUrl: url2 };
@@ -26830,16 +26827,12 @@ function clearServerUrl() {
 
 // src/remote-tools-cache-store.ts
 import fs9 from "node:fs";
-import path9 from "node:path";
-import { homedir as homedir3 } from "node:os";
+import path10 from "node:path";
 var CACHE_FILENAME = "remote-tools-cache.json";
 var DIR_MODE3 = 448;
 var FILE_MODE3 = 384;
-function resolveCacheDir() {
-  return process.env.PLUGIN_DATA_DIR || path9.join(homedir3(), ".glean");
-}
 function cacheFile() {
-  return path9.join(resolveCacheDir(), CACHE_FILENAME);
+  return path10.join(serverDataDir(), CACHE_FILENAME);
 }
 function readStore() {
   try {
@@ -26855,7 +26848,7 @@ function readStore() {
 }
 function writeStore(store) {
   const filePath = cacheFile();
-  const dir = path9.dirname(filePath);
+  const dir = path10.dirname(filePath);
   fs9.mkdirSync(dir, { recursive: true, mode: DIR_MODE3 });
   fs9.chmodSync(dir, DIR_MODE3);
   writeFileAtomicSync(filePath, JSON.stringify(store, null, 2), FILE_MODE3);
@@ -27079,12 +27072,11 @@ var EMAIL_RESOLVE_FAILED_TEXT = `Double-check the email for typos and try again 
 var SETUP_NEEDED_ERROR = "Glean is not configured yet. Call the `setup` tool first to provide your Glean Server URL before using find_skills or run_tool.";
 var AUTH_REDIRECT_TO_SETUP_TEXT = "[SETUP_REQUIRED]\n\nAuthentication is required. Call the `setup` tool (no arguments) to sign in to Glean, then retry this tool.";
 function resolveLogPath() {
-  const base = process.env.PLUGIN_DATA_DIR || path10.join(homedir4(), ".glean");
-  return path10.join(base, "glean-server.log");
+  return path11.join(serverDataDir(), "glean-server.log");
 }
 var LOG_PATH = resolveLogPath();
 try {
-  const logDir = path10.dirname(LOG_PATH);
+  const logDir = path11.dirname(LOG_PATH);
   fs10.mkdirSync(logDir, { recursive: true, mode: 448 });
   fs10.chmodSync(logDir, 448);
 } catch {
@@ -27105,7 +27097,7 @@ function resolveSkillsBaseDir() {
   if (process.env.SKILLS_BASE_DIR) {
     return process.env.SKILLS_BASE_DIR;
   }
-  return path10.join(tmpdir(), "glean-skills-cache");
+  return path11.join(tmpdir(), "glean-skills-cache");
 }
 var server = new Server(
   { name: "glean", version: pluginVersionString() },
