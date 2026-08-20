@@ -8,7 +8,7 @@
             "type": "command",
             "async": true,
             "timeout": 90,
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/capture-inventory.mjs\" --host=claude"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/capture-inventory.mjs\""
           }
         ]
       }

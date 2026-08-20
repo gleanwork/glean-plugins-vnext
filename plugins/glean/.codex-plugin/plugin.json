@@ -7,7 +7,6 @@
   },
   "skills": "./skills/",
   "mcpServers": "./.mcp.codex.json",
-  "hooks": "./hooks/hooks.codex.json",
   "interface": {
     "displayName": "Glean vNext",
     "websiteURL": "https://www.glean.com/home",

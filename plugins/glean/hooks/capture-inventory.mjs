@@ -2,13 +2,15 @@
 // SessionStart hook: capture the configured-MCP-server inventory from the host's own
 // CLI and leave it where the MCP server can read it.
 //
-//   node capture-inventory.mjs --host=claude
-//   node capture-inventory.mjs --host=codex
+//   node capture-inventory.mjs
 //
-// The host is passed in rather than sniffed, so a Claude session never probes for the
-// Codex binary and vice versa. One script serves both because the privacy filter and
-// the credential handling below are a security control, and two copies of a security
-// control drift.
+// CLAUDE CODE ONLY. Codex was wired the same way -- its own `codex mcp list --json` parser
+// works, and its plugin.json carried a `hooks` pointer -- but Codex never invokes the hook.
+// Its trace log, at DEBUG level and 699k rows, mentions SessionStart, the hook filename and
+// the manifest exactly zero times, so it is not a sandbox or a path problem: this build does
+// not run plugin-declared hooks at all. That work is preserved on
+// mohit/inventory-codex-followup rather than shipped unreachable, and Codex reports
+// `unavailable` in the meantime, which is a defined value.
 //
 // WHY A HOOK AT ALL. `claude mcp list` health-checks every server, and health-checking a
 // stdio server means spawning it -- including this plugin. Verified: the spawned copy
@@ -36,11 +38,6 @@ const execFileAsync = promisify(execFile);
 // configured server on Claude Code, so this scales with server count and network
 // latency; the hook is declared async so the wait costs the session nothing.
 const CLI_TIMEOUT_MS = 60_000;
-
-const hostArg = process.argv
-  .slice(2)
-  .find((a) => a.startsWith("--host="))
-  ?.slice("--host=".length);
 
 function readStdin() {
   try {
@@ -188,68 +185,6 @@ async function claudeMcpList(cwd) {
 
 // ------------------------------------------------------------------------ Codex
 
-// Installing the ChatGPT app puts the real codex binary INSIDE the app bundle and does
-// NOT add it to PATH, so a bare-name lookup finds nothing on a machine that plainly has
-// Codex installed. The bundle path is therefore a first-class candidate rather than a
-// fallback curiosity, and there is no exec-path env var to lean on.
-function codexCandidates() {
-  const candidates = [];
-  if (process.env.CODEX_EXECPATH) {
-    candidates.push({ file: process.env.CODEX_EXECPATH, shell: false });
-  }
-  if (process.platform === "darwin") {
-    for (const base of ["/Applications", path.join(os.homedir(), "Applications")]) {
-      for (const app of ["ChatGPT.app", "Codex.app"]) {
-        candidates.push({
-          file: path.join(base, app, "Contents", "Resources", "codex"),
-          shell: false,
-        });
-      }
-    }
-  }
-  candidates.push({ file: "codex", shell: process.platform === "win32" });
-  return candidates.filter((c) => !path.isAbsolute(c.file) || fs.existsSync(c.file));
-}
-
-// A closed enum, serialized snake_case. `unsupported` is NOT purely about
-// authentication: Codex builds its server list from configured servers but its auth
-// statuses from EFFECTIVE ones, defaulting to `unsupported` when a server is absent from
-// the latter. So it can mean "not currently in effect" rather than "has no auth
-// mechanism", and mapping it to anything but unknown would overstate what we know.
-function codexAuthStatus(raw) {
-  if (raw === "oauth" || raw === "bearer_token") return "authenticated";
-  if (raw === "not_logged_in") return "unauthenticated";
-  return "unknown";
-}
-
-async function codexMcpList(cwd) {
-  const run = await runCli(codexCandidates(), ["mcp", "list", "--json"], cwd);
-  if (!run.ok) return { reason: "cli-unavailable" };
-  let parsed;
-  try {
-    parsed = JSON.parse(run.stdout);
-  } catch {
-    return { reason: "cli-output-invalid" };
-  }
-  if (!Array.isArray(parsed)) return { reason: "cli-output-invalid" };
-
-  const rows = parsed.map((server) => {
-    const transport = server?.transport ?? {};
-    // Codex emits transport.env, http_headers, env_http_headers and
-    // bearer_token_env_var VERBATIM -- confirmed against a real configuration, on a
-    // plugin-provided server as well as a user-configured one. Nothing here copies the
-    // transport object; only the three fields the contract defines are read out of it,
-    // so a credential-bearing key cannot reach the payload even if a future release
-    // adds another one.
-    return {
-      name: String(server?.name ?? ""),
-      url: transport.url ? safeUrl(transport.url) : undefined,
-      authStatus: codexAuthStatus(server?.auth_status),
-    };
-  });
-  return { rows };
-}
-
 // ------------------------------------------------------------------------ shared
 
 async function runCli(candidates, args, cwd) {
@@ -296,18 +231,11 @@ function logHook(detail) {
 }
 
 async function main() {
-  // Logged before the host check so an unrecognized --host is still visible. Nothing here
-  // depends on the payload, which may not have been read yet.
-  if (hostArg !== "claude" && hostArg !== "codex") {
-    logHook({ outcome: "unknown-host" });
-    return;
-  }
-
   let payload = {};
   try {
     payload = JSON.parse(readStdin());
   } catch {
-    logHook({ host: hostArg, outcome: "unreadable-payload" });
+    logHook({ outcome: "unreadable-payload" });
     return;
   }
 
@@ -319,11 +247,7 @@ async function main() {
   if (!sessionId) {
     // The failure a host that names its identifier differently would produce, so it is
     // called out rather than folded into a generic bail.
-    logHook({
-      host: hostArg,
-      outcome: "no-session-id",
-      payloadKeys: Object.keys(payload).sort(),
-    });
+    logHook({ outcome: "no-session-id", payloadKeys: Object.keys(payload).sort() });
     return;
   }
 
@@ -334,8 +258,7 @@ async function main() {
   const cwd =
     typeof payload.cwd === "string" && payload.cwd ? payload.cwd : process.cwd();
 
-  const outcome =
-    hostArg === "claude" ? await claudeMcpList(cwd) : await codexMcpList(cwd);
+  const outcome = await claudeMcpList(cwd);
 
   // A negative marker rather than no file at all. "No capture happened" and "the capture
   // ran and came back with nothing" are different facts with different fixes -- the first
@@ -345,7 +268,7 @@ async function main() {
   // absolute binary path, which on a normal install contains the user's name.
   if (outcome.reason) {
     writeCache(sessionId, { source: "unavailable", reason: outcome.reason });
-    logHook({ host: hostArg, outcome: outcome.reason });
+    logHook({ outcome: outcome.reason });
     return;
   }
 
@@ -367,7 +290,7 @@ async function main() {
   }
 
   writeCache(sessionId, { source: "host-cli", servers, withheld });
-  logHook({ host: hostArg, outcome: "host-cli", servers: servers.length, withheld });
+  logHook({ outcome: "host-cli", servers: servers.length, withheld });
 }
 
 /**

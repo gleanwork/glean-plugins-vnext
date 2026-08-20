@@ -24,7 +24,6 @@ interface Run {
 }
 
 interface Options {
-  host: string;
   /** Text the stubbed CLI prints. Omit to stub a CLI that cannot run at all. */
   cliOutput?: string;
   /**
@@ -89,12 +88,12 @@ printf '%s' '${payload}'
   await new Promise<void>((resolve) => {
     const child = spawn(
       process.execPath,
-      [hook, `--host=${options.host}`],
+      [hook],
       {
         env: {
           CLAUDE_PLUGIN_DATA: dataDir,
           CLAUDE_CODE_EXECPATH: fakeCli,
-          CODEX_EXECPATH: fakeCli,
+          CLAUDE_CODE_EXECPATH: fakeCli,
           PATH: path.join(root, "no-such-bin"),
           HOME: root,
         },
@@ -127,69 +126,12 @@ const CLAUDE_REAL = [
   "chrome-devtools: npx -y chrome-devtools-mcp@latest --autoConnect --channel=beta - \u2718 Failed to connect \u2014 -32000: MCP error -32000: Connection closed",
 ].join("\n");
 
-// The real four-server payload from `codex mcp list --json` on the machine this was
-// built on, credential fields included verbatim -- which is how Codex actually emits
-// them, and therefore what the hook has to be trusted not to pass on.
-const CODEX_REAL = JSON.stringify([
-  {
-    name: "computer-use",
-    enabled: false,
-    auth_status: "unsupported",
-    transport: {
-      type: "stdio",
-      command: "node",
-      args: ["./computer-use.mjs"],
-      cwd: "/Users/someone/tools/computer-use",
-      env: { OPENAI_API_KEY: "sk-must-not-appear" },
-      env_vars: {},
-    },
-  },
-  {
-    name: "glean-local",
-    enabled: true,
-    auth_status: "unsupported",
-    transport: {
-      type: "stdio",
-      command: "node",
-      args: ["./start.mjs"],
-      cwd: "/Users/someone/.codex/plugins/cache/glean-plugins-vnext/glean-vnext/0.2.43/.",
-      env: { ENABLE_HITL: "true" },
-      env_vars: {},
-    },
-  },
-  {
-    name: "glean_default",
-    enabled: true,
-    auth_status: "not_logged_in",
-    transport: {
-      type: "streamable_http",
-      url: "https://scio-prod-be.glean.com/mcp/default?token=must-not-appear",
-      bearer_token_env_var: "GLEAN_API_TOKEN",
-      http_headers: { Authorization: "Bearer must-not-appear" },
-      env_http_headers: { "X-Secret": "must-not-appear" },
-    },
-  },
-  {
-    name: "node_repl",
-    enabled: true,
-    auth_status: "unsupported",
-    transport: {
-      type: "stdio",
-      command: "node",
-      args: ["--experimental-repl-await"],
-      cwd: "/Users/someone",
-      env: {},
-      env_vars: {},
-    },
-  },
-]);
-
 describe("claude mcp list capture", () => {
   // Only the remote Glean server is reported. Both stdio entries are withheld, including
   // this plugin's own: a stdio server exposes no URL and so can never be confirmed, and
   // reporting ours would add nothing the request's own plugin block does not already say.
   it("reports the Glean remote and withholds every stdio server", async () => {
-    const { cache } = await runHook({ host: "claude", cliOutput: CLAUDE_REAL });
+    const { cache } = await runHook({ cliOutput: CLAUDE_REAL });
 
     expect(cache).toMatchObject({
       source: "host-cli",
@@ -208,14 +150,13 @@ describe("claude mcp list capture", () => {
   // than carried and filtered later: a path discloses filesystem layout for no policy
   // benefit, and the surest way not to leak it is never to hold it.
   it("never reports a launch path", async () => {
-    const { raw } = await runHook({ host: "claude", cliOutput: CLAUDE_REAL });
+    const { raw } = await runHook({ cliOutput: CLAUDE_REAL });
     expect(raw).not.toContain("start.mjs");
     expect(raw).not.toContain("/Users/someone");
   });
 
   it("treats pending approval as unknown, not unauthenticated", async () => {
     const { cache } = await runHook({
-      host: "claude",
       cliOutput:
         "glean_default: https://acme-be.glean.com/mcp (HTTP) - \u23f8 Pending approval (run `claude` to approve)",
     });
@@ -229,7 +170,6 @@ describe("claude mcp list capture", () => {
 
   it("maps an explicit authentication prompt to unauthenticated", async () => {
     const { cache } = await runHook({
-      host: "claude",
       cliOutput:
         "glean_default: https://acme-be.glean.com/mcp (HTTP) - needs authentication",
     });
@@ -238,7 +178,6 @@ describe("claude mcp list capture", () => {
 
   it("maps a connection failure to unknown", async () => {
     const { cache } = await runHook({
-      host: "claude",
       cliOutput:
         "glean_default: https://acme-be.glean.com/mcp (HTTP) - \u2718 Failed to connect \u2014 -32000: MCP error -32000: Connection closed",
     });
@@ -249,7 +188,6 @@ describe("claude mcp list capture", () => {
   // inventory is indistinguishable from a user who genuinely has fewer servers.
   it("discards the whole inventory when any line does not parse", async () => {
     const { cache } = await runHook({
-      host: "claude",
       cliOutput: [
         "glean_default: https://acme-be.glean.com/mcp (HTTP) - \u2714 Connected",
         "a brand new output format nobody taught us",
@@ -263,7 +201,6 @@ describe("claude mcp list capture", () => {
 
   it("distinguishes a host with no servers from a host it could not ask", async () => {
     const { cache } = await runHook({
-      host: "claude",
       cliOutput: "No MCP servers configured. Use `claude mcp add` to add one.",
     });
     expect(cache).toMatchObject({ source: "host-cli", servers: [], withheld: 0 });
@@ -272,7 +209,7 @@ describe("claude mcp list capture", () => {
   // A marker rather than no file: "the hook never fired" and "the hook fired and could
   // not find the CLI" need different fixes and used to look identical.
   it("records that the CLI could not be run", async () => {
-    const { cache, raw } = await runHook({ host: "claude" });
+    const { cache, raw } = await runHook({});
     expect(cache?.reason).toBe("cli-unavailable");
     // Never the exec error: it carries an absolute binary path, and on a normal install
     // that path contains the user's name. Nor the working directory.
@@ -288,7 +225,6 @@ describe("claude mcp list capture", () => {
   // used for identification and discarded.
   it("writes no filesystem path of any kind", async () => {
     const { cache, raw, projectDir } = await runHook({
-      host: "claude",
       cliOutput: CLAUDE_REAL,
     });
 
@@ -299,95 +235,21 @@ describe("claude mcp list capture", () => {
   });
 });
 
-describe("codex mcp list capture", () => {
-  // `glean-local` in this fixture is a real server on the machine this was recorded from,
-  // genuinely Glean's, and still withheld: it is stdio. The name is never consulted.
-  it("reports only the Glean remote, withholding three stdio servers", async () => {
-    const { cache } = await runHook({ host: "codex", cliOutput: CODEX_REAL });
-
-    expect(cache).toMatchObject({
-      source: "host-cli",
-      servers: [
-        {
-          name: "glean_default",
-          url: "https://scio-prod-be.glean.com/mcp/default",
-          authStatus: "unauthenticated",
-        },
-      ],
-      withheld: 3,
-    });
-  });
-
-  // Codex emits transport.env, http_headers, env_http_headers and bearer_token_env_var
-  // verbatim, so using the CLI instead of config files does not make the payload safe.
-  // Every one of those appears in the fixture above.
-  it("lets no credential-bearing value through", async () => {
-    const { raw } = await runHook({ host: "codex", cliOutput: CODEX_REAL });
-
-    expect(raw).not.toContain("must-not-appear");
-    expect(raw).not.toContain("sk-");
-    for (const key of [
-      "env",
-      "env_vars",
-      "http_headers",
-      "env_http_headers",
-      "bearer_token_env_var",
-      "Authorization",
-    ]) {
-      expect(raw).not.toContain(key);
-    }
-  });
-
-  it("drops a query string that may carry a token", async () => {
-    const { cache, raw } = await runHook({ host: "codex", cliOutput: CODEX_REAL });
-    expect(raw).not.toContain("token=");
-    expect(cache?.servers?.find((s) => s.name === "glean_default")?.url).toBe(
-      "https://scio-prod-be.glean.com/mcp/default",
-    );
-  });
-
-  it("maps the auth enum to the three-value contract", async () => {
-    const { cache } = await runHook({
-      host: "codex",
-      cliOutput: JSON.stringify([
-        { name: "a", auth_status: "oauth", transport: { type: "streamable_http", url: "https://a.glean.com/mcp" } },
-        { name: "b", auth_status: "bearer_token", transport: { type: "streamable_http", url: "https://b.glean.com/mcp" } },
-        { name: "c", auth_status: "not_logged_in", transport: { type: "streamable_http", url: "https://c.glean.com/mcp" } },
-        { name: "d", auth_status: "unknown", transport: { type: "streamable_http", url: "https://d.glean.com/mcp" } },
-      ]),
-    });
-
-    expect(cache?.servers?.map((s) => [s.name, s.authStatus])).toEqual([
-      ["a", "authenticated"],
-      ["b", "authenticated"],
-      ["c", "unauthenticated"],
-      ["d", "unknown"],
-    ]);
-  });
-
-  it("writes nothing when the JSON is not the expected shape", async () => {
-    const { cache } = await runHook({
-      host: "codex",
-      cliOutput: JSON.stringify({ servers: [] }),
-    });
-    // Valid JSON of the wrong shape, which is a validation failure rather than a parse
-    // failure -- the same wire reason, because the remote cannot act on the difference,
-    // and the log keeps it.
-    expect(cache?.reason).toBe("cli-output-invalid");
-  });
-});
-
 // The control that keeps a customer's estate out of the payload. Its failure mode is
 // disclosure, so it gets the most cases.
+//
+// One risk left with the Codex parser: `codex mcp list --json` emits transport.env,
+// http_headers, env_http_headers and bearer_token_env_var verbatim, so entries had to be
+// rebuilt field by field rather than trusted. `claude mcp list` prints only
+// `name: target - status`, so there is no credential-bearing field to leak in the first
+// place. Dropping Codex removed that whole class of exposure from the shipping path; the
+// tests for it live on mohit/inventory-codex-followup with the parser.
 describe("the Glean-only filter", () => {
   const remote = (name: string, url: string) =>
-    JSON.stringify([
-      { name, auth_status: "oauth", transport: { type: "streamable_http", url } },
-    ]);
+    `${name}: ${url} (HTTP) - \u2714 Connected`;
 
   it("admits Glean's own domain", async () => {
     const { cache } = await runHook({
-      host: "codex",
       cliOutput: remote("glean_default", "https://anything-be.glean.com/mcp"),
     });
     expect(cache?.servers).toHaveLength(1);
@@ -400,7 +262,6 @@ describe("the Glean-only filter", () => {
   // side to fail on.
   it("does not admit a customer domain, even the configured one", async () => {
     const { cache } = await runHook({
-      host: "codex",
       configuredUrl: "https://mcp.acme.com/glean/mcp",
       cliOutput: remote("white-labeled", "https://mcp.acme.com/glean/mcp"),
     });
@@ -409,24 +270,27 @@ describe("the Glean-only filter", () => {
 
   it("is not fooled by a lookalike domain", async () => {
     const { cache } = await runHook({
-      host: "codex",
       cliOutput: remote("phish", "https://glean.com.evil.example/mcp"),
     });
     expect(cache).toMatchObject({ servers: [], withheld: 1 });
   });
 
-  // The name is never consulted, only the URL. Otherwise a directory or a server label
-  // containing "glean" would be as good as proof.
+  // Query strings on MCP URLs carry credentials and search-config parameters in the wild,
+  // so a URL is reduced to origin plus path. This is the one scrubbing rule that still
+  // applies with Codex gone, because Claude prints URLs verbatim.
+  it("drops a query string that may carry a token", async () => {
+    const { cache, raw } = await runHook({
+      cliOutput: remote("glean_default", "https://acme-be.glean.com/mcp?token=must-not-appear"),
+    });
+    expect(raw).not.toContain("must-not-appear");
+    expect(cache?.servers?.[0].url).toBe("https://acme-be.glean.com/mcp");
+  });
+
+  // The name is never consulted, only the URL. Otherwise a server label containing "glean"
+  // would be as good as proof.
   it("withholds a Glean-sounding stdio server", async () => {
     const { cache } = await runHook({
-      host: "codex",
-      cliOutput: JSON.stringify([
-        {
-          name: "glean-totally-legit",
-          auth_status: "unsupported",
-          transport: { type: "stdio", command: "node", cwd: "/Users/someone/gleanwork" },
-        },
-      ]),
+      cliOutput: "glean-totally-legit: node /Users/someone/gleanwork/server.mjs - \u2714 Connected",
     });
     expect(cache).toMatchObject({ servers: [], withheld: 1 });
   });
@@ -445,14 +309,8 @@ describe("the hook and the server agree on where the capture lives", () => {
     const hook = path.join(hookDir, "capture-inventory.mjs");
     await fs.copyFile(HOOK_SOURCE, hook);
 
-    const fakeCli = path.join(root, "fake-codex");
-    const payload = JSON.stringify([
-      {
-        name: "glean_default",
-        auth_status: "oauth",
-        transport: { type: "streamable_http", url: "https://acme-be.glean.com/mcp" },
-      },
-    ]);
+    const fakeCli = path.join(root, "fake-claude");
+    const payload = "glean_default: https://acme-be.glean.com/mcp (HTTP) - ✔ Connected";
     await fs.writeFile(
       fakeCli,
       `#!/bin/sh\nprintf '%s' '${payload}'\n`,
@@ -461,10 +319,10 @@ describe("the hook and the server agree on where the capture lives", () => {
 
     // Only CLAUDE_PLUGIN_DATA is set, because that is the only variable the hook can see.
     await new Promise<void>((resolve) => {
-      const child = spawn(process.execPath, [hook, "--host=codex"], {
+      const child = spawn(process.execPath, [hook], {
         env: {
           CLAUDE_PLUGIN_DATA: root,
-          CODEX_EXECPATH: fakeCli,
+          CLAUDE_CODE_EXECPATH: fakeCli,
           PATH: path.join(root, "no-such-bin"),
           HOME: root,
         },
@@ -505,18 +363,18 @@ describe("how the capture is written", () => {
 
     const hook = path.join(root, "capture-inventory.mjs");
     await fs.copyFile(HOOK_SOURCE, hook);
-    const fakeCli = path.join(root, "fake-codex");
+    const fakeCli = path.join(root, "fake-claude");
     await fs.writeFile(
       fakeCli,
-      `#!/bin/sh\nprintf '%s' '[{"name":"glean_default","auth_status":"oauth","transport":{"type":"streamable_http","url":"https://acme-be.glean.com/mcp"}}]'\n`,
+      `#!/bin/sh\nprintf '%s' 'glean_default: https://acme-be.glean.com/mcp (HTTP) - ✔ Connected'\n`,
       { mode: 0o755 },
     );
 
     await new Promise<void>((resolve) => {
-      const child = spawn(process.execPath, [hook, "--host=codex"], {
+      const child = spawn(process.execPath, [hook], {
         env: {
           CLAUDE_PLUGIN_DATA: dataDir,
-          CODEX_EXECPATH: fakeCli,
+          CLAUDE_CODE_EXECPATH: fakeCli,
           PATH: path.join(root, "no-such-bin"),
           HOME: root,
         },
@@ -543,18 +401,10 @@ describe("how the capture is written", () => {
 describe("hook preconditions", () => {
   it("writes nothing without a session id to key by", async () => {
     const { cache } = await runHook({
-      host: "claude",
       cliOutput: CLAUDE_REAL,
       sessionId: null,
     });
     expect(cache).toBeNull();
   });
 
-  // The host is passed in rather than sniffed, so a Claude session never probes for the
-  // Codex binary. An unrecognized value must therefore do nothing at all rather than
-  // fall back to trying everything.
-  it("writes nothing when the host is not one it knows", async () => {
-    const { cache } = await runHook({ host: "cursor", cliOutput: CLAUDE_REAL });
-    expect(cache).toBeNull();
-  });
 });
