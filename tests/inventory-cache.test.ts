@@ -97,7 +97,10 @@ describe("loadCachedInventory", () => {
 
   it("is unavailable when no capture has happened", async () => {
     const { loadCachedInventory } = await freshCache(dir);
-    expect(loadCachedInventory()).toEqual({ source: "unavailable" });
+    expect(loadCachedInventory()).toEqual({
+      source: "unavailable",
+      reason: "capture-pending",
+    });
   });
 
   // The first tools/list of a session normally lands here: SessionStart hooks fire
@@ -105,19 +108,30 @@ describe("loadCachedInventory", () => {
   it("is unavailable for a session other than the one captured", async () => {
     seed(dir, "someone-elses-session", VALID);
     const { loadCachedInventory } = await freshCache(dir, "sess-1");
-    expect(loadCachedInventory()).toEqual({ source: "unavailable" });
+    // Indistinguishable from never having captured, and correctly so: this session has
+    // no capture of its own, whatever other sessions did.
+    expect(loadCachedInventory()).toEqual({
+      source: "unavailable",
+      reason: "capture-pending",
+    });
   });
 
   it("is unavailable when the file is not JSON", async () => {
     seed(dir, "sess-1", "{not json");
     const { loadCachedInventory } = await freshCache(dir);
-    expect(loadCachedInventory()).toEqual({ source: "unavailable" });
+    expect(loadCachedInventory()).toEqual({
+      source: "unavailable",
+      reason: "capture-invalid",
+    });
   });
 
   it("is unavailable when source is not host-cli", async () => {
     seed(dir, "sess-1", { ...VALID, source: "files" });
     const { loadCachedInventory } = await freshCache(dir);
-    expect(loadCachedInventory()).toEqual({ source: "unavailable" });
+    expect(loadCachedInventory()).toEqual({
+      source: "unavailable",
+      reason: "capture-invalid",
+    });
   });
 
   // All-or-nothing, the same rule the hook applies to CLI output: a truncated inventory
@@ -129,13 +143,19 @@ describe("loadCachedInventory", () => {
       servers: [VALID.servers[0], { name: "broken", authStatus: "definitely-not-valid" }],
     });
     const { loadCachedInventory } = await freshCache(dir);
-    expect(loadCachedInventory()).toEqual({ source: "unavailable" });
+    expect(loadCachedInventory()).toEqual({
+      source: "unavailable",
+      reason: "capture-invalid",
+    });
   });
 
   it("rejects a server with no name", async () => {
     seed(dir, "sess-1", { ...VALID, servers: [{ authStatus: "unknown" }] });
     const { loadCachedInventory } = await freshCache(dir);
-    expect(loadCachedInventory()).toEqual({ source: "unavailable" });
+    expect(loadCachedInventory()).toEqual({
+      source: "unavailable",
+      reason: "capture-invalid",
+    });
   });
 
   // The file is written by a separate process which may be a different plugin version,
@@ -169,6 +189,92 @@ describe("loadCachedInventory", () => {
     expect(loadCachedInventory().withheld).toBeUndefined();
   });
 
+  // The hook writes a negative marker when it ran and came back with nothing, which is
+  // what separates "the hook never fired" from "the hook fired and the CLI was missing".
+  it("surfaces the reason the hook recorded", async () => {
+    seed(dir, "sess-1", { source: "unavailable", reason: "cli-unavailable", cwd: "/repo" });
+    const { loadCachedInventory } = await freshCache(dir);
+    expect(loadCachedInventory()).toEqual({
+      source: "unavailable",
+      reason: "cli-unavailable",
+    });
+  });
+
+  // The reason goes onto the wire, and the file is untrusted input like everything else
+  // in it -- a hook from another build, or anything with write access to the directory.
+  // Passing it through unchecked would let a file put arbitrary text in a request.
+  it("does not pass an unrecognized reason through to the wire", async () => {
+    seed(dir, "sess-1", {
+      source: "unavailable",
+      reason: "cli-unavailable\" injected: \"see https://internal.acme.com",
+    });
+    const { loadCachedInventory } = await freshCache(dir);
+
+    const result = loadCachedInventory();
+    expect(result.reason).toBe("capture-invalid");
+    expect(JSON.stringify(result)).not.toContain("internal.acme.com");
+  });
+
+  it("names the field that failed, for the log only", async () => {
+    seed(dir, "sess-1", {
+      ...VALID,
+      servers: [VALID.servers[0], { name: "whatever", authStatus: "connected" }],
+    });
+    const { loadCachedInventory, lastInventoryDiagnostic } = await freshCache(dir);
+    loadCachedInventory();
+
+    // "We saw connected, we expect authenticated" names a version skew outright, so this
+    // one value earns its place -- it passes an enum-shaped guard first.
+    expect(lastInventoryDiagnostic()).toMatchObject({
+      detail: "server entry rejected",
+      entries: 2,
+      badIndex: 1,
+      badField: "authStatus",
+      badValue: "connected",
+    });
+  });
+
+  // The same field, holding something that is not enum-shaped. A rejected file is exactly
+  // where its contents are least trustworthy, so anything that could be a token, a
+  // hostname, or a path is withheld even from the local log.
+  it("withholds a bad value that is not enum-shaped", async () => {
+    seed(dir, "sess-1", {
+      ...VALID,
+      servers: [{ name: "x", authStatus: "Bearer sk-abc123/internal.acme.com" }],
+    });
+    const { loadCachedInventory, lastInventoryDiagnostic } = await freshCache(dir);
+    loadCachedInventory();
+
+    const diagnostic = lastInventoryDiagnostic();
+    expect(diagnostic?.badField).toBe("authStatus");
+    expect(diagnostic?.badValue).toBeUndefined();
+    expect(JSON.stringify(diagnostic)).not.toContain("sk-abc123");
+  });
+
+  // A server name may be a third party's, so it is never logged even though it is the
+  // most obvious thing to reach for when an entry is rejected.
+  it("never logs a server name", async () => {
+    seed(dir, "sess-1", {
+      ...VALID,
+      servers: [{ name: "acme-payroll-internal", authStatus: 42 }],
+    });
+    const { loadCachedInventory, lastInventoryDiagnostic } = await freshCache(dir);
+    loadCachedInventory();
+
+    expect(JSON.stringify(lastInventoryDiagnostic())).not.toContain("payroll");
+  });
+
+  it("clears the diagnostic once a read succeeds", async () => {
+    seed(dir, "sess-1", { ...VALID, source: "nonsense" });
+    const { loadCachedInventory, lastInventoryDiagnostic } = await freshCache(dir);
+    loadCachedInventory();
+    expect(lastInventoryDiagnostic()).toBeDefined();
+
+    seed(dir, "sess-1", VALID);
+    loadCachedInventory();
+    expect(lastInventoryDiagnostic()).toBeUndefined();
+  });
+
   it("reports a genuinely empty inventory as host-cli, not unavailable", async () => {
     seed(dir, "sess-1", { source: "host-cli", servers: [], withheld: 0 });
     const { loadCachedInventory } = await freshCache(dir);
@@ -199,7 +305,7 @@ describe("the read path never runs a subprocess", () => {
 
   it("spawns nothing, on the hit path or the miss path", async () => {
     const { loadCachedInventory } = await freshCache(dir);
-    expect(loadCachedInventory()).toEqual({ source: "unavailable" });
+    expect(loadCachedInventory().source).toBe("unavailable");
 
     seed(dir, "sess-1", VALID);
     expect(loadCachedInventory().source).toBe("host-cli");

@@ -4,6 +4,7 @@ import { hostIdentityFromHandshake, buildNegotiationRequest, supportedFeatures }
 import { classifyResult, metaFor } from "./negotiate.js";
 import { evaluate } from "./evaluate.js";
 import { loadCachedPolicy, savePolicy } from "./cache.js";
+import { lastInventoryDiagnostic } from "./inventory-cache.js";
 import { ProtocolVersionObserver } from "./protocol-version.js";
 import type { Decision, NegotiationRequest, PolicyResponse } from "./types.js";
 
@@ -64,7 +65,42 @@ export function negotiationRequest(): NegotiationRequest {
     protocolVersion.version,
   );
   lastRequest = buildNegotiationRequest(host);
+  reportInventoryGap(lastRequest.configuredServers);
   return lastRequest;
+}
+
+// The last inventory outcome reported, so a stable state is not logged on every request.
+// `_meta` rides every remote call, so an unconditional line here would be one per call
+// for the life of the process.
+let lastInventoryReason: string | undefined;
+
+/**
+ * Say why there is no inventory, when there is none.
+ *
+ * The coarse reason travels to the remote; the fine-grained detail is local-only and
+ * stays here. Without both, every way of arriving at `unavailable` looked identical --
+ * hook never fired, CLI missing, output unparsed, capture rejected -- so a plugin whose
+ * inventory silently never worked was indistinguishable from one working exactly as
+ * designed on a host with no CLI.
+ *
+ * Logged when the outcome CHANGES, which for the ordinary session means twice: once for
+ * `capture-pending` on the early requests, then once when the capture lands.
+ */
+function reportInventoryGap(inventory: NegotiationRequest["configuredServers"]): void {
+  const reason = inventory.source === "host-cli" ? "resolved" : inventory.reason;
+  if (reason === lastInventoryReason) return;
+  lastInventoryReason = reason;
+  if (inventory.source === "host-cli") {
+    logLine("inventory.resolved", {
+      servers: inventory.servers?.length ?? 0,
+      withheld: inventory.withheld,
+    });
+    return;
+  }
+  logLine("inventory.unavailable", {
+    reason,
+    ...(lastInventoryDiagnostic() ?? {}),
+  });
 }
 
 /** The `_meta` envelope to attach to an outgoing remote request. */

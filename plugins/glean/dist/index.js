@@ -25170,39 +25170,106 @@ var AUTH_STATUSES = /* @__PURE__ */ new Set([
   "unauthenticated",
   "unknown"
 ]);
+var HOOK_REASONS = /* @__PURE__ */ new Set([
+  "cli-unavailable",
+  "cli-output-invalid"
+]);
+var lastDiagnostic;
+function lastInventoryDiagnostic() {
+  return lastDiagnostic;
+}
 function inventoryCachePath() {
   const base = process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), ".glean");
   const sessionId = resolveSessionId().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64);
   return path.join(base, "inventory", `${sessionId}.json`);
 }
-function loadCachedInventory() {
-  try {
-    const raw = fs.readFileSync(inventoryCachePath(), "utf-8");
-    const parsed = JSON.parse(raw);
-    if (parsed?.source !== "host-cli" || !Array.isArray(parsed.servers)) {
-      return { source: "unavailable" };
-    }
-    const servers = [];
-    for (const entry of parsed.servers) {
-      const server2 = validateServer(entry);
-      if (!server2) return { source: "unavailable" };
-      servers.push(server2);
-    }
-    const withheld = typeof parsed.withheld === "number" && Number.isInteger(parsed.withheld) && parsed.withheld >= 0 ? parsed.withheld : void 0;
-    return withheld === void 0 ? { source: "host-cli", servers } : { source: "host-cli", servers, withheld };
-  } catch {
-    return { source: "unavailable" };
-  }
+function unavailable(reason, diagnostic) {
+  lastDiagnostic = diagnostic;
+  return { source: "unavailable", reason };
 }
-function validateServer(entry) {
-  if (!entry || typeof entry !== "object") return void 0;
-  const { name, url: url2, authStatus } = entry;
-  if (typeof name !== "string" || !name) return void 0;
-  if (typeof authStatus !== "string" || !AUTH_STATUSES.has(authStatus)) {
-    return void 0;
+function loadCachedInventory() {
+  let raw;
+  try {
+    raw = fs.readFileSync(inventoryCachePath(), "utf-8");
+  } catch (err) {
+    const code = err?.code;
+    return unavailable("capture-pending", {
+      detail: code === "ENOENT" ? "no capture file" : `unreadable (${code ?? "unknown"})`
+    });
   }
-  if (url2 !== void 0 && typeof url2 !== "string") return void 0;
-  return url2 === void 0 ? { name, authStatus } : { name, url: url2, authStatus };
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return unavailable("capture-invalid", { detail: "not JSON", bytes: raw.length });
+  }
+  if (parsed?.source === "unavailable") {
+    if (typeof parsed.reason === "string" && HOOK_REASONS.has(parsed.reason)) {
+      return unavailable(parsed.reason, {
+        detail: "hook reported no inventory"
+      });
+    }
+    return unavailable("capture-invalid", {
+      detail: "hook reason not recognized",
+      badField: "reason",
+      badType: typeof parsed.reason
+    });
+  }
+  if (parsed?.source !== "host-cli") {
+    return unavailable("capture-invalid", {
+      detail: "source not recognized",
+      badField: "source",
+      badType: typeof parsed?.source
+    });
+  }
+  if (!Array.isArray(parsed.servers)) {
+    return unavailable("capture-invalid", {
+      detail: "servers is not an array",
+      badField: "servers",
+      badType: typeof parsed.servers
+    });
+  }
+  const servers = [];
+  for (const [index, entry] of parsed.servers.entries()) {
+    const outcome = validateServer(entry);
+    if ("bad" in outcome) {
+      return unavailable("capture-invalid", {
+        detail: "server entry rejected",
+        entries: parsed.servers.length,
+        badIndex: index,
+        ...outcome.bad
+      });
+    }
+    servers.push(outcome.server);
+  }
+  const withheld = typeof parsed.withheld === "number" && Number.isInteger(parsed.withheld) && parsed.withheld >= 0 ? parsed.withheld : void 0;
+  lastDiagnostic = void 0;
+  return withheld === void 0 ? { source: "host-cli", servers } : { source: "host-cli", servers, withheld };
+}
+var ENUM_SHAPED = /^[a-z_-]{1,32}$/;
+function validateServer(entry) {
+  if (!entry || typeof entry !== "object") {
+    return { bad: { badField: "(entry)", badType: typeof entry } };
+  }
+  const { name, url: url2, authStatus } = entry;
+  if (typeof name !== "string" || !name) {
+    return { bad: { badField: "name", badType: typeof name } };
+  }
+  if (typeof authStatus !== "string" || !AUTH_STATUSES.has(authStatus)) {
+    return {
+      bad: {
+        badField: "authStatus",
+        badType: typeof authStatus,
+        badValue: typeof authStatus === "string" && ENUM_SHAPED.test(authStatus) ? authStatus : void 0
+      }
+    };
+  }
+  if (url2 !== void 0 && typeof url2 !== "string") {
+    return { bad: { badField: "url", badType: typeof url2 } };
+  }
+  return {
+    server: url2 === void 0 ? { name, authStatus } : { name, url: url2, authStatus }
+  };
 }
 
 // src/policy/context.ts
@@ -25597,7 +25664,25 @@ function negotiationRequest() {
     protocolVersion.version
   );
   lastRequest = buildNegotiationRequest(host);
+  reportInventoryGap(lastRequest.configuredServers);
   return lastRequest;
+}
+var lastInventoryReason;
+function reportInventoryGap(inventory2) {
+  const reason = inventory2.source === "host-cli" ? "resolved" : inventory2.reason;
+  if (reason === lastInventoryReason) return;
+  lastInventoryReason = reason;
+  if (inventory2.source === "host-cli") {
+    logLine("inventory.resolved", {
+      servers: inventory2.servers?.length ?? 0,
+      withheld: inventory2.withheld
+    });
+    return;
+  }
+  logLine("inventory.unavailable", {
+    reason,
+    ...lastInventoryDiagnostic() ?? {}
+  });
 }
 function negotiationMeta() {
   return metaFor(negotiationRequest());

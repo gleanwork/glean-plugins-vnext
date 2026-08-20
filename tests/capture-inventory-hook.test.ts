@@ -17,6 +17,7 @@ interface Run {
     servers?: { name: string; url?: string; authStatus: string }[];
     withheld?: number;
     cwd?: string;
+    reason?: string;
   } | null;
   raw: string | null;
   projectDir: string;
@@ -255,7 +256,7 @@ describe("claude mcp list capture", () => {
 
   // All-or-nothing. One unrecognized line means the format shifted, and a truncated
   // inventory is indistinguishable from a user who genuinely has fewer servers.
-  it("writes nothing when any line does not parse", async () => {
+  it("discards the whole inventory when any line does not parse", async () => {
     const { cache } = await runHook({
       host: "claude",
       cliOutput: [
@@ -263,7 +264,13 @@ describe("claude mcp list capture", () => {
         "a brand new output format nobody taught us",
       ].join("\n"),
     });
-    expect(cache).toBeNull();
+    // The one recognized line is discarded with the rest, and the marker names why so a
+    // format shift is diagnosable rather than merely absent.
+    expect(cache).toMatchObject({
+      source: "unavailable",
+      reason: "cli-output-invalid",
+    });
+    expect(cache?.servers).toBeUndefined();
   });
 
   it("distinguishes a host with no servers from a host it could not ask", async () => {
@@ -274,9 +281,19 @@ describe("claude mcp list capture", () => {
     expect(cache).toMatchObject({ source: "host-cli", servers: [], withheld: 0 });
   });
 
-  it("writes nothing when the CLI cannot be run", async () => {
-    const { cache } = await runHook({ host: "claude" });
-    expect(cache).toBeNull();
+  // A marker rather than no file: "the hook never fired" and "the hook fired and could
+  // not find the CLI" need different fixes and used to look identical.
+  it("records that the CLI could not be run", async () => {
+    const { cache, raw } = await runHook({ host: "claude" });
+    expect(cache).toMatchObject({
+      source: "unavailable",
+      reason: "cli-unavailable",
+    });
+    // Never the exec error: it carries an absolute binary path, and on a normal install
+    // that path contains the user's name.
+    expect(raw).not.toContain("ENOENT");
+    expect(raw).not.toContain("EACCES");
+    expect(raw).not.toContain("fake-cli");
   });
 
   it("records the session's cwd it was handed, not its own", async () => {
@@ -361,7 +378,13 @@ describe("codex mcp list capture", () => {
       host: "codex",
       cliOutput: JSON.stringify({ servers: [] }),
     });
-    expect(cache).toBeNull();
+    // Valid JSON of the wrong shape, which is a validation failure rather than a parse
+    // failure -- the same wire reason, because the remote cannot act on the difference,
+    // and the log keeps it.
+    expect(cache).toMatchObject({
+      source: "unavailable",
+      reason: "cli-output-invalid",
+    });
   });
 });
 

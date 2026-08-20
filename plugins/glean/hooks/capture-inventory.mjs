@@ -17,10 +17,13 @@
 // per level. A hook is a separate process that the MCP server never invokes, so the
 // recursion has no edge to travel along.
 //
-// Failure is always silent and always means "unavailable": we write nothing and exit 0.
-// `unavailable` is a defined value in the contract -- it carries no servers and implies
-// nothing about the user's setup -- so a missing file is a correct answer, while a
-// partial or guessed one is not.
+// Failure is never fatal and never loud: the hook exits 0 whatever happens, because a
+// hook that cannot capture an inventory must not be a hook that breaks a session. But it
+// is no longer silent. When the capture runs and comes back with nothing it writes a
+// negative marker carrying an enumerated reason, so "the hook never fired" and "the hook
+// fired and the CLI was missing" stop looking identical. Only codes are written, never an
+// error string: an exec failure carries an absolute binary path, which on a normal install
+// contains the user's name.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -237,18 +240,18 @@ function claudeAuthStatus(status) {
 
 async function claudeMcpList(cwd) {
   const run = await runCli(claudeCandidates(), ["mcp", "list"], cwd);
-  if (!run.ok) return undefined;
+  if (!run.ok) return { reason: "cli-unavailable" };
 
   const rows = [];
   for (const line of run.stdout.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("Checking MCP server health")) continue;
-    if (/^No MCP servers configured/i.test(trimmed)) return [];
+    if (/^No MCP servers configured/i.test(trimmed)) return { rows: [] };
     const parsed = parseClaudeMcpLine(trimmed);
     // All-or-nothing. One unrecognized line means the format shifted, and a truncated
     // inventory is indistinguishable from a user who genuinely has fewer servers -- so
     // it is discarded entirely in favour of `unavailable`.
-    if (!parsed) return undefined;
+    if (!parsed) return { reason: "cli-output-invalid" };
     rows.push({
       name: parsed.name,
       url: parsed.remote ? safeUrl(parsed.target) : undefined,
@@ -256,7 +259,7 @@ async function claudeMcpList(cwd) {
       authStatus: claudeAuthStatus(parsed.status),
     });
   }
-  return rows;
+  return { rows };
 }
 
 // ------------------------------------------------------------------------ Codex
@@ -297,16 +300,16 @@ function codexAuthStatus(raw) {
 
 async function codexMcpList(cwd) {
   const run = await runCli(codexCandidates(), ["mcp", "list", "--json"], cwd);
-  if (!run.ok) return undefined;
+  if (!run.ok) return { reason: "cli-unavailable" };
   let parsed;
   try {
     parsed = JSON.parse(run.stdout);
   } catch {
-    return undefined;
+    return { reason: "cli-output-invalid" };
   }
-  if (!Array.isArray(parsed)) return undefined;
+  if (!Array.isArray(parsed)) return { reason: "cli-output-invalid" };
 
-  return parsed.map((server) => {
+  const rows = parsed.map((server) => {
     const transport = server?.transport ?? {};
     // Codex emits transport.env, http_headers, env_http_headers and
     // bearer_token_env_var VERBATIM -- confirmed against a real configuration, on a
@@ -321,6 +324,7 @@ async function codexMcpList(cwd) {
       authStatus: codexAuthStatus(server?.auth_status),
     };
   });
+  return { rows };
 }
 
 // ------------------------------------------------------------------------ shared
@@ -370,14 +374,24 @@ async function main() {
   const cwd =
     typeof payload.cwd === "string" && payload.cwd ? payload.cwd : process.cwd();
 
-  const rows =
+  const outcome =
     hostArg === "claude" ? await claudeMcpList(cwd) : await codexMcpList(cwd);
-  if (!rows) return;
+
+  // A negative marker rather than no file at all. "No capture happened" and "the capture
+  // ran and came back with nothing" are different facts with different fixes -- the first
+  // means the hook never fired, the second means the CLI could not be found or its output
+  // was not understood -- and writing nothing made them indistinguishable, both on the
+  // wire and in the log. Only enumerated codes are written: an exec error would carry an
+  // absolute binary path, which on a normal install contains the user's name.
+  if (outcome.reason) {
+    writeCache(sessionId, { source: "unavailable", reason: outcome.reason, cwd });
+    return;
+  }
 
   const knownHost = configuredHost();
   const servers = [];
   let withheld = 0;
-  for (const row of rows) {
+  for (const row of outcome.rows) {
     const keep = row.url
       ? isGleanUrl(row.url, knownHost)
       : isOurPlugin(row.launchPath);
@@ -395,18 +409,22 @@ async function main() {
     );
   }
 
+  writeCache(sessionId, { source: "host-cli", servers, withheld, cwd });
+}
+
+/** Written via temp+rename so the server never reads a half-written file. */
+function writeCache(sessionId, body) {
   const dir = path.join(dataDir(), "inventory");
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = path.join(dir, `${sessionId}.json`);
   const tmp = `${file}.${process.pid}.tmp`;
-  const body = JSON.stringify(
-    { source: "host-cli", servers, withheld, cwd, capturedAt: new Date().toISOString() },
+  const payload = JSON.stringify(
+    { ...body, capturedAt: new Date().toISOString() },
     null,
     2,
   );
-  // Written via temp+rename so the server never reads a half-written file. Same
-  // filesystem, so the rename is atomic.
-  fs.writeFileSync(tmp, body, { encoding: "utf-8", mode: 0o600 });
+  fs.writeFileSync(tmp, payload, { encoding: "utf-8", mode: 0o600 });
+  // Same filesystem, so the rename is atomic.
   fs.renameSync(tmp, file);
 }
 
