@@ -166,34 +166,33 @@ export const FILE_ARGS_DISABLED_TEXT =
  * refused on call. The remote's catalog is the remote's business, so it is gone and this
  * is the single authoritative list.
  *
- * Every clause is derived rather than asserted, because every one of them moves:
- * `metaTools` and `toolPromotion` are policy, and deactivation withdraws all of it.
- * Meta-tool names come from META_TOOL_NAMES so this cannot drift from what
- * advertisedTools() actually serves.
+ * Scoped to naming tools and nothing else. Deactivation status and the remote's upgrade
+ * message belong to policySummary(), which prints them a few lines above -- stating the
+ * consequence here as well duplicated it, and when the remote supplied its own wording
+ * the specific instruction ("Run `claude plugin update glean`") was immediately followed
+ * by a vaguer restatement of it.
+ *
+ * No deactivation branch is needed to achieve that: evaluate() reports every feature as
+ * false when deactivated, so the empty case below is reached without asking. Meta-tool
+ * names come from META_TOOL_NAMES so this cannot drift from what advertisedTools()
+ * actually serves.
  */
 export function setupClosingLine(input: {
   decision: Decision;
   promoted: readonly string[];
 }): string {
   const { decision, promoted } = input;
-  if (decision.deactivated) {
-    return (
-      `This plugin version is not supported by your Glean instance, so only ` +
-      `\`${SETUP_TOOL_NAME}\` is available. Upgrade the Glean plugin to restore the rest.`
-    );
-  }
   const usable = [
     ...(decision.features.metaTools ? [...META_TOOL_NAMES] : []),
     ...(decision.features.toolPromotion ? promoted : []),
   ];
-  // Reachable without deactivation: a policy may disable metaTools and toolPromotion
-  // together, which leaves `setup` as the only callable tool. Without this branch the
-  // sentence degrades to "You can now use ."
+  // Two ways to get here, deliberately answered the same way: a deactivated plugin, and
+  // a policy that disables metaTools and toolPromotion together without deactivating.
+  // The cause is on the `Policy:`/`Deactivated:` lines above; this states only the
+  // consequence, because without it the second case leaves the feature JSON as the sole
+  // hint that nothing is callable. Unguarded, the sentence degrades to "You can now use ."
   if (usable.length === 0) {
-    return (
-      `Remote policy has disabled the tools this plugin provides, so only ` +
-      `\`${SETUP_TOOL_NAME}\` is available.`
-    );
+    return `No tools are available beyond \`${SETUP_TOOL_NAME}\`.`;
   }
   return `You can now use ${usable.join(", ")}.`;
 }

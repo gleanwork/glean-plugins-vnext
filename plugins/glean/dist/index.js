@@ -26451,15 +26451,12 @@ This version of the Glean plugin is not supported by your Glean instance, so onl
 var FILE_ARGS_DISABLED_TEXT = "`file_args` is disabled for your Glean instance by remote policy, so no file was read and the tool was not executed. Retry `run_tool` with the values inline in `arguments` instead.";
 function setupClosingLine(input) {
   const { decision: decision2, promoted } = input;
-  if (decision2.deactivated) {
-    return `This plugin version is not supported by your Glean instance, so only \`${SETUP_TOOL_NAME}\` is available. Upgrade the Glean plugin to restore the rest.`;
-  }
   const usable = [
     ...decision2.features.metaTools ? [...META_TOOL_NAMES] : [],
     ...decision2.features.toolPromotion ? promoted : []
   ];
   if (usable.length === 0) {
-    return `Remote policy has disabled the tools this plugin provides, so only \`${SETUP_TOOL_NAME}\` is available.`;
+    return `No tools are available beyond \`${SETUP_TOOL_NAME}\`.`;
   }
   return `You can now use ${usable.join(", ")}.`;
 }

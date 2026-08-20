@@ -375,18 +375,42 @@ describe("setupClosingLine", () => {
     });
 
     // Not "You can now use ." -- the empty join is the failure this branch exists for.
-    expect(line).toContain("only `setup` is available");
+    // Reached without the deactivated flag, which is why the branch cannot key on it.
+    expect(line).toBe("No tools are available beyond `setup`.");
     expect(line).not.toContain("You can now use");
   });
 
-  it("tells a deactivated install to upgrade rather than listing tools", () => {
+  // Deactivation reaches the empty case through evaluate(), which reports every feature
+  // as false -- so this needs no branch of its own, and asserting it here is what pins
+  // that. The status and the upgrade instruction are policySummary()'s, and saying them
+  // here as well was the duplication this scoping removes.
+  it("names no tools for a deactivated install, and does not restate the upgrade", () => {
     const line = setupClosingLine({
-      decision: decision({ deactivated: true }),
+      decision: decision({
+        deactivated: true,
+        features: { toolPromotion: false, metaTools: false, fileArgs: false },
+        showUpgrade: true,
+        upgradeMessage: "Run `claude plugin update glean`.",
+      }),
       promoted,
     });
 
-    expect(line).toContain("not supported by your Glean instance");
-    expect(line).toContain("Upgrade the Glean plugin");
+    expect(line).toBe("No tools are available beyond `setup`.");
+    expect(line).not.toContain("Upgrade");
+    expect(line).not.toContain("claude plugin update");
     expect(line).not.toContain("find_skills");
+  });
+
+  // The reason a deactivated decision must not be special-cased: evaluate() has already
+  // zeroed the features, so a branch keyed on the flag would be a second source of truth
+  // for the same fact.
+  it("is driven by the features, not by the deactivated flag", () => {
+    const asIfDeactivated = decision({
+      features: { toolPromotion: false, metaTools: false, fileArgs: false },
+    });
+
+    expect(setupClosingLine({ decision: asIfDeactivated, promoted })).toBe(
+      "No tools are available beyond `setup`.",
+    );
   });
 });
