@@ -25128,7 +25128,7 @@ var StreamableHTTPClientTransport = class {
 };
 
 // src/version.ts
-var BUILD_VERSION = true ? "0.2.48" : void 0;
+var BUILD_VERSION = true ? "0.2.49" : void 0;
 function pluginVersion() {
   if (BUILD_VERSION) return { version: BUILD_VERSION, source: "build" };
   return { version: "0.0.0", source: "unknown" };
@@ -26449,6 +26449,17 @@ This version of the Glean plugin is not supported by your Glean instance, so onl
   return void 0;
 }
 var FILE_ARGS_DISABLED_TEXT = "`file_args` is disabled for your Glean instance by remote policy, so no file was read and the tool was not executed. Retry `run_tool` with the values inline in `arguments` instead.";
+function setupClosingLine(input) {
+  const { decision: decision2, promoted } = input;
+  const usable = [
+    ...decision2.features.metaTools ? [...META_TOOL_NAMES] : [],
+    ...decision2.features.toolPromotion ? promoted : []
+  ];
+  if (usable.length === 0) {
+    return `No tools are available beyond \`${SETUP_TOOL_NAME}\`.`;
+  }
+  return `You can now use ${usable.join(", ")}.`;
+}
 
 // src/tools/approval-args.ts
 import fs6 from "node:fs/promises";
@@ -27393,12 +27404,10 @@ async function advanceSetup() {
     const remoteTools = await fetchAllowedRemoteTools(remoteClient);
     cachedRemoteTools = remoteTools;
     saveRemoteTools(serverUrl, remoteTools);
-    const toolNames = remoteTools.map((t) => t.name).join(", ") || "(none)";
-    const decision2 = decisionInForce();
-    const closing = decision2.deactivated ? `This plugin version is not supported by your Glean instance, so only \`setup\` is available. Upgrade the Glean plugin to restore the rest.` : `You can now use ` + [
-      ...decision2.features.metaTools ? ["find_skills", "run_tool"] : [],
-      ...decision2.features.toolPromotion && remoteTools.length > 0 ? ["any of the listed remote tools"] : []
-    ].join(", ") + `.`;
+    const closing = setupClosingLine({
+      decision: decisionInForce(),
+      promoted: remoteTools.map((t) => t.name)
+    });
     return {
       content: [
         {
@@ -27406,7 +27415,6 @@ async function advanceSetup() {
           text: `Glean setup is complete.
 Server URL: ${serverUrl}
 Authenticated: yes
-Remote tools: ${toolNames}
 ${policySummary().join("\n")}
 
 ` + closing

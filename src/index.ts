@@ -50,7 +50,7 @@ import {
   protocolVersion,
   setPolicyServerUrl,
 } from "./policy/session.js";
-import { advertisedTools, policyRefusal } from "./policy/enforce.js";
+import { advertisedTools, policyRefusal, setupClosingLine } from "./policy/enforce.js";
 
 function readEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -563,22 +563,10 @@ async function advanceSetup(): Promise<CallToolResult> {
     const remoteTools = await fetchAllowedRemoteTools(remoteClient);
     cachedRemoteTools = remoteTools;
     saveRemoteTools(serverUrl, remoteTools);
-    const toolNames = remoteTools.map((t) => t.name).join(", ") || "(none)";
-    // Derived from the decision rather than asserted. Naming find_skills and run_tool
-    // unconditionally would be wrong the moment policy withholds them, and actively
-    // misleading when the plugin is deactivated and only `setup` works.
-    const decision = decisionInForce();
-    const closing = decision.deactivated
-      ? `This plugin version is not supported by your Glean instance, so only ` +
-        `\`setup\` is available. Upgrade the Glean plugin to restore the rest.`
-      : `You can now use ` +
-        [
-          ...(decision.features.metaTools ? ["find_skills", "run_tool"] : []),
-          ...(decision.features.toolPromotion && remoteTools.length > 0
-            ? ["any of the listed remote tools"]
-            : []),
-        ].join(", ") +
-        `.`;
+    const closing = setupClosingLine({
+      decision: decisionInForce(),
+      promoted: remoteTools.map((t) => t.name),
+    });
     return {
       content: [
         {
@@ -587,7 +575,6 @@ async function advanceSetup(): Promise<CallToolResult> {
             `Glean setup is complete.\n` +
             `Server URL: ${serverUrl}\n` +
             `Authenticated: yes\n` +
-            `Remote tools: ${toolNames}\n` +
             // Surfacing the negotiated context here is what makes a build with a
             // missing version constant, or an unobserved MCP revision, visible per
             // install rather than only in logs.
