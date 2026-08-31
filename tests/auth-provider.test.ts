@@ -28,15 +28,12 @@ describe("GleanOAuthClientProvider", () => {
 
   beforeEach(() => {
     delete process.env.PLUGIN_DATA_DIR;
-    // Skip the rotation grace window by default so invalidation tests don't
-    // wait out the real 2s poll; the grace test overrides this explicitly.
-    process.env.GLEAN_ROTATION_GRACE_MS = "0";
     fs.rmSync(gleanDir, { recursive: true, force: true });
     vi.clearAllMocks();
   });
 
   afterEach(() => {
-    delete process.env.GLEAN_ROTATION_GRACE_MS;
+    vi.useRealTimers();
     fs.rmSync(gleanDir, { recursive: true, force: true });
   });
 
@@ -174,7 +171,10 @@ describe("GleanOAuthClientProvider", () => {
     expect(provider.tokens()?.access_token).toBe("T0");
 
     // No sibling write since our snapshot → a genuine invalidation → clear.
-    await provider.invalidateCredentials("tokens");
+    vi.useFakeTimers();
+    const invalidation = provider.invalidateCredentials("tokens");
+    await vi.advanceTimersByTimeAsync(2000);
+    await invalidation;
 
     expect(provider.tokens()).toBeUndefined();
     const raw = JSON.parse(fs.readFileSync(credFile, "utf-8"));
@@ -183,7 +183,6 @@ describe("GleanOAuthClientProvider", () => {
 
   it("invalidateCredentials('tokens') adopts a token that lands during the grace window", async () => {
     // The winner's write lands just after the loser's invalid_grant.
-    process.env.GLEAN_ROTATION_GRACE_MS = "2000";
     const provider = new GleanOAuthClientProvider();
     provider.saveTokens({ access_token: "T0", refresh_token: "R0" } as any);
 

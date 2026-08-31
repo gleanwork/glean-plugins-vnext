@@ -25288,6 +25288,7 @@ async function callRemoteTool(client, name, args) {
 
 // src/auth-provider.ts
 import { execFile, spawn } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { platform } from "node:os";
 
 // src/auth-callback-server.ts
@@ -25419,19 +25420,8 @@ function clearCredentials() {
 }
 
 // src/auth-provider.ts
-var ROTATION_GRACE_MS_DEFAULT = 2e3;
+var ROTATION_GRACE_MS = 2e3;
 var ROTATION_POLL_MS = 100;
-function rotationGraceMs() {
-  const raw = process.env.GLEAN_ROTATION_GRACE_MS;
-  if (raw !== void 0) {
-    const parsed = Number.parseInt(raw, 10);
-    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
-  }
-  return ROTATION_GRACE_MS_DEFAULT;
-}
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 function openBrowser(url2) {
   if (platform() === "win32") {
     spawn("cmd", ["/c", "start", '""', "/b", url2.replace(/&/g, "^&")], {
@@ -25483,7 +25473,7 @@ var GleanOAuthClientProvider = class {
   // Wait for a sibling's refresh to land on disk. Returns true once a
   // different access token is available for adoption/retry.
   async waitForSiblingRefresh(previousAccessToken) {
-    const deadline = Date.now() + rotationGraceMs();
+    const deadline = Date.now() + ROTATION_GRACE_MS;
     for (; ; ) {
       const current = this.tokens()?.access_token;
       if (current && current !== previousAccessToken) return true;

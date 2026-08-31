@@ -5,6 +5,7 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { execFile, spawn } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { platform } from "node:os";
 import { getCallbackUrl, setExpectedState } from "./auth-callback-server.js";
 import {
@@ -16,21 +17,8 @@ import {
 export type InvalidationScope = "all" | "client" | "tokens" | "verifier";
 
 // Grace window for a sibling's in-flight refresh to land on disk.
-const ROTATION_GRACE_MS_DEFAULT = 2000;
+const ROTATION_GRACE_MS = 2000;
 const ROTATION_POLL_MS = 100;
-
-function rotationGraceMs(): number {
-  const raw = process.env.GLEAN_ROTATION_GRACE_MS;
-  if (raw !== undefined) {
-    const parsed = Number.parseInt(raw, 10);
-    if (Number.isFinite(parsed) && parsed >= 0) return parsed;
-  }
-  return ROTATION_GRACE_MS_DEFAULT;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /**
  * Open `url` in the user's default browser. Used for the self-open sign-in
@@ -104,7 +92,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   async waitForSiblingRefresh(
     previousAccessToken: string | undefined,
   ): Promise<boolean> {
-    const deadline = Date.now() + rotationGraceMs();
+    const deadline = Date.now() + ROTATION_GRACE_MS;
     for (;;) {
       const current = this.tokens()?.access_token;
       if (current && current !== previousAccessToken) return true;
