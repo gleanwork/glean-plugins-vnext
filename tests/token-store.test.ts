@@ -10,7 +10,7 @@ vi.mock("node:os", async () => {
   return { ...actual, homedir: () => tmpDir };
 });
 
-const { clearCredentials, credentialsMtimeMs, loadCredentials, saveCredentials } =
+const { clearCredentials, loadCredentials, saveCredentials } =
   await import("../src/token-store.js");
 
 describe("token-store", () => {
@@ -88,22 +88,4 @@ describe("token-store", () => {
     expect(() => clearCredentials()).not.toThrow();
   });
 
-  it("credentialsMtimeMs returns undefined when file does not exist", () => {
-    expect(credentialsMtimeMs()).toBeUndefined();
-  });
-
-  it("credentialsMtimeMs returns a number once credentials are saved", () => {
-    saveCredentials({ access_token: "x" }, undefined);
-    expect(typeof credentialsMtimeMs()).toBe("number");
-  });
-
-  it("credentialsMtimeMs advances when the file is rewritten", () => {
-    saveCredentials({ access_token: "x" }, undefined);
-    const first = credentialsMtimeMs()!;
-    // Force a strictly-newer mtime rather than relying on filesystem timer
-    // resolution between two quick writes.
-    const future = new Date(Date.now() + 10_000);
-    fs.utimesSync(credFile, future, future);
-    expect(credentialsMtimeMs()!).toBeGreaterThan(first);
-  });
 });

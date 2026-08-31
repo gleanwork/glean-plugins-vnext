@@ -28,18 +28,6 @@ export function loadCredentials(): StoredCredentials | undefined {
   }
 }
 
-/**
- * mtime of the credentials file (epoch ms), or undefined if unreadable.
- * Cheap change probe: a single stat, no read + parse.
- */
-export function credentialsMtimeMs(): number | undefined {
-  try {
-    return fs.statSync(credentialsFile()).mtimeMs;
-  } catch {
-    return undefined;
-  }
-}
-
 export function saveCredentials(tokens: unknown, clientInfo: unknown): void {
   try {
     const filePath = credentialsFile();

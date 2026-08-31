@@ -9,7 +9,6 @@ import { platform } from "node:os";
 import { getCallbackUrl, setExpectedState } from "./auth-callback-server.js";
 import {
   clearCredentials,
-  credentialsMtimeMs,
   loadCredentials,
   saveCredentials,
 } from "./token-store.js";
@@ -69,9 +68,6 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   // explicitly invalidating. Used to detect when a previous auth URL didn't
   // complete — likely because the server rejected the (stale) client_id.
   private _authUrlPending = false;
-  // mtime at last read; detects sibling rewrites of the shared store.
-  private _credentialsMtimeMs: number | undefined;
-
   authorizationUrl: string | undefined;
 
   /**
@@ -88,22 +84,12 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
       this._tokens = stored.tokens as OAuthTokens | undefined;
       this._clientInfo = stored.clientInfo as OAuthClientInformationMixed | undefined;
     }
-    this._credentialsMtimeMs = credentialsMtimeMs();
   }
 
-  // Re-read the shared store after a sibling process rewrites it, so we use
-  // the rotated grant instead of a stale in-memory copy.
+  // Re-read the shared store on every token access so a sibling's rotated
+  // grant is used instead of a stale in-memory copy.
   private syncTokensFromDisk(): void {
-    const mtimeMs = credentialsMtimeMs();
-    if (mtimeMs === undefined) return;
-    if (
-      this._credentialsMtimeMs !== undefined &&
-      mtimeMs <= this._credentialsMtimeMs
-    ) {
-      return;
-    }
     const stored = loadCredentials();
-    this._credentialsMtimeMs = mtimeMs;
     if (!stored) return;
     if (stored.tokens) {
       this._tokens = stored.tokens as OAuthTokens;
@@ -113,52 +99,8 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     }
   }
 
-  // On invalid_grant, adopt a sibling's newer on-disk token instead of
-  // clearing. Returns false when nothing newer exists.
-  private adoptNewerTokenFromDisk(): boolean {
-    const diskMtime = credentialsMtimeMs();
-    if (
-      diskMtime === undefined ||
-      this._credentialsMtimeMs === undefined ||
-      diskMtime <= this._credentialsMtimeMs
-    ) {
-      return false;
-    }
-    const stored = loadCredentials();
-    const diskTokens = stored?.tokens as OAuthTokens | undefined;
-    if (
-      !diskTokens?.access_token ||
-      diskTokens.access_token === this._tokens?.access_token
-    ) {
-      return false;
-    }
-    this._tokens = diskTokens;
-    this._credentialsMtimeMs = diskMtime;
-    if (stored?.clientInfo) {
-      this._clientInfo = stored.clientInfo as OAuthClientInformationMixed;
-    }
-    console.error(
-      "[auth] invalid_grant, but a newer token is on disk " +
-        "(sibling refresh) — adopting it instead of clearing",
-    );
-    return true;
-  }
-
-  // Poll briefly for the race winner's write before clearing. Skipped when
-  // no refresh token was held (no race possible).
-  private async adoptNewerTokenWithGrace(): Promise<boolean> {
-    if (this.adoptNewerTokenFromDisk()) return true;
-    if (!this._tokens?.refresh_token) return false;
-    const deadline = Date.now() + rotationGraceMs();
-    while (Date.now() < deadline) {
-      await sleep(ROTATION_POLL_MS);
-      if (this.adoptNewerTokenFromDisk()) return true;
-    }
-    return false;
-  }
-
-  // Grace-bounded wait for a sibling's refresh; covers failures the SDK does
-  // not route through invalidateCredentials (e.g. invalid_request collisions).
+  // Wait for a sibling's refresh to land on disk. Returns true once a
+  // different access token is available for adoption/retry.
   async waitForSiblingRefresh(
     previousAccessToken: string | undefined,
   ): Promise<boolean> {
@@ -189,7 +131,6 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   saveClientInformation(info: OAuthClientInformationMixed): void {
     this._clientInfo = info;
     saveCredentials(this._tokens, this._clientInfo);
-    this._credentialsMtimeMs = credentialsMtimeMs();
   }
 
   tokens(): OAuthTokens | undefined {
@@ -201,8 +142,6 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     this._tokens = tokens;
     this._authUrlPending = false;
     saveCredentials(this._tokens, this._clientInfo);
-    // Own write must not look like a sibling change.
-    this._credentialsMtimeMs = credentialsMtimeMs();
     this.onTokensChanged?.(tokens);
   }
 
@@ -221,12 +160,19 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
         this._clientInfo = undefined;
         saveCredentials(this._tokens, undefined);
         break;
-      case "tokens":
+      case "tokens": {
         // Usually a sibling's rotation — try adopting before clearing.
-        if (await this.adoptNewerTokenWithGrace()) return;
+        const previousAccessToken = this._tokens?.access_token;
+        if (
+          this._tokens?.refresh_token &&
+          (await this.waitForSiblingRefresh(previousAccessToken))
+        ) {
+          return;
+        }
         this._tokens = undefined;
         saveCredentials(undefined, this._clientInfo);
         break;
+      }
       case "verifier":
         this._codeVerifier = "";
         break;

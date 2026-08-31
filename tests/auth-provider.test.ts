@@ -82,16 +82,12 @@ describe("GleanOAuthClientProvider", () => {
 
   const credFile = path.join(gleanDir, "mcp-credentials.json");
 
-  function writeCredFileNewer(tokens: unknown, clientInfo?: unknown): void {
+  function writeCredFile(tokens: unknown, clientInfo?: unknown): void {
     fs.mkdirSync(gleanDir, { recursive: true });
     fs.writeFileSync(credFile, JSON.stringify({ tokens, clientInfo }));
-    // Guarantee a strictly-newer mtime than any prior read, independent of
-    // filesystem timestamp resolution.
-    const future = new Date(Date.now() + 10_000);
-    fs.utimesSync(credFile, future, future);
   }
 
-  it("tokens() adopts a newer token written by another process", () => {
+  it("tokens() adopts a token written by another process", () => {
     fs.mkdirSync(gleanDir, { recursive: true });
     fs.writeFileSync(
       credFile,
@@ -102,12 +98,15 @@ describe("GleanOAuthClientProvider", () => {
     );
     const provider = new GleanOAuthClientProvider();
     expect(provider.tokens()?.access_token).toBe("T0");
+    const originalMtime = fs.statSync(credFile).mtime;
 
     // Sibling refreshes: new access + rotated refresh token on disk.
-    writeCredFileNewer(
+    writeCredFile(
       { access_token: "T1", refresh_token: "R1" },
       { client_id: "cid" },
     );
+    // The provider must not rely on mtime to observe this rewrite.
+    fs.utimesSync(credFile, originalMtime, originalMtime);
 
     expect(provider.tokens()?.access_token).toBe("T1");
     expect(provider.tokens()?.refresh_token).toBe("R1");
@@ -137,11 +136,11 @@ describe("GleanOAuthClientProvider", () => {
     expect(provider.tokens()?.access_token).toBe("T0");
 
     // A client-only rewrite (tokens dropped) must not log us out in-memory.
-    writeCredFileNewer(undefined, { client_id: "cid" });
+    writeCredFile(undefined, { client_id: "cid" });
     expect(provider.tokens()?.access_token).toBe("T0");
   });
 
-  it("invalidateCredentials('tokens') adopts a sibling's newer token instead of wiping the store", async () => {
+  it("invalidateCredentials('tokens') adopts a sibling's token instead of wiping the store", async () => {
     fs.mkdirSync(gleanDir, { recursive: true });
     fs.writeFileSync(
       credFile,
@@ -153,8 +152,8 @@ describe("GleanOAuthClientProvider", () => {
     const provider = new GleanOAuthClientProvider();
     expect(provider.tokens()?.access_token).toBe("T0");
 
-    // A sibling refreshed + rotated: fresh grant now on disk with a newer mtime.
-    writeCredFileNewer(
+    // A sibling refreshed + rotated: fresh grant is now on disk.
+    writeCredFile(
       { access_token: "T1", refresh_token: "R1" },
       { client_id: "cid" },
     );
@@ -191,7 +190,7 @@ describe("GleanOAuthClientProvider", () => {
     const invalidation = provider.invalidateCredentials("tokens");
     // Sibling's write lands mid-window.
     setTimeout(() => {
-      writeCredFileNewer(
+      writeCredFile(
         { access_token: "T1", refresh_token: "R1" },
         { client_id: "cid" },
       );

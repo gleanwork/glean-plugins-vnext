@@ -25391,13 +25391,6 @@ function loadCredentials() {
     return void 0;
   }
 }
-function credentialsMtimeMs() {
-  try {
-    return fs.statSync(credentialsFile()).mtimeMs;
-  } catch {
-    return void 0;
-  }
-}
 function saveCredentials(tokens, clientInfo) {
   try {
     const filePath = credentialsFile();
@@ -25460,8 +25453,6 @@ var GleanOAuthClientProvider = class {
   // explicitly invalidating. Used to detect when a previous auth URL didn't
   // complete — likely because the server rejected the (stale) client_id.
   _authUrlPending = false;
-  // mtime at last read; detects sibling rewrites of the shared store.
-  _credentialsMtimeMs;
   authorizationUrl;
   /**
    * Optional hook invoked whenever the in-memory token state changes —
@@ -25476,18 +25467,11 @@ var GleanOAuthClientProvider = class {
       this._tokens = stored.tokens;
       this._clientInfo = stored.clientInfo;
     }
-    this._credentialsMtimeMs = credentialsMtimeMs();
   }
-  // Re-read the shared store after a sibling process rewrites it, so we use
-  // the rotated grant instead of a stale in-memory copy.
+  // Re-read the shared store on every token access so a sibling's rotated
+  // grant is used instead of a stale in-memory copy.
   syncTokensFromDisk() {
-    const mtimeMs = credentialsMtimeMs();
-    if (mtimeMs === void 0) return;
-    if (this._credentialsMtimeMs !== void 0 && mtimeMs <= this._credentialsMtimeMs) {
-      return;
-    }
     const stored = loadCredentials();
-    this._credentialsMtimeMs = mtimeMs;
     if (!stored) return;
     if (stored.tokens) {
       this._tokens = stored.tokens;
@@ -25496,42 +25480,8 @@ var GleanOAuthClientProvider = class {
       this._clientInfo = stored.clientInfo;
     }
   }
-  // On invalid_grant, adopt a sibling's newer on-disk token instead of
-  // clearing. Returns false when nothing newer exists.
-  adoptNewerTokenFromDisk() {
-    const diskMtime = credentialsMtimeMs();
-    if (diskMtime === void 0 || this._credentialsMtimeMs === void 0 || diskMtime <= this._credentialsMtimeMs) {
-      return false;
-    }
-    const stored = loadCredentials();
-    const diskTokens = stored?.tokens;
-    if (!diskTokens?.access_token || diskTokens.access_token === this._tokens?.access_token) {
-      return false;
-    }
-    this._tokens = diskTokens;
-    this._credentialsMtimeMs = diskMtime;
-    if (stored?.clientInfo) {
-      this._clientInfo = stored.clientInfo;
-    }
-    console.error(
-      "[auth] invalid_grant, but a newer token is on disk (sibling refresh) \u2014 adopting it instead of clearing"
-    );
-    return true;
-  }
-  // Poll briefly for the race winner's write before clearing. Skipped when
-  // no refresh token was held (no race possible).
-  async adoptNewerTokenWithGrace() {
-    if (this.adoptNewerTokenFromDisk()) return true;
-    if (!this._tokens?.refresh_token) return false;
-    const deadline = Date.now() + rotationGraceMs();
-    while (Date.now() < deadline) {
-      await sleep(ROTATION_POLL_MS);
-      if (this.adoptNewerTokenFromDisk()) return true;
-    }
-    return false;
-  }
-  // Grace-bounded wait for a sibling's refresh; covers failures the SDK does
-  // not route through invalidateCredentials (e.g. invalid_request collisions).
+  // Wait for a sibling's refresh to land on disk. Returns true once a
+  // different access token is available for adoption/retry.
   async waitForSiblingRefresh(previousAccessToken) {
     const deadline = Date.now() + rotationGraceMs();
     for (; ; ) {
@@ -25556,7 +25506,6 @@ var GleanOAuthClientProvider = class {
   saveClientInformation(info) {
     this._clientInfo = info;
     saveCredentials(this._tokens, this._clientInfo);
-    this._credentialsMtimeMs = credentialsMtimeMs();
   }
   tokens() {
     this.syncTokensFromDisk();
@@ -25566,7 +25515,6 @@ var GleanOAuthClientProvider = class {
     this._tokens = tokens;
     this._authUrlPending = false;
     saveCredentials(this._tokens, this._clientInfo);
-    this._credentialsMtimeMs = credentialsMtimeMs();
     this.onTokensChanged?.(tokens);
   }
   async invalidateCredentials(scope) {
@@ -25584,11 +25532,15 @@ var GleanOAuthClientProvider = class {
         this._clientInfo = void 0;
         saveCredentials(this._tokens, void 0);
         break;
-      case "tokens":
-        if (await this.adoptNewerTokenWithGrace()) return;
+      case "tokens": {
+        const previousAccessToken = this._tokens?.access_token;
+        if (this._tokens?.refresh_token && await this.waitForSiblingRefresh(previousAccessToken)) {
+          return;
+        }
         this._tokens = void 0;
         saveCredentials(void 0, this._clientInfo);
         break;
+      }
       case "verifier":
         this._codeVerifier = "";
         break;
