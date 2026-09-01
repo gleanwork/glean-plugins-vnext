@@ -25404,6 +25404,7 @@ function saveCredentials(tokens, clientInfo) {
       encoding: "utf-8",
       mode: FILE_MODE
     });
+    fs.chmodSync(tmpPath, FILE_MODE);
     fs.renameSync(tmpPath, filePath);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
