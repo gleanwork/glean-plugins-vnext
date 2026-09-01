@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import { InvalidRequestError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 
 // Control client.connect() across (re)tries.
 const { connectMock } = vi.hoisted(() => ({ connectMock: vi.fn() }));
@@ -95,16 +96,14 @@ describe("createRemoteClient refresh-collision retry", () => {
     connectMock.mockReset();
   });
 
-  // Fosite fails concurrent-refresh losers with invalid_request (SDK rethrows raw).
-  const collisionError = new Error(
-    "The request is missing a required parameter, includes an invalid " +
-      "parameter value, includes a parameter more than once, or is " +
-      "otherwise malformed. Failed to refresh token",
+  // The SDK preserves fosite's machine-readable OAuth error code.
+  const collisionError = new InvalidRequestError(
+    "The refresh request was rejected because another process rotated the grant.",
   );
 
   function makeCollisionProvider(siblingRefreshed: boolean) {
     return {
-      tokens: () => ({ access_token: "T0" }),
+      tokens: () => ({ access_token: "T0", refresh_token: "R0" }),
       authorizationUrl: undefined,
       pendingAuthCode: undefined,
       needsFreshClient: () => false,
@@ -145,8 +144,8 @@ describe("createRemoteClient refresh-collision retry", () => {
     expect(connectMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not treat unrelated connect errors as refresh failures", async () => {
-    connectMock.mockRejectedValue(new Error("socket hang up"));
+  it("does not treat untyped refresh-like errors as refresh failures", async () => {
+    connectMock.mockRejectedValue(new Error("Failed to refresh token"));
     const provider = makeCollisionProvider(true /*siblingRefreshed*/);
 
     await expect(
@@ -155,7 +154,7 @@ describe("createRemoteClient refresh-collision retry", () => {
         { authProvider: provider },
         "sess-7",
       ),
-    ).rejects.toThrow("socket hang up");
+    ).rejects.toThrow("Failed to refresh token");
 
     expect(provider.waitForSiblingRefresh).not.toHaveBeenCalled();
   });

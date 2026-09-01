@@ -25262,7 +25262,7 @@ async function createRemoteClient(serverUrl, opts, chatSessionId, authRetry = fa
         throw new AuthRequiredError(authProvider.authorizationUrl);
       }
     }
-    if (authProvider && !authRetry && isLikelyRefreshFailure(error2) && await authProvider.waitForSiblingRefresh(accessTokenAtConnect)) {
+    if (authProvider && !authRetry && isRefreshOAuthError(error2) && await authProvider.waitForSiblingRefresh(accessTokenAtConnect)) {
       console.error(
         "[auth] Refresh failed but a sibling refreshed \u2014 retrying with its token"
       );
@@ -25272,9 +25272,8 @@ async function createRemoteClient(serverUrl, opts, chatSessionId, authRetry = fa
   }
   return client;
 }
-function isLikelyRefreshFailure(error2) {
-  const msg = error2 instanceof Error ? error2.message : String(error2);
-  return /refresh|invalid_grant|invalid_request|oauth/i.test(msg);
+function isRefreshOAuthError(error2) {
+  return error2 instanceof OAuthError && (error2.errorCode === "invalid_request" || error2.errorCode === "invalid_grant");
 }
 async function callRemoteTool(client, name, args) {
   const result = await client.callTool({ name, arguments: args }, void 0, {

@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import { OAuthError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { GleanOAuthClientProvider } from "./auth-provider.js";
 
@@ -216,12 +217,13 @@ export async function createRemoteClient(
         throw new AuthRequiredError(authProvider.authorizationUrl);
       }
     }
-    // Concurrent-refresh losers get errors the SDK rethrows raw (e.g. fosite
-    // invalid_request); retry once if a sibling's grant lands in the grace window.
+    // Concurrent-refresh losers are reported with structured OAuth errors
+    // (typically invalid_request); retry once if a sibling's grant lands in the
+    // grace window.
     if (
       authProvider &&
       !authRetry &&
-      isLikelyRefreshFailure(error) &&
+      isRefreshOAuthError(error) &&
       (await authProvider.waitForSiblingRefresh(accessTokenAtConnect))
     ) {
       console.error(
@@ -235,10 +237,14 @@ export async function createRemoteClient(
   return client;
 }
 
-// Match broadly; the caller's disk re-check gates the actual retry.
-function isLikelyRefreshFailure(error: unknown): boolean {
-  const msg = error instanceof Error ? error.message : String(error);
-  return /refresh|invalid_grant|invalid_request|oauth/i.test(msg);
+// Restrict recovery to OAuth errors that can indicate a refresh race. The SDK
+// preserves the response's machine-readable error code.
+function isRefreshOAuthError(error: unknown): boolean {
+  return (
+    error instanceof OAuthError &&
+    (error.errorCode === "invalid_request" ||
+      error.errorCode === "invalid_grant")
+  );
 }
 
 export async function callRemoteTool(
