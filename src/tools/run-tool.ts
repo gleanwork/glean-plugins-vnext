@@ -6,6 +6,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
+import { FILE_ARGS_DISABLED_TEXT } from "../policy/enforce.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
 import { resolveSessionId } from "../session-id.js";
 
@@ -187,9 +188,9 @@ async function findToolJson(
   return null;
 }
 
-// A stdio server's only client signal is clientInfo.name. Cursor reports
-// "cursor-vscode" and already renders the tool name + arguments in its own
-// expandable UI, so its approval prompt only needs a one-line review ask.
+// A stdio server's only client signal is clientInfo.name; Cursor reports
+// "cursor-vscode". Used to offer Cursor's version as a possible cause when an
+// approval request waits out the clock (see elicitationFailureText).
 export function isCursorClient(mcpServer: Server): boolean {
   return (mcpServer.getClientVersion()?.name ?? "")
     .toLowerCase()
@@ -199,15 +200,19 @@ export function isCursorClient(mcpServer: Server): boolean {
 // Plain text, NOT Markdown: Claude Code does not reliably render Markdown in
 // elicitation prompts. Kept short (a few lines) so the Accept/Decline buttons
 // stay in view; full argument detail spills to a file when it can't fit.
+//
+// Every host gets the same text, Cursor included. Cursor was an exception for good
+// reason until recently: it rendered the tool and its arguments itself, directly above
+// the prompt, so its message was only a review ask — "Review the tool and arguments
+// shown above". As of August 2026 Cursor no longer renders them (confirmed by
+// screenshot), which left that message pointing at nothing on screen. The shared text
+// names the action and arguments itself, so it cannot go stale that way. Re-introducing
+// a host-specific short form means first confirming that host still displays the
+// arguments somewhere.
 async function buildApprovalMessage(
-  mcpServer: Server,
   toolName: string,
   args: unknown,
 ): Promise<string> {
-  if (isCursorClient(mcpServer)) {
-    return `Review the tool and arguments shown above, click on Submit to allow and Cancel to deny.`;
-  }
-
   const { lines, needsFile } = buildCompactArgs(args);
   // Indent argument lines under "Arguments:" so the structural labels stay
   // distinct from values; keys are uppercased (in compactArgLine) so a key
@@ -281,11 +286,78 @@ async function currentPermissionMode(): Promise<string | null> {
   }
 }
 
+// The HITL timeout defaults to 5 minutes, and "waited the full 300s" reads worse than
+// "the full 5 minutes" in a message a model relays to a user verbatim.
+function humanizeMs(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 120) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+// Text for a FAILED approval request — a rejection, not a user's decline or cancel.
+// Those resolve with an action and are handled by the caller.
+//
+// A request that burned the whole timeout is AMBIGUOUS, and the message has to stay that
+// way: the prompt may have been shown and left unanswered, or never delivered at all.
+// Nothing observable from here separates the two, so the Cursor explanation is offered as
+// a possibility for the user to check, never asserted. Cursor before 3.15 can silently
+// drop server-initiated elicitations onto the auto-run lane, and its clientInfo.version
+// is a hardcoded "1.0.0" (verified: the app reports 3.14.7 while the handshake says
+// 1.0.0), so there is no version to compare and no way to confirm which case occurred.
+//
+// The duration check only keeps the note off plainly unrelated failures: an interrupted
+// request fails early, a dropped one waits out the clock. It cannot carry more weight
+// than that, because the SDK wraps every abort reason as ErrorCode.RequestTimeout
+// (shared/protocol.js) — a user-driven abort and a real timeout arrive with the same code
+// and message shape.
+export function elicitationFailureText(
+  mcpServer: Server,
+  toolName: string,
+  detail: string,
+  elapsedMs: number,
+  timeoutMs: number,
+): string {
+  const base =
+    `Action ${toolName} was not approved — the approval request failed ` +
+    `(${detail}). The action was NOT executed.`;
+
+  // Only a request that waited out the clock is a candidate for the Cursor note; an
+  // early failure was interrupted, which the dropped-prompt bug does not explain.
+  const waitedFullTimeout = elapsedMs >= timeoutMs * 0.9;
+
+  if (!waitedFullTimeout || !isCursorClient(mcpServer)) {
+    return `${base} Ask the user to confirm, then retry.`;
+  }
+
+  return (
+    `${base}\n\n` +
+    `It waited the full ${humanizeMs(timeoutMs)} without an answer. Either the approval ` +
+    `prompt was shown and went unanswered, or it was never shown at all — this end ` +
+    `cannot tell which. One possible cause, if no prompt appeared, is a known Cursor ` +
+    `issue before version 3.15: a server-initiated approval prompt can be dropped ` +
+    `silently, leaving nothing on screen to accept or dismiss. Ask the user whether they ` +
+    `saw an approval prompt. If they did not, suggest checking Cursor's version and ` +
+    `updating if it is below 3.15 — otherwise a retry may wait out the clock again.`
+  );
+}
+
+/**
+ * The policy-controlled features this handler implements.
+ *
+ * Required rather than optional: an omitted argument would silently mean "enabled", and
+ * the typechecker is the only thing that can stop a new call site forgetting it.
+ */
+export interface RunToolPolicy {
+  fileArgs: boolean;
+}
+
 export async function handleRunTool(
   remoteClient: Client,
   mcpServer: Server,
   skillsBaseDir: string,
   args: Record<string, unknown>,
+  policy: RunToolPolicy,
 ): Promise<CallToolResult> {
   const serverId = args.server_id;
   const toolName = args.tool_name;
@@ -303,6 +375,21 @@ export async function handleRunTool(
   // file_args JSON-parsing (object/array params) and its requires_approval
   // drives the HITL gate. Both paths must see it regardless of ENABLE_HITL.
   const toolMeta = await findToolJson(skillsBaseDir, toolName);
+
+  // Refuse before resolveFileArgs, not alongside it. That function reads model-supplied
+  // absolute paths off the user's disk, so a disabled feature has to mean the read does
+  // not happen -- "advertised without file_args but still reading files" would make the
+  // feature inert in name only.
+  //
+  // Refusing rather than ignoring the argument: silently dropping input the model
+  // supplied invites it to retry the same call, so the text says to inline the values.
+  // A call that passes no file_args is unaffected.
+  if (!policy.fileArgs && args.file_args !== undefined) {
+    return {
+      content: [{ type: "text", text: FILE_ARGS_DISABLED_TEXT }],
+      isError: true,
+    };
+  }
 
   // Resolve file_args up front so the approval prompt shows the COMPLETE input
   // (file-sourced values included, not just the inline `arguments`), and so an
@@ -329,17 +416,20 @@ export async function handleRunTool(
   }
 
   const hitlEnabled = process.env.ENABLE_HITL === "true";
-  // Cursor is gated by its OWN native run-tool approval, not our elicitation.
-  // We omit run_tool's readOnlyHint for Cursor (see runToolAnnotations), so
-  // Cursor prompts the user before it executes run_tool. Firing our elicitation
-  // on top would be a redundant second gate — and worse, Cursor 3.12.x silently
-  // drops server-initiated elicitations on the auto-run lane, hanging for the
-  // full HITL timeout. So skip our gate for Cursor and let its native prompt
-  // (already shown before this call) be the single approval.
+  // Cursor is deliberately NOT excepted here any more. It used to be: we omitted
+  // run_tool's readOnlyHint so Cursor showed its own native prompt, and skipped our
+  // elicitation entirely, because Cursor before 3.15 can silently drop server-initiated
+  // elicitations onto the auto-run lane — no prompt appears and the call waits out the
+  // HITL timeout. That workaround was permanent and silent, though: it left every Cursor
+  // user on the weaker native prompt even on builds where elicitation works, with no
+  // signal that upgrading would help. Cursor's clientInfo.version is a hardcoded "1.0.0"
+  // (verified: the app reports 3.14.7 while the handshake says 1.0.0), so we cannot
+  // detect the fixed build and switch back automatically. Instead we treat Cursor like
+  // any other elicitation-capable host, and a timeout surfaces the version as a
+  // possible cause — see elicitationFailureText.
   if (
     hitlEnabled &&
     toolMeta?.requires_approval &&
-    !isCursorClient(mcpServer) &&
     mcpServer.getClientCapabilities()?.elicitation
   ) {
     // In bypassPermissions mode (`claude --dangerously-skip-permissions`) the
@@ -351,16 +441,13 @@ export async function handleRunTool(
     // gate. Only bypassPermissions is skipped (deliberately narrow).
     const bypass = (await currentPermissionMode()) === "bypassPermissions";
     if (!bypass) {
-      const message = await buildApprovalMessage(
-        mcpServer,
-        toolName,
-        resolvedArgs,
-      );
+      const message = await buildApprovalMessage(toolName, resolvedArgs);
       const timeout = hitlTimeoutMs();
 
       // Make a dummy empty request to burn JSON-RPC request id 0
       primeElicitationCancellation(mcpServer);
 
+      const startedAt = Date.now();
       try {
         const result = await mcpServer.elicitInput(
           {
@@ -389,7 +476,13 @@ export async function handleRunTool(
           content: [
             {
               type: "text",
-              text: `Action ${toolName} was not approved — the approval request failed (${detail}). The action was NOT executed. Ask the user to confirm, then retry.`,
+              text: elicitationFailureText(
+                mcpServer,
+                toolName,
+                detail,
+                Date.now() - startedAt,
+                timeout,
+              ),
             },
           ],
           isError: true,
@@ -432,21 +525,18 @@ export function buildRemoteArgs(
  * and avoid a double prompt. Without HITL there is no gate of our own, so we
  * leave annotations unset and let the client decide.
  *
- * TEMP (Cursor): Cursor 3.12.x silently drops the server-initiated elicitation
- * for a `run_tool` marked `readOnlyHint` (it lands on the auto-run lane), so the
- * approval banner never shows and the call hangs to the HITL timeout. For Cursor
- * we therefore flip the whole strategy: do NOT advertise `readOnlyHint` (so
- * Cursor shows its OWN native run-tool approval before executing), and skip our
- * elicitation entirely (see handleRunTool) so Cursor's native prompt is the
- * single gate. Claude Code is unaffected: it keeps `readOnlyHint` (its native
- * prompt stays suppressed) and our elicitation remains its gate.
+ * Cursor is no longer excepted here. It used to be, to route around its
+ * pre-3.15 elicitation bug, but that traded a permanent weaker gate for a
+ * transient bug and left users with no signal that upgrading would help. Cursor
+ * now gets `readOnlyHint` like any other elicitation-capable host, so our prompt
+ * is the single gate there too. If the prompt is dropped, the request waits out the HITL
+ * timeout and `elicitationFailureText` raises the version as something to check.
  */
 export function runToolAnnotations(
   enableHitl: boolean,
   clientSupportsElicitation: boolean,
-  isCursor: boolean,
 ): Tool["annotations"] {
-  return enableHitl && clientSupportsElicitation && !isCursor
+  return enableHitl && clientSupportsElicitation
     ? { readOnlyHint: true }
     : undefined;
 }

@@ -20,11 +20,7 @@ import {
   closeCallbackServer,
 } from "./auth-callback-server.js";
 import { handleFindSkills } from "./tools/find-skills.js";
-import {
-  handleRunTool,
-  isCursorClient,
-  runToolAnnotations,
-} from "./tools/run-tool.js";
+import { handleRunTool, runToolAnnotations } from "./tools/run-tool.js";
 import { evictStaleSkills } from "./skill-writer.js";
 import {
   loadServerUrl,
@@ -45,6 +41,15 @@ import {
 } from "./tools/remote-passthrough.js";
 import { resolveSessionId } from "./session-id.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
+import { pluginVersionString } from "./version.js";
+import {
+  decisionInForce,
+  initPolicySession,
+  policySummary,
+  protocolVersion,
+  setPolicyServerUrl,
+} from "./policy/session.js";
+import { advertisedTools, policyRefusal } from "./policy/enforce.js";
 
 function readEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -105,10 +110,15 @@ try {
   /* ignore */
 }
 
+// Every line carries the pid. Hosts spawn and reap this server on their own schedule,
+// and several processes can be alive at once writing to this one shared log, so without
+// a pid an interleaved log cannot be split back into per-process histories — and
+// whether two lines came from one process or two is exactly the question that arises
+// when in-memory state (the negotiated decision, the session id) appears inconsistent.
 function logLine(label: string, detail?: Record<string, unknown>): void {
   const ts = new Date().toISOString();
   const suffix = detail ? ` ${JSON.stringify(detail)}` : "";
-  const line = `${ts} ${label}${suffix}\n`;
+  const line = `${ts} [${process.pid}] ${label}${suffix}\n`;
   try {
     fs.appendFileSync(LOG_PATH, line, { mode: 0o600 });
     fs.chmodSync(LOG_PATH, 0o600);
@@ -126,9 +136,16 @@ function resolveSkillsBaseDir(): string {
 }
 
 const server = new Server(
-  { name: "glean", version: "1.0.0" },
+  { name: "glean", version: pluginVersionString() },
   { capabilities: { tools: { listChanged: true } } },
 );
+
+// Capability/policy negotiation. Reports the plugin's context to the remote, records the
+// policy that comes back, and — since this build enforces it — gates what `tools/list`
+// advertises and what `tools/call` will run. The gates themselves are pure functions in
+// ./policy/enforce.ts; the two handlers below only read the decision and apply them.
+initPolicySession(server, logLine);
+setPolicyServerUrl(resolveServerUrl());
 
 let oauthProvider: GleanOAuthClientProvider | undefined;
 
@@ -292,31 +309,48 @@ const SETUP_TOOL: Tool = {
 };
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
-  const runTool: Tool = {
-    ...RUN_TOOL_TOOL,
-    annotations: runToolAnnotations(
-      process.env.ENABLE_HITL === "true",
-      !!server.getClientCapabilities()?.elicitation,
-      isCursorClient(server),
-    ),
-  };
-  const staticTools: Tool[] = [FIND_SKILLS_TOOL, runTool, SETUP_TOOL];
-
   // One structured line on every return path, so "why don't my tools appear?"
-  // is answerable from the log alone: `static` is constant, `names` lists the
-  // dynamic tools we actually surfaced (freshly fetched or served from cache),
-  // and `state` names the path we took. The allow-list only ever drops tools
-  // outside our fixed set, so a missing allow-listed name (e.g. `chat`) means
-  // the backend never returned it. Only tool *names*, counts and the state
-  // tag are logged — never argument values, which can carry PII/secrets.
+  // is answerable from the log alone: `names` lists the dynamic tools we actually
+  // surfaced (freshly fetched or served from cache), `withheld` names what policy
+  // removed, and `state` names the path we took. The allow-list only ever drops
+  // tools outside our fixed set, so a missing allow-listed name (e.g. `chat`)
+  // that policy did not withhold means the backend never returned it. Only tool
+  // *names*, counts and the state tag are logged — never argument values, which
+  // can carry PII/secrets.
+  //
+  // The decision is read HERE rather than at the top of the handler: on the `fetched`
+  // path the policy is recorded during the fetch `await`, so reading it earlier would
+  // apply a one-request-stale decision to a freshly fetched catalog.
   const serve = (state: string, dynamic: Tool[]): { tools: Tool[] } => {
+    const decision = decisionInForce();
+    const runTool: Tool = {
+      ...RUN_TOOL_TOOL,
+      annotations: runToolAnnotations(
+        process.env.ENABLE_HITL === "true",
+        !!server.getClientCapabilities()?.elicitation,
+      ),
+    };
+    const { tools, withheld } = advertisedTools({
+      decision,
+      setupTool: SETUP_TOOL,
+      findSkillsTool: FIND_SKILLS_TOOL,
+      runTool,
+      promoted: dynamic,
+    });
+    // `static` used to be a constant 3. It varies now, so derive it rather than assume:
+    // anything advertised that did not come from the remote catalog.
+    const fromCatalog = new Set(dynamic.map((t) => t.name));
     logLine("tools-list.served", {
-      static: staticTools.length,
-      dynamic: dynamic.length,
+      static: tools.filter((t) => !fromCatalog.has(t.name)).length,
+      dynamic: tools.filter((t) => fromCatalog.has(t.name)).length,
       names: dynamic.map((t) => t.name),
+      withheld,
+      deactivated: decision.deactivated,
+      versionState: decision.versionState,
+      features: decision.features,
       state,
     });
-    return { tools: [...staticTools, ...dynamic] };
+    return { tools };
   };
 
   // Pre-auth gate: tokens() is sync. When unauthenticated (or unconfigured)
@@ -530,6 +564,21 @@ async function advanceSetup(): Promise<CallToolResult> {
     cachedRemoteTools = remoteTools;
     saveRemoteTools(serverUrl, remoteTools);
     const toolNames = remoteTools.map((t) => t.name).join(", ") || "(none)";
+    // Derived from the decision rather than asserted. Naming find_skills and run_tool
+    // unconditionally would be wrong the moment policy withholds them, and actively
+    // misleading when the plugin is deactivated and only `setup` works.
+    const decision = decisionInForce();
+    const closing = decision.deactivated
+      ? `This plugin version is not supported by your Glean instance, so only ` +
+        `\`setup\` is available. Upgrade the Glean plugin to restore the rest.`
+      : `You can now use ` +
+        [
+          ...(decision.features.metaTools ? ["find_skills", "run_tool"] : []),
+          ...(decision.features.toolPromotion && remoteTools.length > 0
+            ? ["any of the listed remote tools"]
+            : []),
+        ].join(", ") +
+        `.`;
     return {
       content: [
         {
@@ -538,9 +587,12 @@ async function advanceSetup(): Promise<CallToolResult> {
             `Glean setup is complete.\n` +
             `Server URL: ${serverUrl}\n` +
             `Authenticated: yes\n` +
-            `Remote tools: ${toolNames}\n\n` +
-            `You can now use find_skills, run_tool, and any of the listed ` +
-            `remote tools.`,
+            `Remote tools: ${toolNames}\n` +
+            // Surfacing the negotiated context here is what makes a build with a
+            // missing version constant, or an unobserved MCP revision, visible per
+            // install rather than only in logs.
+            `${policySummary().join("\n")}\n\n` +
+            closing,
         },
       ],
     };
@@ -567,6 +619,30 @@ async function advanceSetup(): Promise<CallToolResult> {
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args = {} } = request.params;
+
+  // The gate. Advertisement is advisory: a host may re-fetch its tool list late or never,
+  // and a model can call a tool still in its context from an earlier list, so a tool
+  // withdrawn from tools/list stays reachable until it is refused here too.
+  //
+  // Placed above the allow-list branch because that is the only point covering all three
+  // lanes — promoted passthrough, find_skills, and run_tool each have their own entry
+  // below. `setup` is exempt inside policyRefusal, before the deactivation check, since it
+  // is the path by which a deactivation gets lifted.
+  const decision = decisionInForce();
+  const refusal = policyRefusal({
+    name,
+    decision,
+    promoted: REMOTE_TOOLS_ALLOWLIST,
+  });
+  if (refusal) {
+    logLine("policy.refused", {
+      tool: name,
+      deactivated: decision.deactivated,
+      versionState: decision.versionState,
+      features: decision.features,
+    });
+    return refusal;
+  }
 
   // Allow-listed remote tools (chat/search/read_document) — only valid once
   // setup has provided a server URL. Auth is handled by dispatchRemoteTool
@@ -711,7 +787,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       try {
         const skillsBaseDir = resolveSkillsBaseDir();
-        return await handleRunTool(remoteClient, server, skillsBaseDir, args);
+        return await handleRunTool(remoteClient, server, skillsBaseDir, args, {
+          fileArgs: decision.features.fileArgs,
+        });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`run_tool: execution failed: ${msg}`);
@@ -735,6 +813,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clearRemoteTools();
         oauthProvider = undefined;
         cachedRemoteTools = [];
+        // The cached POLICY deliberately survives reset. Only a valid policy replaces
+        // it, so a user-invokable reset must not become a way to drop a cached
+        // deactivation or version block — the remote may be unreachable afterwards,
+        // in which case there is nothing to refresh it from. Re-keying is enough:
+        // the cache is keyed by remote URL, so a different instance never inherits it.
+        setPolicyServerUrl(undefined);
         logLine("setup.reset");
         // Fire-and-forget — tools list is shorter without the dynamic
         // surface; the host should re-fetch on its next idle cycle.
@@ -814,6 +898,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         clearCredentials();
         oauthProvider = undefined;
         cachedRemoteTools = loadRemoteTools(normalized);
+        // Re-key the policy cache: a different instance must not inherit the previous
+        // instance's policy.
+        setPolicyServerUrl(normalized);
         logLine("setup.configured", { serverUrl: normalized });
         // Fall through to advanceSetup, which will now find URL ✓ and try
         // to drive auth + tool fetch in the same call.
@@ -840,7 +927,10 @@ async function main() {
     logLine("evict-stale-skills.failed", { msg });
   }
 
-  const transport = new StdioServerTransport();
+  // Wrap the transport so the negotiated MCP revision can be observed: the SDK settles
+  // it internally during `initialize` and exposes no server-side accessor for the
+  // result. `Transport` is a plain interface, so this needs no subclassing.
+  const transport = protocolVersion.wrap(new StdioServerTransport());
   await server.connect(transport);
 }
 

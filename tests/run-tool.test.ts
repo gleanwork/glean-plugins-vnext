@@ -8,11 +8,18 @@ import {
   FileArgsError,
   handleRunTool,
   runToolAnnotations,
+  elicitationFailureText,
 } from "../src/tools/run-tool.js";
 import {
   buildCompactArgs,
   formatArgumentsForFile,
 } from "../src/tools/approval-args.js";
+import type { RunToolPolicy } from "../src/tools/run-tool.js";
+
+// The decision every install resolves to today, since production returns no policy.
+// Passed explicitly at each call site rather than defaulted, so a case that means to
+// exercise a disabled feature has to say so.
+const ALL_ON: RunToolPolicy = { fileArgs: true };
 
 describe("resolveFileArgs", () => {
   let tmpDir: string;
@@ -322,7 +329,7 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: false });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(server.elicitInput).not.toHaveBeenCalled();
     expect(remote.callTool).toHaveBeenCalledTimes(1);
@@ -334,16 +341,16 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: false });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(server.elicitInput).not.toHaveBeenCalled();
     expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT elicit for Cursor — its native prompt is the gate; executes directly", async () => {
+  it("DOES elicit for Cursor — our prompt is the single gate there too", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
-    const elicit = vi.fn();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
     const server = makeServer({
       elicitation: true,
       clientName: "cursor-vscode",
@@ -351,12 +358,244 @@ describe("handleRunTool (HITL)", () => {
     });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
-    // Cursor: readOnlyHint is omitted (native prompt shows), so our elicitation
-    // is skipped and the tool runs directly.
-    expect(elicit).not.toHaveBeenCalled();
+    // Cursor is no longer excluded: it gets readOnlyHint like every other
+    // elicitation-capable host, so this prompt is the only approval gate.
+    expect(elicit).toHaveBeenCalledTimes(1);
     expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  // Cursor used to render the tool and its arguments itself, so its prompt was only a
+  // review ask pointing at them. It stopped doing that (confirmed by screenshot, Aug
+  // 2026), so it now gets the same self-describing text as every other host.
+  it("spells out action and arguments for Cursor too, since it no longer shows them", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, {
+      ...baseArgs,
+      arguments: { project: "ENG", summary: "ship it" },
+    }, ALL_ON);
+
+    const message = elicit.mock.calls[0][0].message as string;
+    expect(message).toContain("Action: jirasearch");
+    expect(message).toContain("ENG");
+    // Would point at something Cursor no longer draws.
+    expect(message).not.toContain("shown above");
+  });
+
+  it("spells out action and arguments for a host that does not render them", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "accept" });
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, {
+      ...baseArgs,
+      arguments: { project: "ENG" },
+    }, ALL_ON);
+
+    const message = elicit.mock.calls[0][0].message as string;
+    expect(message).toContain("Action: jirasearch");
+    expect(message).toContain("ENG");
+    expect(message).not.toContain("shown above");
+  });
+
+  // Cursor's pre-3.15 bug can drop the prompt, so the request burns the whole
+  // timeout. Its version cannot be checked (clientInfo reports a hardcoded
+  // "1.0.0"), so the note keys off that duration instead.
+  it("raises Cursor as a possible cause when the request waits out the clock", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("HITL_TIMEOUT_MS", "40");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockImplementation(
+      () =>
+        new Promise((_resolve, reject) =>
+          setTimeout(() => reject(new Error("Request timed out")), 60),
+        ),
+    );
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(result.isError).toBe(true);
+    expect(text).toContain("3.15");
+    expect(text).toContain("NOT executed");
+    expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  // A timeout cannot distinguish "prompt shown, nobody answered" from "prompt never
+  // delivered", so the text must not claim the prompt was missing. Asserting it would
+  // send the user chasing a Cursor upgrade for what may just be an unanswered prompt.
+  it("frames the missing prompt as a possibility, never as a finding", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("HITL_TIMEOUT_MS", "40");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockImplementation(
+      () =>
+        new Promise((_resolve, reject) =>
+          setTimeout(() => reject(new Error("Request timed out")), 60),
+        ),
+    );
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(text).toContain("cannot tell which");
+    expect(text).toContain("One possible cause");
+    expect(text).toContain("Ask the user whether they saw an approval prompt");
+    // No claim about what did or did not happen on screen.
+    expect(text).not.toContain("never appeared");
+    expect(text).not.toContain("is silently dropped");
+    expect(text).not.toContain("will fix this");
+  });
+
+  // Escape should resolve with action "cancel", but a host that delivers it as
+  // an abort instead reaches this path as ErrorCode.RequestTimeout — the SDK
+  // wraps every abort reason that way, so the code and message shape are
+  // identical to a real timeout. Duration is the only discriminator, and a fast
+  // failure must not blame Cursor's version.
+  it("omits Cursor guidance when the prompt failed early, e.g. dismissed", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("HITL_TIMEOUT_MS", "10000");
+    const remote = makeRemote();
+    const elicit = vi
+      .fn()
+      .mockRejectedValue(new Error("MCP error -32001: Request timed out"));
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(result.isError).toBe(true);
+    expect(text).not.toContain("3.15");
+    expect(text).toContain("Ask the user to confirm");
+    expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  it("never mentions Cursor to another host, even on a full-timeout hang", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    vi.stubEnv("HITL_TIMEOUT_MS", "40");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockImplementation(
+      () =>
+        new Promise((_resolve, reject) =>
+          setTimeout(() => reject(new Error("Request timed out")), 60),
+        ),
+    );
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
+
+    expect((result.content[0] as { text: string }).text).not.toContain("3.15");
+    expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  // fileArgs disabled by remote policy. The refusal lives here rather than at the call
+  // funnel because resolveFileArgs reads model-supplied absolute paths off the user's
+  // disk: an inert feature has to mean the read does not happen.
+  it("rejects file_args when policy disables the feature", async () => {
+    vi.stubEnv("ENABLE_HITL", "false");
+    const remote = makeRemote();
+    const server = makeServer({ elicitation: false });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: false });
+
+    const result = await handleRunTool(
+      remote,
+      server,
+      tmpDir,
+      { ...baseArgs, file_args: { body: "/tmp/whatever.md" } },
+      { fileArgs: false },
+    );
+
+    expect(result.isError).toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain(
+      "`file_args` is disabled",
+    );
+    expect(remote.callTool).not.toHaveBeenCalled();
+  });
+
+  // Proves the refusal short-circuits BEFORE any disk access: the path does not exist,
+  // so a guard placed after resolveFileArgs would surface a "cannot read" FileArgsError
+  // instead. That difference is the whole point of where the check sits.
+  it("rejects without touching the filesystem", async () => {
+    vi.stubEnv("ENABLE_HITL", "false");
+    const remote = makeRemote();
+    const server = makeServer({ elicitation: false });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: false });
+
+    const result = await handleRunTool(
+      remote,
+      server,
+      tmpDir,
+      { ...baseArgs, file_args: { body: path.join(tmpDir, "does-not-exist.md") } },
+      { fileArgs: false },
+    );
+
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("`file_args` is disabled");
+    expect(text).not.toContain("cannot read");
+  });
+
+  it("runs normally when policy disables file_args but the call passes none", async () => {
+    vi.stubEnv("ENABLE_HITL", "false");
+    const remote = makeRemote();
+    const server = makeServer({ elicitation: false });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: false });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, {
+      fileArgs: false,
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a spec-compliant cancel as a cancel, not a failure", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi.fn().mockResolvedValue({ action: "cancel" });
+    const server = makeServer({
+      elicitation: true,
+      clientName: "cursor-vscode",
+      elicit,
+    });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(text).toContain("cancelled by the user");
+    expect(text).not.toContain("3.15");
+    expect(result.isError).toBeUndefined();
+    expect(remote.callTool).not.toHaveBeenCalled();
   });
 
   it("prompts with action name + arguments and forwards on accept", async () => {
@@ -369,7 +608,7 @@ describe("handleRunTool (HITL)", () => {
       description: "Search Jira issues",
     });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     const [params, options] = elicit.mock.calls[0];
     expect(params.message).toContain("Action: jirasearch");
@@ -392,8 +631,8 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true, elicit, request });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     // Ping fired exactly once for this server, and it is a ping.
     expect(request).toHaveBeenCalledTimes(1);
@@ -409,7 +648,7 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true, request });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: false });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(request).not.toHaveBeenCalled();
   });
@@ -422,7 +661,7 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true, elicit });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(elicit.mock.calls[0][1].timeout).toBe(5000);
   });
@@ -437,7 +676,7 @@ describe("handleRunTool (HITL)", () => {
       const elicit = vi.fn().mockResolvedValue({ action: "accept" });
       const server = makeServer({ elicitation: true, elicit });
 
-      await handleRunTool(remote, server, tmpDir, baseArgs);
+      await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
       expect(elicit.mock.calls[0][1].timeout).toBe(300_000);
     }
@@ -450,7 +689,7 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true, elicit });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(remote.callTool).not.toHaveBeenCalled();
     expect((result.content[0] as { text: string }).text).toContain("declined");
@@ -463,7 +702,7 @@ describe("handleRunTool (HITL)", () => {
     const server = makeServer({ elicitation: true, elicit });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
-    const result = await handleRunTool(remote, server, tmpDir, baseArgs);
+    const result = await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(remote.callTool).not.toHaveBeenCalled();
     expect(result.isError).toBe(true);
@@ -484,7 +723,7 @@ describe("handleRunTool (HITL)", () => {
       server_id: "s",
       tool_name: "create_doc",
       arguments: { title: "Report", body: bigBody },
-    });
+    }, ALL_ON);
 
     const message = elicit.mock.calls[0][0].message as string;
     expect(message).toContain("Action: create_doc");
@@ -517,7 +756,7 @@ describe("handleRunTool (HITL)", () => {
       tool_name: "create_doc",
       arguments: { title: "Doc" },
       file_args: { body: bodyFile },
-    });
+    }, ALL_ON);
 
     const message = elicit.mock.calls[0][0].message as string;
     expect(message).toContain("TITLE: Doc");
@@ -541,7 +780,7 @@ describe("handleRunTool (HITL)", () => {
       tool_name: "save_agent",
       arguments: {},
       file_args: { spec: specFile },
-    });
+    }, ALL_ON);
 
     const call = remote.callTool.mock.calls[0][0];
     expect(call.name).toBe("run_tool");
@@ -563,7 +802,7 @@ describe("handleRunTool (HITL)", () => {
       tool_name: "create_doc",
       arguments: {},
       file_args: { body: "/no/such/abs/path.md" },
-    });
+    }, ALL_ON);
 
     expect(result.isError).toBe(true);
     expect(elicit).not.toHaveBeenCalled(); // no prompt for unreadable input
@@ -580,7 +819,7 @@ describe("handleRunTool (HITL)", () => {
     const elicit = vi.fn().mockResolvedValue({ action: "accept" });
     const server = makeServer({ elicitation: true, elicit });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(elicit).not.toHaveBeenCalled();
     expect(remote.callTool).toHaveBeenCalledTimes(1);
@@ -596,7 +835,7 @@ describe("handleRunTool (HITL)", () => {
     const elicit = vi.fn().mockResolvedValue({ action: "accept" });
     const server = makeServer({ elicitation: true, elicit });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(elicit).toHaveBeenCalledTimes(1);
     expect(remote.callTool).toHaveBeenCalledTimes(1);
@@ -612,7 +851,7 @@ describe("handleRunTool (HITL)", () => {
     const elicit = vi.fn().mockResolvedValue({ action: "accept" });
     const server = makeServer({ elicitation: true, elicit });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(elicit).toHaveBeenCalledTimes(1);
   });
@@ -628,7 +867,7 @@ describe("handleRunTool (HITL)", () => {
     const elicit = vi.fn().mockResolvedValue({ action: "accept" });
     const server = makeServer({ elicitation: true, elicit });
 
-    await handleRunTool(remote, server, tmpDir, baseArgs);
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     expect(elicit).toHaveBeenCalledTimes(1); // gate preserved for THIS session
   });
@@ -710,21 +949,44 @@ describe("formatArgumentsForFile", () => {
 });
 
 describe("runToolAnnotations", () => {
-  it("marks run_tool read-only when HITL gates an elicitation-capable non-Cursor client", () => {
-    expect(runToolAnnotations(true, true, false)).toEqual({
+  it("marks run_tool read-only when HITL gates an elicitation-capable client", () => {
+    expect(runToolAnnotations(true, true)).toEqual({
       readOnlyHint: true,
     });
   });
 
   it("leaves annotations unset when HITL is disabled", () => {
-    expect(runToolAnnotations(false, true, false)).toBeUndefined();
+    expect(runToolAnnotations(false, true)).toBeUndefined();
   });
 
   it("leaves annotations unset when the client cannot elicit", () => {
-    expect(runToolAnnotations(true, false, false)).toBeUndefined();
+    expect(runToolAnnotations(true, false)).toBeUndefined();
   });
 
-  it("does NOT advertise readOnlyHint to Cursor (its elicitation only renders on the attended lane)", () => {
-    expect(runToolAnnotations(true, true, true)).toBeUndefined();
+  // Cursor used to be excluded here so it would show its own native prompt. It no
+  // longer is: our elicitation is the single gate on every elicitation-capable host,
+  // and a Cursor build that drops the prompt surfaces as a timeout carrying upgrade
+  // guidance rather than as a permanently weaker gate.
+  it("advertises readOnlyHint to Cursor as well, so our prompt is the single gate", () => {
+    expect(runToolAnnotations(true, true)).toEqual({ readOnlyHint: true });
+  });
+});
+
+describe("elicitationFailureText", () => {
+  const cursor = {
+    getClientVersion: () => ({ name: "cursor-vscode", version: "1.0.0" }),
+  } as any;
+
+  // The shipped HITL_TIMEOUT_MS is 300000, so this phrasing is what almost every
+  // real occurrence prints. A model relays it verbatim, so it reads in minutes.
+  it("renders the 5-minute default as minutes, not 300s", () => {
+    const text = elicitationFailureText(cursor, "t", "timed out", 300_000, 300_000);
+    expect(text).toContain("the full 5 minutes");
+    expect(text).not.toContain("300s");
+  });
+
+  it("keeps short test timeouts in seconds", () => {
+    const text = elicitationFailureText(cursor, "t", "timed out", 20_000, 20_000);
+    expect(text).toContain("the full 20s");
   });
 });
