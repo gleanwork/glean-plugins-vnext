@@ -1,5 +1,6 @@
 import { FEATURE_NAMES, type FeatureName } from "./key.js";
 import { pluginVersion } from "../version.js";
+import { loadCachedInventory } from "./inventory-cache.js";
 import type {
   ConfiguredServers,
   HostIdentity,
@@ -34,25 +35,26 @@ export function hostIdentityFromHandshake(
 }
 
 /**
- * The configured-MCP-server inventory. Not reported yet.
+ * The configured-MCP-server inventory, as captured by the SessionStart hook.
  *
  * Reconstructing it from host configuration files was evaluated and rejected: it means
  * reimplementing host merge semantics -- multiple config scopes, enablement and
  * approval state, plugin installation state, two different `.mcp.json` schemas, and
  * enterprise managed settings -- and every failure in that reimplementation is silent,
- * producing a plausible list with wrong contents rather than an error.
+ * producing a plausible list with wrong contents rather than an error. That holds for
+ * Codex too: it merges plugin-contributed servers with its own config, and no host
+ * exposes per-server auth state on disk at all.
  *
- * The accurate source is the host's own CLI (`claude mcp list`, `codex mcp list
- * --json`), which is deferred because it cannot be called from this path: those
- * commands health-check every server by spawning it, including this one, so invoking
- * them during `tools/list` would make the plugin recursively launch itself. It needs a
- * SessionStart hook that runs once per session and caches the result.
+ * The accurate source is the host's own CLI, which cannot be called from here -- see
+ * ./inventory-cache.ts for why doing so recurses into this plugin. So the hook captures
+ * it once per session and this reads the result.
  *
- * Until then the field reports `unavailable`, which by contract says nothing about the
- * user's setup rather than implying an empty list.
+ * `unavailable` is the answer on Cursor, which has no MCP CLI, and on any request that
+ * arrives before the capture lands. By contract it says nothing about the user's setup
+ * rather than implying an empty list.
  */
 export function inventory(): ConfiguredServers {
-  return { source: "unavailable" };
+  return loadCachedInventory();
 }
 
 /** The features this build implements. Static: it changes only when a release does. */

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { writeFileAtomicSync } from "../atomic-write.js";
+import { serverDataDir } from "../data-dir.js";
 import type { PolicyResponse } from "./types.js";
 
 // The last VALID policy, keyed by remote URL so switching instances does not
@@ -21,11 +21,8 @@ interface PolicyCacheEntry {
 
 type PolicyCacheFile = Record<string, PolicyCacheEntry>;
 
-// Same anchor as url-config-store and token-store: PLUGIN_DATA_DIR when the host
-// provides a managed data directory, else ~/.glean.
 function cachePath(): string {
-  const base = process.env.PLUGIN_DATA_DIR || path.join(os.homedir(), ".glean");
-  return path.join(base, "policy-cache.json");
+  return path.join(serverDataDir(), "policy-cache.json");
 }
 
 function readAll(): PolicyCacheFile {

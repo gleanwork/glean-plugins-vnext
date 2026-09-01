@@ -9,6 +9,7 @@ import { callRemoteTool } from "../remote-client.js";
 import { FILE_ARGS_DISABLED_TEXT } from "../policy/enforce.js";
 import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
 import { resolveSessionId } from "../session-id.js";
+import { hostSharedDataDir } from "../data-dir.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -249,17 +250,13 @@ function primeElicitationCancellation(mcpServer: Server): void {
 
 // Path to the per-session permission-mode marker the PreToolUse hook writes
 // immediately before each run_tool call (see hooks/auto-approve-run-tool.mjs).
-// This resolution MUST match the hook's exactly. The hook cannot see the
-// server-only PLUGIN_DATA_DIR that start.sh derives, so both sides key off
-// CLAUDE_PLUGIN_DATA (falling back to ~/.glean) — the one anchor available to
-// both processes. Under start.sh, PLUGIN_DATA_DIR resolves to this same path.
+// The directory has to be the one the HOOK can compute, not the one this process
+// would prefer -- see hostSharedDataDir() in ../data-dir.ts.
 function permissionModeMarkerPath(): string {
-  const base =
-    process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), ".glean");
   const sessionId = resolveSessionId()
     .replace(/[^a-zA-Z0-9_-]/g, "-")
     .slice(0, 64);
-  return path.join(base, "glean-hitl-mode", `${sessionId}.json`);
+  return path.join(hostSharedDataDir(), "glean-hitl-mode", `${sessionId}.json`);
 }
 
 // Claude Code's live permission mode for THIS session, as captured by the hook

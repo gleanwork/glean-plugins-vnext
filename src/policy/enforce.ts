@@ -155,3 +155,44 @@ export const FILE_ARGS_DISABLED_TEXT =
   "`file_args` is disabled for your Glean instance by remote policy, so no file was " +
   "read and the tool was not executed. Retry `run_tool` with the values inline in " +
   "`arguments` instead.";
+
+/**
+ * The closing sentence of `setup`: exactly what the caller may invoke right now.
+ *
+ * There used to be two lists here, and they disagreed the moment policy withheld
+ * anything -- `setup` printed the remote's whole catalog ("Remote tools: search, chat,
+ * ...") and then closed with "You can now use find_skills, run_tool". A model reading
+ * that has been handed names it may call, most of which are not advertised and would be
+ * refused on call. The remote's catalog is the remote's business, so it is gone and this
+ * is the single authoritative list.
+ *
+ * Scoped to naming tools and nothing else. Deactivation status and the remote's upgrade
+ * message belong to policySummary(), which prints them a few lines above -- stating the
+ * consequence here as well duplicated it, and when the remote supplied its own wording
+ * the specific instruction ("Run `claude plugin update glean`") was immediately followed
+ * by a vaguer restatement of it.
+ *
+ * No deactivation branch is needed to achieve that: evaluate() reports every feature as
+ * false when deactivated, so the empty case below is reached without asking. Meta-tool
+ * names come from META_TOOL_NAMES so this cannot drift from what advertisedTools()
+ * actually serves.
+ */
+export function setupClosingLine(input: {
+  decision: Decision;
+  promoted: readonly string[];
+}): string {
+  const { decision, promoted } = input;
+  const usable = [
+    ...(decision.features.metaTools ? [...META_TOOL_NAMES] : []),
+    ...(decision.features.toolPromotion ? promoted : []),
+  ];
+  // Two ways to get here, deliberately answered the same way: a deactivated plugin, and
+  // a policy that disables metaTools and toolPromotion together without deactivating.
+  // The cause is on the `Policy:`/`Deactivated:` lines above; this states only the
+  // consequence, because without it the second case leaves the feature JSON as the sole
+  // hint that nothing is callable. Unguarded, the sentence degrades to "You can now use ."
+  if (usable.length === 0) {
+    return `No tools are available beyond \`${SETUP_TOOL_NAME}\`.`;
+  }
+  return `You can now use ${usable.join(", ")}.`;
+}
