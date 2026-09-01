@@ -25128,7 +25128,7 @@ var StreamableHTTPClientTransport = class {
 };
 
 // src/version.ts
-var BUILD_VERSION = true ? "0.2.50" : void 0;
+var BUILD_VERSION = true ? "0.2.51" : void 0;
 function pluginVersion() {
   if (BUILD_VERSION) return { version: BUILD_VERSION, source: "build" };
   return { version: "0.0.0", source: "unknown" };
@@ -25926,7 +25926,7 @@ function buildTransport(serverUrl, opts, chatSessionId) {
   }
   return new StreamableHTTPClientTransport(parsedUrl, transportOpts);
 }
-async function createRemoteClient(serverUrl, opts, chatSessionId) {
+async function createRemoteClient(serverUrl, opts, chatSessionId, authRetry = false) {
   const authProvider = opts.authProvider;
   if (authProvider?.pendingAuthCode) {
     const transportForAuth = pendingTransport ?? buildTransport(serverUrl, opts, chatSessionId);
@@ -25954,17 +25954,36 @@ async function createRemoteClient(serverUrl, opts, chatSessionId) {
     { name: "glean", version: pluginVersionString() },
     { capabilities: {} }
   );
+  const accessTokenAtConnect = authProvider?.tokens()?.access_token;
   const transport = buildTransport(serverUrl, opts, chatSessionId);
   try {
     await client.connect(transport);
   } catch (error2) {
-    if (error2 instanceof UnauthorizedError && authProvider?.authorizationUrl) {
-      pendingTransport = transport;
-      throw new AuthRequiredError(authProvider.authorizationUrl);
+    if (error2 instanceof UnauthorizedError && authProvider) {
+      const refreshedAccessToken = authProvider.tokens()?.access_token;
+      if (!authRetry && refreshedAccessToken && refreshedAccessToken !== accessTokenAtConnect) {
+        console.error(
+          "[auth] Auth failed but a newer token is on disk (sibling refresh) \u2014 retrying once"
+        );
+        return createRemoteClient(serverUrl, opts, chatSessionId, true);
+      }
+      if (authProvider.authorizationUrl) {
+        pendingTransport = transport;
+        throw new AuthRequiredError(authProvider.authorizationUrl);
+      }
+    }
+    if (authProvider && !authRetry && isRefreshOAuthError(error2) && await authProvider.waitForSiblingRefresh(accessTokenAtConnect)) {
+      console.error(
+        "[auth] Refresh failed but a sibling refreshed \u2014 retrying with its token"
+      );
+      return createRemoteClient(serverUrl, opts, chatSessionId, true);
     }
     throw error2;
   }
   return client;
+}
+function isRefreshOAuthError(error2) {
+  return error2 instanceof OAuthError && (error2.errorCode === "invalid_request" || error2.errorCode === "invalid_grant");
 }
 async function callRemoteTool(client, name, args) {
   const result = await client.callTool(
@@ -25981,6 +26000,7 @@ async function callRemoteTool(client, name, args) {
 
 // src/auth-provider.ts
 import { execFile, spawn } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { platform } from "node:os";
 
 // src/auth-callback-server.ts
@@ -26087,11 +26107,13 @@ function saveCredentials(tokens, clientInfo) {
     fs4.mkdirSync(dir, { recursive: true, mode: DIR_MODE });
     fs4.chmodSync(dir, DIR_MODE);
     const data = { tokens, clientInfo };
-    fs4.writeFileSync(filePath, JSON.stringify(data, null, 2), {
+    const tmpPath = `${filePath}.${process.pid}.tmp`;
+    fs4.writeFileSync(tmpPath, JSON.stringify(data, null, 2), {
       encoding: "utf-8",
       mode: FILE_MODE
     });
-    fs4.chmodSync(filePath, FILE_MODE);
+    fs4.chmodSync(tmpPath, FILE_MODE);
+    fs4.renameSync(tmpPath, filePath);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[auth] Failed to persist credentials: ${msg}`);
@@ -26107,6 +26129,8 @@ function clearCredentials() {
 }
 
 // src/auth-provider.ts
+var ROTATION_GRACE_MS = 2e3;
+var ROTATION_POLL_MS = 100;
 function openBrowser(url2) {
   if (platform() === "win32") {
     spawn("cmd", ["/c", "start", '""', "/b", url2.replace(/&/g, "^&")], {
@@ -26143,6 +26167,29 @@ var GleanOAuthClientProvider = class {
       this._clientInfo = stored.clientInfo;
     }
   }
+  // Re-read the shared store on every token access so a sibling's rotated
+  // grant is used instead of a stale in-memory copy.
+  syncTokensFromDisk() {
+    const stored = loadCredentials();
+    if (!stored) return;
+    if (stored.tokens) {
+      this._tokens = stored.tokens;
+    }
+    if (stored.clientInfo) {
+      this._clientInfo = stored.clientInfo;
+    }
+  }
+  // Wait for a sibling's refresh to land on disk. Returns true once a
+  // different access token is available for adoption/retry.
+  async waitForSiblingRefresh(previousAccessToken) {
+    const deadline = Date.now() + ROTATION_GRACE_MS;
+    for (; ; ) {
+      const current = this.tokens()?.access_token;
+      if (current && current !== previousAccessToken) return true;
+      if (Date.now() >= deadline) return false;
+      await sleep(ROTATION_POLL_MS);
+    }
+  }
   get redirectUrl() {
     return getCallbackUrl();
   }
@@ -26160,6 +26207,7 @@ var GleanOAuthClientProvider = class {
     saveCredentials(this._tokens, this._clientInfo);
   }
   tokens() {
+    this.syncTokensFromDisk();
     return this._tokens;
   }
   saveTokens(tokens) {
@@ -26183,10 +26231,15 @@ var GleanOAuthClientProvider = class {
         this._clientInfo = void 0;
         saveCredentials(this._tokens, void 0);
         break;
-      case "tokens":
+      case "tokens": {
+        const previousAccessToken = this._tokens?.access_token;
+        if (this._tokens?.refresh_token && await this.waitForSiblingRefresh(previousAccessToken)) {
+          return;
+        }
         this._tokens = void 0;
         saveCredentials(void 0, this._clientInfo);
         break;
+      }
       case "verifier":
         this._codeVerifier = "";
         break;

@@ -10,9 +10,8 @@ vi.mock("node:os", async () => {
   return { ...actual, homedir: () => tmpDir };
 });
 
-const { clearCredentials, loadCredentials, saveCredentials } = await import(
-  "../src/token-store.js"
-);
+const { clearCredentials, loadCredentials, saveCredentials } =
+  await import("../src/token-store.js");
 
 describe("token-store", () => {
   const gleanDir = path.join(tmpDir, ".glean");
@@ -88,4 +87,5 @@ describe("token-store", () => {
     expect(fs.existsSync(credFile)).toBe(false);
     expect(() => clearCredentials()).not.toThrow();
   });
+
 });

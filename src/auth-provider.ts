@@ -5,11 +5,20 @@ import type {
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { execFile, spawn } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
 import { platform } from "node:os";
 import { getCallbackUrl, setExpectedState } from "./auth-callback-server.js";
-import { clearCredentials, loadCredentials, saveCredentials } from "./token-store.js";
+import {
+  clearCredentials,
+  loadCredentials,
+  saveCredentials,
+} from "./token-store.js";
 
 export type InvalidationScope = "all" | "client" | "tokens" | "verifier";
+
+// Grace window for a sibling's in-flight refresh to land on disk.
+const ROTATION_GRACE_MS = 2000;
+const ROTATION_POLL_MS = 100;
 
 /**
  * Open `url` in the user's default browser. Used for the self-open sign-in
@@ -47,7 +56,6 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   // explicitly invalidating. Used to detect when a previous auth URL didn't
   // complete — likely because the server rejected the (stale) client_id.
   private _authUrlPending = false;
-
   authorizationUrl: string | undefined;
 
   /**
@@ -63,6 +71,33 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     if (stored) {
       this._tokens = stored.tokens as OAuthTokens | undefined;
       this._clientInfo = stored.clientInfo as OAuthClientInformationMixed | undefined;
+    }
+  }
+
+  // Re-read the shared store on every token access so a sibling's rotated
+  // grant is used instead of a stale in-memory copy.
+  private syncTokensFromDisk(): void {
+    const stored = loadCredentials();
+    if (!stored) return;
+    if (stored.tokens) {
+      this._tokens = stored.tokens as OAuthTokens;
+    }
+    if (stored.clientInfo) {
+      this._clientInfo = stored.clientInfo as OAuthClientInformationMixed;
+    }
+  }
+
+  // Wait for a sibling's refresh to land on disk. Returns true once a
+  // different access token is available for adoption/retry.
+  async waitForSiblingRefresh(
+    previousAccessToken: string | undefined,
+  ): Promise<boolean> {
+    const deadline = Date.now() + ROTATION_GRACE_MS;
+    for (;;) {
+      const current = this.tokens()?.access_token;
+      if (current && current !== previousAccessToken) return true;
+      if (Date.now() >= deadline) return false;
+      await sleep(ROTATION_POLL_MS);
     }
   }
 
@@ -87,6 +122,7 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
   }
 
   tokens(): OAuthTokens | undefined {
+    this.syncTokensFromDisk();
     return this._tokens;
   }
 
@@ -112,10 +148,19 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
         this._clientInfo = undefined;
         saveCredentials(this._tokens, undefined);
         break;
-      case "tokens":
+      case "tokens": {
+        // Usually a sibling's rotation — try adopting before clearing.
+        const previousAccessToken = this._tokens?.access_token;
+        if (
+          this._tokens?.refresh_token &&
+          (await this.waitForSiblingRefresh(previousAccessToken))
+        ) {
+          return;
+        }
         this._tokens = undefined;
         saveCredentials(undefined, this._clientInfo);
         break;
+      }
       case "verifier":
         this._codeVerifier = "";
         break;
