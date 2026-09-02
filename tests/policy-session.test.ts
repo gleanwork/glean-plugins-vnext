@@ -462,3 +462,4 @@ describe("unenforced display caps", () => {
     expect(labels.filter((l) => l === "policy.caps-not-enforced")).toHaveLength(1);
   });
 });
+
