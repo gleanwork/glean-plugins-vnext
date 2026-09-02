@@ -11,12 +11,7 @@ import { resolveSessionId } from "../session-id.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 
-// Tools the user chose "always allow" for during THIS process. The durable
-// grant is persisted server-side (Glean ToolPreferences, via the
-// set_tool_approval gateway meta-tool) and flows back as find_skills'
-// `requires_approval:false`; this in-process set makes the grant take effect
-// immediately, before the next find_skills refresh. Keyed by server_id +
-// tool_name.
+// Fast path until find_skills reflects the persisted grant.
 const sessionApproved = new Set<string>();
 function approvalKey(serverId: string, toolName: string): string {
   return JSON.stringify([serverId, toolName]);
@@ -242,25 +237,9 @@ async function buildApprovalMessage(
   return message.join("\n");
 }
 
-// The approval scope resolved from the prompt.
-//   task   – approve just this one call (Accept with the box unticked).
-//   always – approve this tool for all future calls (persisted to Glean's
-//            ToolPreferences via the set_tool_approval gateway meta-tool).
-// "decline" is the prompt's built-in Decline action, handled by the caller via
-// result.action, not a content field.
-//
-// We deliberately keep only "allow once" (Accept) + "always allow" (the box),
-// mirroring the Glean Assistant approval model. A per-session scope was dropped:
-// it can't be represented on a remote MCP server (no client-local session
-// state), and we don't want the plugin to diverge from Assistant here.
 export type ApprovalScope = "task" | "always";
 
-// The elicitation schema for the approval prompt. A single BOOLEAN field renders
-// as an INLINE checkbox in Claude Code (toggle with Space), shown upfront above
-// the built-in Accept/Decline buttons — unlike a string enum, which Claude Code
-// renders as a collapse/expand ("▶") accordion that hides the choice. So the
-// user sees: [ ] Always allow this tool / Accept / Decline. Accept with the box
-// unticked = allow once; tick it = always allow; Decline = reject.
+// Boolean fields render inline in Claude Code; enum fields collapse.
 export function approvalRequestedSchema(): Record<string, unknown> {
   return {
     type: "object",
@@ -274,9 +253,7 @@ export function approvalRequestedSchema(): Record<string, unknown> {
   };
 }
 
-// Maps an ACCEPTED elicitation result's content to a scope: box ticked =
-// "always"; otherwise (unticked, or missing/garbled content) a one-time "task"
-// approval. Decline is a non-accept action, handled upstream.
+// Missing or invalid content defaults to one-time approval.
 export function readApprovalScope(content: unknown): ApprovalScope {
   if (
     content &&
@@ -411,10 +388,7 @@ export async function handleRunTool(
     // call and never leaks across sessions. Any other or unknown mode keeps the
     // gate. Only bypassPermissions is skipped (deliberately narrow).
     const bypass = (await currentPermissionMode()) === "bypassPermissions";
-    // Already "always allowed" earlier in this process — skip the prompt, just
-    // like bypassPermissions does. (A server-side "always allow" arrives
-    // instead as requires_approval:false from find_skills, which skips the whole
-    // gate above — so no plugin storage is needed for that.)
+    // Skip grants made earlier in this process.
     const preApproved = sessionApproved.has(approvalKey(serverId, toolName));
     if (!bypass && !preApproved) {
       const message = await buildApprovalMessage(
@@ -436,18 +410,11 @@ export async function handleRunTool(
           { timeout },
         );
 
-        // Dismissing the prompt (Esc, or the built-in Decline button) is never
-        // an approval — fail closed.
         if (result.action !== "accept") {
           return notExecutedResult(toolName, result.action);
         }
 
-        // Accept: if the box was ticked, persist an "always allow" to Glean's
-        // shared ToolPreferences via the set_tool_approval gateway meta-tool
-        // (the same store Glean Assistant uses). Best-effort — a failed persist
-        // must never break execution. The session set makes it take effect
-        // immediately; the durable value returns via find_skills'
-        // requires_approval on the next refresh.
+        // Persist only explicit "always"; a failure must not block execution.
         if (readApprovalScope(result.content) === "always") {
           sessionApproved.add(approvalKey(serverId, toolName));
           try {

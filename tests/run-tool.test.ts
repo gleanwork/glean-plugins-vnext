@@ -311,8 +311,7 @@ describe("handleRunTool (HITL)", () => {
 
   beforeEach(async () => {
     tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "run-tool-hitl-test-"));
-    // Isolate the session/always approval stores to this test's tmp dir so they
-    // never read or pollute the real ~/.glean.
+    // Keep tests out of the real ~/.glean.
     vi.stubEnv("PLUGIN_DATA_DIR", tmpDir);
   });
 
@@ -578,8 +577,7 @@ describe("handleRunTool (HITL)", () => {
   it("approvalRequestedSchema exposes a single 'always' boolean checkbox", () => {
     const schema = approvalRequestedSchema() as any;
     expect(schema.properties.always.type).toBe("boolean");
-    // No string enum (which CC renders as a collapsed accordion) and no session
-    // field (dropped — can't work on a remote MCP server).
+    // Enum fields collapse in Claude Code; session scope is not remote state.
     expect(schema.properties.session).toBeUndefined();
     expect(schema.properties.choice).toBeUndefined();
   });
@@ -626,8 +624,7 @@ describe("handleRunTool (HITL)", () => {
       .fn()
       .mockResolvedValue({ action: "accept", content: { always: true } });
     const server = makeServer({ elicitation: true, elicit });
-    // Unique tool name: sessionApproved is process-level, so a shared name would
-    // leak this grant into other tests.
+    // Use a unique name because sessionApproved is process-global.
     const args = {
       server_id: "composio/jira-pack",
       tool_name: "always_tool",
@@ -647,7 +644,7 @@ describe("handleRunTool (HITL)", () => {
       value: "ALWAYS_ALLOWED",
     });
 
-    // Second call to the same tool is pre-approved this session → no prompt.
+    // The process-local fast path skips the second prompt.
     await handleRunTool(remote, server, tmpDir, args);
     expect(elicit).toHaveBeenCalledTimes(1);
   });
