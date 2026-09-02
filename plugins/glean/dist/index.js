@@ -25915,23 +25915,22 @@ async function buildApprovalMessage(mcpServer, toolName, args) {
   }
   return message.join("\n");
 }
-function approvalRequestedSchema() {
-  return {
-    type: "object",
-    properties: {
-      always: {
-        type: "boolean",
-        title: "Always allow this tool",
-        default: false
-      }
-    }
-  };
-}
-function readApprovalScope(content) {
-  if (content && typeof content === "object" && content.always === true) {
-    return "always";
+var alwaysAllowFollowUpTimeoutMs = 5e3;
+async function requestAlwaysAllowFollowUp(mcpServer, toolName) {
+  primeElicitationCancellation(mcpServer);
+  try {
+    const result = await mcpServer.elicitInput(
+      {
+        message: `Always allow ${toolName} for future calls?`,
+        // Empty form preserves the host-native Yes/No actions.
+        requestedSchema: { type: "object", properties: {} }
+      },
+      { timeout: alwaysAllowFollowUpTimeoutMs }
+    );
+    return result.action === "accept";
+  } catch {
+    return false;
   }
-  return "task";
 }
 function notExecutedResult(toolName, action) {
   const verb = action === "cancel" ? "cancelled" : "declined";
@@ -26010,21 +26009,25 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
         const result = await mcpServer.elicitInput(
           {
             message,
-            requestedSchema: approvalRequestedSchema()
+            requestedSchema: { type: "object", properties: {} }
           },
           { timeout }
         );
         if (result.action !== "accept") {
           return notExecutedResult(toolName, result.action);
         }
-        if (readApprovalScope(result.content) === "always") {
-          sessionApproved.add(approvalKey(serverId, toolName));
+        const alwaysAllow = await requestAlwaysAllowFollowUp(
+          mcpServer,
+          toolName
+        );
+        if (alwaysAllow) {
           try {
             await callRemoteTool(remoteClient, "set_tool_approval", {
               server_id: serverId,
               tool_name: toolName,
               value: "ALWAYS_ALLOWED"
             });
+            sessionApproved.add(approvalKey(serverId, toolName));
           } catch (err) {
             const detail = err instanceof Error ? err.message : String(err);
             console.error(
@@ -26331,6 +26334,24 @@ function sameOrigin(a, b) {
   }
 }
 
+// src/server-url.ts
+var DEFAULT_MCP_PATH = "/mcp/gateway/proxy";
+function parseServerUrl(raw) {
+  const parsed = new URL(raw);
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("Server URL must use http or https.");
+  }
+  return parsed;
+}
+function preserveExplicitServerUrl(raw) {
+  parseServerUrl(raw);
+  return raw;
+}
+function normalizeDiscoveredServerUrl(raw) {
+  const parsed = parseServerUrl(raw);
+  return `${parsed.origin}${DEFAULT_MCP_PATH}`;
+}
+
 // src/index.ts
 function readEnv(...keys) {
   for (const key of keys) {
@@ -26345,10 +26366,6 @@ function resolveServerUrl() {
   const fromEnv = readEnv("GLEAN_MCP_SERVER_URL");
   if (fromEnv) return fromEnv;
   return loadServerUrl();
-}
-function normalizeServerUrl(raw) {
-  const parsed = new URL(raw);
-  return `${parsed.origin}/mcp/gateway/proxy`;
 }
 var SETUP_REQUIRED_TEXT = `[SETUP_REQUIRED]
 
@@ -26842,7 +26859,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ]
         };
       }
-      let rawUrl = typeof args.server_url === "string" ? args.server_url.trim() : "";
+      const suppliedServerUrl = typeof args.server_url === "string" ? args.server_url.trim() : "";
+      const explicitServerUrl = suppliedServerUrl !== "";
+      let rawUrl = suppliedServerUrl;
       const email2 = typeof args.email === "string" ? args.email.trim() : "";
       if (!rawUrl && email2) {
         const resolved = await resolveServerUrlFromEmail(email2);
@@ -26866,7 +26885,7 @@ ${EMAIL_RESOLVE_FAILED_TEXT}`
       if (rawUrl) {
         let normalized;
         try {
-          normalized = normalizeServerUrl(rawUrl);
+          normalized = explicitServerUrl ? preserveExplicitServerUrl(rawUrl) : normalizeDiscoveredServerUrl(rawUrl);
         } catch {
           return {
             content: [

@@ -41,6 +41,10 @@ import {
 } from "./tools/remote-passthrough.js";
 import { resolveSessionId } from "./session-id.js";
 import { resolveServerUrlFromEmail } from "./config-search.js";
+import {
+  normalizeDiscoveredServerUrl,
+  preserveExplicitServerUrl,
+} from "./server-url.js";
 
 function readEnv(...keys: string[]): string | undefined {
   for (const key of keys) {
@@ -56,11 +60,6 @@ function resolveServerUrl(): string | undefined {
   const fromEnv = readEnv("GLEAN_MCP_SERVER_URL");
   if (fromEnv) return fromEnv;
   return loadServerUrl();
-}
-
-function normalizeServerUrl(raw: string): string {
-  const parsed = new URL(raw);
-  return `${parsed.origin}/mcp/gateway/proxy`;
 }
 
 const SETUP_REQUIRED_TEXT =
@@ -738,8 +737,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // An explicit server_url wins; otherwise derive the QE URL from the
       // user's email via the public config/search lookup.
-      let rawUrl =
+      const suppliedServerUrl =
         typeof args.server_url === "string" ? args.server_url.trim() : "";
+      const explicitServerUrl = suppliedServerUrl !== "";
+      let rawUrl = suppliedServerUrl;
       const email = typeof args.email === "string" ? args.email.trim() : "";
 
       if (!rawUrl && email) {
@@ -763,7 +764,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       if (rawUrl) {
         let normalized: string;
         try {
-          normalized = normalizeServerUrl(rawUrl);
+          normalized = explicitServerUrl
+            ? preserveExplicitServerUrl(rawUrl)
+            : normalizeDiscoveredServerUrl(rawUrl);
         } catch {
           return {
             content: [

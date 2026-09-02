@@ -49,8 +49,13 @@ or your email domain isn't recognized. Two options:
 
 - Pass `server_url` to the `setup` tool with your **Server instance (QE)** URL
   (e.g. `https://acme-be.glean.com`). Admins can find this at
-  https://app.glean.com/admin/about-glean.
+  https://app.glean.com/admin/about-glean. Explicit URLs are validated and
+  preserved as supplied, including experiment path segments such as
+  `/qe-glean-exp/102`.
 - Or set the `GLEAN_MCP_SERVER_URL` environment variable.
+
+Email-based discovery continues to map the returned QE URL to the default
+`/mcp/gateway/proxy` endpoint.
 
 ## Updates
 
@@ -108,11 +113,10 @@ HITL ones — or in your shell:
 | Variable | Purpose | Default |
 | --- | --- | --- |
 | `GLEAN_MCP_SERVER_URL` | Overrides the Glean server URL captured by `setup`. | URL saved by `setup` |
-| `ENABLE_HITL` | Human-in-the-loop confirmation before `run_tool` runs a downstream tool. Active only when set to exactly `true`. | `true` (set in the shipped `.mcp.json`) |
+| `ENABLE_HITL` | Human-in-the-loop confirmation before `run_tool` runs a downstream tool, followed by an optional five-second "always allow" preference prompt for write tools. Active only when set to exactly `true`. | `true` (set in the shipped `.mcp.json`) |
 | `HITL_TIMEOUT_MS` | Timeout in milliseconds for a HITL confirmation prompt. Positive integer. | `300000` (5 min), set in `.mcp.json` |
 | `GLEAN_REMOTE_TOOL_TIMEOUT_MS` | Timeout in milliseconds for a downstream tool call made via `run_tool` (overrides the MCP SDK's 60s default). Positive integer. | `300000` (5 min), bundle default |
 | `GLEAN_FILE_ARG_MAX_BYTES` | Maximum size in bytes of each file read via `run_tool`'s `file_args`. Positive integer. | `1048576` (1 MiB), bundle default |
-| `GLEAN_REMOTE_TOOL_APPROVALS` | When exactly `true`, persist "always allow this tool" grants to Glean's per-user settings (`saveusersettings`/`listusersettings`, key `pluginToolApprovals.<tool>`) in addition to the local file, and prefer the remote value on read (falling back to the local file when the remote call fails). **Requires the `internal:web_api` OAuth scope**, which a dynamically-registered MCP client does not hold today — so the call will 401/403 until that scope (or an MCP-gateway settings surface) is available. Ships **off**; the local file remains the source of truth when unset. | unset (local only) |
 | `USE_CLAUDE_PROJECT_DIR` | Set to `1` to route the skills cache under the launch project's `.claude/tmp/`, so the `glean_run` skill's `Read` glob can match cache files. | unset |
 
 Empty values and un-interpolated `${VAR}` placeholders are ignored, falling back
@@ -130,6 +134,11 @@ every launch and setting them yourself has no effect:
   project's `.claude/tmp/` when `USE_CLAUDE_PROJECT_DIR=1`.
 - `GLEAN_SESSION_ID` — the host's conversation id: `CLAUDE_CODE_SESSION_ID` for
   Claude Code, `CODEX_THREAD_ID` for Codex, otherwise a generated UUID.
+
+For write tools requiring HITL, the user first approves the current call. The
+plugin then offers a five-second optional follow-up to persist an "always allow"
+preference remotely. Selecting No, cancelling, timing out, or failing to persist
+never prevents the already-approved call from executing.
 
 ## Troubleshooting
 
