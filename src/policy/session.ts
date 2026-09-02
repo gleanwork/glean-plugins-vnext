@@ -1,0 +1,378 @@
+import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+
+import { hostIdentityFromHandshake, buildNegotiationRequest, supportedFeatures } from "./context.js";
+import { classifyResult, metaFor } from "./negotiate.js";
+import { evaluate } from "./evaluate.js";
+import { loadCachedPolicy, savePolicy } from "./cache.js";
+import { lastInventoryDiagnostic } from "./inventory-cache.js";
+import { ProtocolVersionObserver } from "./protocol-version.js";
+import type { Decision, NegotiationRequest, PolicyResponse } from "./types.js";
+
+type LogFn = (label: string, detail?: Record<string, unknown>) => void;
+
+/**
+ * Session-scoped state for the capability/policy exchange.
+ *
+ * Kept out of index.ts so the wiring there stays to a few lines, and so the pieces a
+ * later change needs -- the resolved decision, the `_meta` to attach -- have one
+ * obvious home.
+ *
+ * This module owns the decision's lifecycle: it reports context, records the policy a
+ * response carried, and resolves the decision now in force. It does not itself withhold
+ * or refuse anything -- the gates are pure functions in ./enforce.ts, applied by the
+ * handlers in index.ts.
+ */
+let mcpServer: Server | undefined;
+let logLine: LogFn = () => {};
+let decision: Decision | undefined;
+// Labels already logged in this process, so each negotiation path reports itself once
+// even when the resolved decision never changes. See recordPolicyFromResult.
+const loggedLabels = new Set<string>();
+let lastRequest: NegotiationRequest | undefined;
+// The remote the policy cache is keyed by. Held here rather than threaded through
+// every call site so that `callRemoteTool` -- the single funnel every remote tool call
+// passes through -- can record policy without knowing about configuration resolution.
+// Keyed by URL so switching Glean instances cannot apply one instance's policy to
+// another.
+let cacheKeyUrl: string | undefined;
+
+export const protocolVersion = new ProtocolVersionObserver();
+
+// The label recordPolicyFromResult receives for a tools/list exchange, shared by the
+// tools/list handler and by setup's own catalog fetch. Exported so both spell it the same
+// way in the log. The notification guard deliberately does NOT key off it -- see
+// RecordPolicyOptions.hostReceivingList, which is what distinguishes those two callers.
+export const TOOLS_LIST_LABEL = "tools/list";
+
+export function initPolicySession(server: Server, log: LogFn): void {
+  mcpServer = server;
+  logLine = log;
+}
+
+/** Called whenever the configured server URL is resolved or changed. */
+export function setPolicyServerUrl(url: string | undefined): void {
+  cacheKeyUrl = url;
+}
+
+/**
+ * The negotiation payload for the current session, rebuilt per request so a late
+ * `initialize` (the handshake completes after the transport is wired) is reflected
+ * rather than captured as undefined at startup.
+ */
+export function negotiationRequest(): NegotiationRequest {
+  const host = hostIdentityFromHandshake(
+    mcpServer?.getClientVersion(),
+    mcpServer?.getClientCapabilities() as Record<string, unknown> | undefined,
+    protocolVersion.version,
+  );
+  lastRequest = buildNegotiationRequest(host);
+  reportInventoryGap(lastRequest.configuredServers);
+  return lastRequest;
+}
+
+// The last inventory outcome reported, so a stable state is not logged on every request.
+// `_meta` rides every remote call, so an unconditional line here would be one per call
+// for the life of the process.
+let lastInventoryReason: string | undefined;
+
+/**
+ * Say why there is no inventory, when there is none.
+ *
+ * The coarse reason travels to the remote; the fine-grained detail is local-only and
+ * stays here. Without both, every way of arriving at `unavailable` looked identical --
+ * hook never fired, CLI missing, output unparsed, capture rejected -- so a plugin whose
+ * inventory silently never worked was indistinguishable from one working exactly as
+ * designed on a host with no CLI.
+ *
+ * Logged when the outcome CHANGES, which for the ordinary session means twice: once for
+ * `capture-pending` on the early requests, then once when the capture lands.
+ */
+function reportInventoryGap(inventory: NegotiationRequest["configuredServers"]): void {
+  const reason = inventory.source === "host-cli" ? "resolved" : inventory.reason;
+  if (reason === lastInventoryReason) return;
+  lastInventoryReason = reason;
+  if (inventory.source === "host-cli") {
+    logLine("inventory.resolved", {
+      servers: inventory.servers?.length ?? 0,
+      withheld: inventory.withheld,
+    });
+    return;
+  }
+  logLine("inventory.unavailable", {
+    reason,
+    ...(lastInventoryDiagnostic() ?? {}),
+  });
+}
+
+/** The `_meta` envelope to attach to an outgoing remote request. */
+export function negotiationMeta(): { _meta: Record<string, unknown> } {
+  return metaFor(negotiationRequest());
+}
+
+export interface RecordPolicyOptions {
+  /**
+   * True only when the host requested this tool list and is about to receive the surface
+   * this decision produces. It suppresses the re-fetch notification, because the response
+   * itself is the update.
+   *
+   * An explicit flag rather than a label check: `setup` fetches the catalog through the
+   * same helper and carries the same label, but the host is receiving setup's text, so it
+   * does need telling.
+   */
+  hostReceivingList?: boolean;
+}
+
+/**
+ * Record the policy carried on a remote response, if any.
+ *
+ * The four outcomes are distinct on purpose:
+ *   policy      - persist it and re-evaluate.
+ *   no-policy   - no policy on THIS response. What that means depends on whether this
+ *                 remote has ever sent one; see below. The cache is never erased.
+ *   malformed   - keep the last valid policy and treat this round as no-policy, so a
+ *                 bad response can never deactivate a working plugin.
+ *   unreachable - decided by the caller, not here: an unreachable remote produces no
+ *                 result to classify. Conflating it with no-policy would silently
+ *                 drop a previously synced version rule on any network blip.
+ *
+ * On no-policy, a cached policy is RETAINED rather than cleared. The compatibility path
+ * -- every supported feature enabled, no version rule -- is for a remote that does not
+ * implement negotiation, and the cached policy is the evidence of whether this one does.
+ * A remote that has already sent a policy is not disowning it by omitting it later.
+ *
+ * Reading omission as revocation looks harmless until a remote attaches policy to
+ * tools/list but not to tools/call -- a plausible split, since a list is answered once
+ * while calls are the hot path. Then every call would clear the policy, every following
+ * list would restore it, and each clear would emit tools/list_changed, so the host would
+ * re-fetch on every tool call and the advertised surface would visibly flicker.
+ *
+ * The cost is that a remote can no longer lift a restriction by going silent: it must
+ * send an explicit `enabled: true`. For a control plane that is the better default --
+ * clearing-by-silence is exactly what makes the flicker possible -- and it makes this
+ * agree with the unreachable path, which already retains the cached policy.
+ */
+export function recordPolicyFromResult(
+  result: unknown,
+  label: string,
+  { hostReceivingList = false }: RecordPolicyOptions = {},
+): void {
+  // No configured remote yet means nothing to key the cache by, and no exchange to
+  // record. Silent no-op rather than an error: this runs on every remote call.
+  const serverUrl = cacheKeyUrl;
+  if (!serverUrl) return;
+
+  const outcome = classifyResult(result);
+  const cachedPolicy = loadCachedPolicy(serverUrl);
+  let policy: PolicyResponse | undefined;
+
+  switch (outcome.kind) {
+    case "policy":
+      policy = outcome.policy;
+      savePolicy(serverUrl, outcome.policy);
+      // Unknown keys are accepted and ignored -- a newer remote must be able to add
+      // fields without an older plugin rejecting the response -- but reported, since
+      // an unrecognized key's type is never checked and a renamed field carrying a
+      // bad value would otherwise pass in total silence.
+      if (outcome.unknownKeys.length > 0) {
+        logLine("policy.unknown-keys", { label, keys: outcome.unknownKeys });
+      }
+      reportUnenforcedCaps(outcome.policy);
+      break;
+    case "malformed":
+      logLine("policy.malformed", { label, reason: outcome.reason });
+      policy = cachedPolicy;
+      break;
+    case "no-policy":
+      // Silence, not revocation. Undefined only when this remote has never sent a
+      // policy, which is the compatibility path's actual condition.
+      policy = cachedPolicy;
+      if (cachedPolicy) {
+        logLine("policy.absent-kept-cache", { label });
+      }
+      break;
+  }
+
+  const request = lastRequest ?? negotiationRequest();
+  const next = evaluate({
+    pluginVersion: request.plugin.version,
+    versionSource: request.plugin.versionSource,
+    supportedFeatures: request.plugin.supportedFeatures,
+    policy,
+  });
+
+  const previous = decision;
+  const changed =
+    !previous || surfaceKey(previous) !== surfaceKey(next);
+  decision = next;
+
+  // Log on a change, and once per label per process.
+  //
+  // The second condition is what makes the mechanism observable at all. A steady-state
+  // exchange changes nothing -- against a remote with no policy support, every response
+  // resolves to the same decision -- so change-only logging goes silent after the first
+  // tools/list and never says a word about tools/call again. The result is a feature
+  // whose entire job is remote control, with no evidence in the log that it ran on a
+  // given path. Labels are bounded (one per distinct remote method plus tool name), so
+  // this is a handful of lines per process, not per call.
+  const firstForLabel = !loggedLabels.has(label);
+  loggedLabels.add(label);
+
+  if (changed || firstForLabel) {
+    logLine("policy.resolved", {
+      label,
+      outcome: outcome.kind,
+      versionState: next.versionState,
+      deactivated: next.deactivated,
+      features: next.features,
+      reasons: next.reasons,
+    });
+  }
+
+  // Tell the host to re-fetch when the reachable surface changed under it.
+  //
+  // Suppressed for exactly one case: the host asked for the list and is about to receive
+  // the freshly filtered surface, so a notification would make it ask again for what it
+  // already holds, and notify -> tools/list -> resolve -> notify would be a cycle. That
+  // is what `hostReceivingList` means, and it is passed by the tools/list handler alone.
+  //
+  // It deliberately is NOT inferred from the label. `setup` fetches the remote catalog
+  // through the same helper and therefore carries the same `tools/list` label, but the
+  // host is receiving setup's text, not a tool list -- so a policy that changes the
+  // surface during setup used to leave the host holding a stale list with nothing to
+  // prompt a refresh. Observed against a real remote: setup learned `toolPromotion: true`
+  // and the promoted tools stayed invisible until the next unrelated list.
+  //
+  // Not on the first decision either: `!previous` counts as changed, so without that
+  // guard every process's first gated call would notify, costing a host tools/list and a
+  // remote round-trip for every user in a world where no policy exists. The stale-list
+  // window on a first call is closed by the refusal, which is the real gate anyway.
+  if (changed && previous && !hostReceivingList) {
+    logLine("policy.surface-changed", {
+      label,
+      from: { deactivated: previous.deactivated, features: previous.features },
+      to: { deactivated: next.deactivated, features: next.features },
+    });
+    mcpServer?.sendToolListChanged().catch(() => {
+      // Transport not connected, or the host does not support the notification.
+      // Harmless: the next tools/list is correct, and calls are refused regardless.
+    });
+  }
+}
+
+// The fields that determine what the agent can reach. Reasons and messages churn between
+// otherwise-equivalent responses without changing the surface, and every spurious
+// notification costs a host tools/list and therefore a remote round-trip.
+function surfaceKey(d: Decision): string {
+  return JSON.stringify([d.deactivated, d.features]);
+}
+
+// Whether this process has already said the caps are inert.
+let capsReported = false;
+
+/**
+ * Say once that display caps are accepted but not honoured.
+ *
+ * `dailyCap`/`weeklyCap` are deliberately tolerated rather than rejected: the design has
+ * the remote send them for forward compatibility, and only `show` needs honouring in v0.
+ * But a remote that sets `dailyCap: 1` and then sees the recommendation on every `setup`
+ * has no way to learn why, and "read the plugin source" is not an answer. Frequency
+ * capping also has nothing to cap yet — `setup` is the only surface and it is
+ * user-initiated, so rate-limiting the answer to a question the user just asked would be
+ * wrong. Once per process, and only when a remote actually sets one.
+ */
+function reportUnenforcedCaps(policy: PolicyResponse): void {
+  if (capsReported) return;
+  const rec = policy.plugin?.upgradeRecommendation;
+  const dailyCap = rec?.dailyCap;
+  const weeklyCap = rec?.weeklyCap;
+  if (dailyCap === undefined && weeklyCap === undefined) return;
+  capsReported = true;
+  logLine("policy.caps-not-enforced", { dailyCap, weeklyCap });
+}
+
+/**
+ * The decision now in force, seeded from the cached policy on first read.
+ *
+ * A fresh process has no decision until a remote exchange happens, and `tools/list` does
+ * not always reach the remote -- the unconfigured, unauthenticated and connect-error
+ * paths all return before any negotiation. Treating that as "no policy, everything on"
+ * would mean a cached deactivation, or a cached `metaTools: false`, was silently undone
+ * by every process start, which is exactly what the design forbids.
+ *
+ * So the first read evaluates the cached policy and memoizes the result. The cache is
+ * touched once per process, never per gated call: `_meta` rides every remote request, so
+ * a process that talks to the remote refreshes its own decision constantly and needs no
+ * re-read. With no configured URL there is nothing to key by, which yields the
+ * all-supported decision.
+ *
+ * Never throws. A failure here would break every tool call, and for a feature that is
+ * inert for every install today, failing open is the only defensible direction.
+ */
+export function decisionInForce(): Decision {
+  if (decision) return decision;
+  try {
+    const policy = cacheKeyUrl ? loadCachedPolicy(cacheKeyUrl) : undefined;
+    const request = lastRequest ?? negotiationRequest();
+    decision = evaluate({
+      pluginVersion: request.plugin.version,
+      versionSource: request.plugin.versionSource,
+      supportedFeatures: request.plugin.supportedFeatures,
+      policy,
+    });
+    if (policy) {
+      logLine("policy.seeded-from-cache", {
+        versionState: decision.versionState,
+        deactivated: decision.deactivated,
+        features: decision.features,
+      });
+    }
+    return decision;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logLine("policy.seed-failed", { msg });
+    decision = evaluate({
+      pluginVersion: "0.0.0",
+      versionSource: "unknown",
+      supportedFeatures: supportedFeatures(),
+      policy: undefined,
+    });
+    return decision;
+  }
+}
+
+/** For `setup` output: what was reported, and what came back. */
+export function policySummary(): string[] {
+  const r = lastRequest;
+  const d = decision;
+  const lines = [
+    `Plugin version: ${r?.plugin.version ?? "?"} (source: ${r?.plugin.versionSource ?? "?"})`,
+    `Host: ${r?.host.id ?? "?"} ${r?.host.version ?? ""} (source: ${r?.host.source ?? "?"})`,
+    `MCP revision: ${r?.host.mcpProtocolVersion ?? "not observed"}`,
+    `Server inventory: ${r?.configuredServers.source ?? "?"}`,
+  ];
+  if (d) {
+    lines.push(`Policy: version ${d.versionState}, features ${JSON.stringify(d.features)}`);
+    // The recommendation is only shown here. It is computed on every exchange, so
+    // without a surface it would be a value the remote sets and nobody ever sees.
+    // Shown on every setup call: dailyCap/weeklyCap are accepted but not enforced
+    // (see reportUnenforcedCaps), and capping a user-initiated answer would be wrong
+    // anyway.
+    if (d.deactivated) {
+      lines.push(
+        `Deactivated: only \`setup\` is available. ${
+          d.upgradeMessage ?? "Upgrade the Glean plugin to restore functionality."
+        }`,
+      );
+    } else if (d.showUpgrade) {
+      lines.push(
+        `Upgrade available: ${
+          d.upgradeMessage ?? "a newer version of the Glean plugin is available."
+        }`,
+      );
+    }
+    if (d.message) lines.push(`Notice: ${d.message}`);
+  } else {
+    lines.push("Policy: not yet negotiated");
+  }
+  return lines;
+}

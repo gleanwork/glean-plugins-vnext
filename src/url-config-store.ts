@@ -1,17 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { homedir } from "node:os";
+import { serverDataDir } from "./data-dir.js";
 
 const CONFIG_FILENAME = "mcp-server-url.json";
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 
-function resolveConfigDir(): string {
-  return process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
-}
-
 function configFile(): string {
-  return path.join(resolveConfigDir(), CONFIG_FILENAME);
+  return path.join(serverDataDir(), CONFIG_FILENAME);
 }
 
 interface StoredConfig {

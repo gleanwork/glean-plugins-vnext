@@ -1,17 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { homedir } from "node:os";
+import { serverDataDir } from "./data-dir.js";
 
 const CREDENTIALS_FILENAME = "mcp-credentials.json";
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 
-function resolveCredentialsDir(): string {
-  return process.env.PLUGIN_DATA_DIR || path.join(homedir(), ".glean");
-}
-
 function credentialsFile(): string {
-  return path.join(resolveCredentialsDir(), CREDENTIALS_FILENAME);
+  return path.join(serverDataDir(), CREDENTIALS_FILENAME);
 }
 
 interface StoredCredentials {

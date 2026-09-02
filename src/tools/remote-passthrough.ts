@@ -6,6 +6,11 @@ import {
   createRemoteClient,
   type RemoteClientOptions,
 } from "../remote-client.js";
+import {
+  TOOLS_LIST_LABEL,
+  negotiationMeta,
+  recordPolicyFromResult,
+} from "../policy/session.js";
 
 // Remote tools promoted to first-class local tools once setup completes.
 // Anything the remote MCP server exposes that is not in this set is dropped
@@ -52,16 +57,25 @@ export function augmentSchemaForLocal(schema: unknown): ToolInputSchema {
  * each surviving tool with its input schema augmented for local exposure.
  *
  * Walks pagination cursors to exhaustion in case the remote ever paginates.
+ *
+ * `hostReceivingList` must be true only when the caller is answering a host `tools/list`.
+ * Setup calls this too, and there the host is receiving setup's text rather than a tool
+ * list, so a surface-changing policy learned here has to notify.
  */
 export async function fetchAllowedRemoteTools(
   remoteClient: Client,
+  { hostReceivingList = false }: { hostReceivingList?: boolean } = {},
 ): Promise<Tool[]> {
   const collected: Tool[] = [];
   let cursor: string | undefined;
   do {
-    const page = await remoteClient.listTools(
-      cursor ? { cursor } : undefined,
-    );
+    // Negotiation metadata rides on tools/list as well as tools/call, so a session
+    // that only ever lists tools still reports its context and still receives policy.
+    const page = await remoteClient.listTools({
+      ...(cursor ? { cursor } : {}),
+      ...negotiationMeta(),
+    });
+    recordPolicyFromResult(page, TOOLS_LIST_LABEL, { hostReceivingList });
     for (const tool of page.tools) {
       if (!REMOTE_TOOLS_ALLOWLIST.has(tool.name)) continue;
       collected.push({
