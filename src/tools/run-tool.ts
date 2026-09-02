@@ -265,18 +265,6 @@ export function readApprovalScope(content: unknown): ApprovalScope {
   return "task";
 }
 
-function notExecutedResult(toolName: string, action: string): CallToolResult {
-  const verb = action === "cancel" ? "cancelled" : "declined";
-  return {
-    content: [
-      {
-        type: "text",
-        text: `Action ${toolName} was ${verb} by the user.`,
-      },
-    ],
-  };
-}
-
 // A WeakSet so a short-lived server in tests doesn't leak,
 // and so the burn happens exactly once per server instance.
 const elicitationIdPrimed = new WeakSet<object>();
@@ -411,7 +399,14 @@ export async function handleRunTool(
         );
 
         if (result.action !== "accept") {
-          return notExecutedResult(toolName, result.action);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Action ${toolName} was ${result.action === "decline" ? "declined" : "cancelled"} by the user.`,
+              },
+            ],
+          };
         }
 
         // Persist only explicit "always"; a failure must not block execution.

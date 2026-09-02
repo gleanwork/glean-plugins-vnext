@@ -25933,17 +25933,6 @@ function readApprovalScope(content) {
   }
   return "task";
 }
-function notExecutedResult(toolName, action) {
-  const verb = action === "cancel" ? "cancelled" : "declined";
-  return {
-    content: [
-      {
-        type: "text",
-        text: `Action ${toolName} was ${verb} by the user.`
-      }
-    ]
-  };
-}
 var elicitationIdPrimed = /* @__PURE__ */ new WeakSet();
 function primeElicitationCancellation(mcpServer) {
   if (elicitationIdPrimed.has(mcpServer)) return;
@@ -26015,7 +26004,14 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
           { timeout }
         );
         if (result.action !== "accept") {
-          return notExecutedResult(toolName, result.action);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Action ${toolName} was ${result.action === "decline" ? "declined" : "cancelled"} by the user.`
+              }
+            ]
+          };
         }
         if (readApprovalScope(result.content) === "always") {
           sessionApproved.add(approvalKey(serverId, toolName));
