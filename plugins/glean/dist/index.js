@@ -25915,23 +25915,22 @@ async function buildApprovalMessage(mcpServer, toolName, args) {
   }
   return message.join("\n");
 }
-function approvalRequestedSchema() {
-  return {
-    type: "object",
-    properties: {
-      always: {
-        type: "boolean",
-        title: "Always allow this tool",
-        default: false
-      }
-    }
-  };
-}
-function readApprovalScope(content) {
-  if (content && typeof content === "object" && content.always === true) {
-    return "always";
+var alwaysAllowFollowUpTimeoutMs = 5e3;
+async function requestAlwaysAllowFollowUp(mcpServer, toolName) {
+  primeElicitationCancellation(mcpServer);
+  try {
+    const result = await mcpServer.elicitInput(
+      {
+        message: `Always allow ${toolName} for future calls?`,
+        // Empty form preserves the host-native Yes/No actions.
+        requestedSchema: { type: "object", properties: {} }
+      },
+      { timeout: alwaysAllowFollowUpTimeoutMs }
+    );
+    return result.action === "accept";
+  } catch {
+    return false;
   }
-  return "task";
 }
 var elicitationIdPrimed = /* @__PURE__ */ new WeakSet();
 function primeElicitationCancellation(mcpServer) {
@@ -25999,7 +25998,7 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
         const result = await mcpServer.elicitInput(
           {
             message,
-            requestedSchema: approvalRequestedSchema()
+            requestedSchema: { type: "object", properties: {} }
           },
           { timeout }
         );
@@ -26013,14 +26012,18 @@ async function handleRunTool(remoteClient, mcpServer, skillsBaseDir, args) {
             ]
           };
         }
-        if (readApprovalScope(result.content) === "always") {
-          sessionApproved.add(approvalKey(serverId, toolName));
+        const alwaysAllow = await requestAlwaysAllowFollowUp(
+          mcpServer,
+          toolName
+        );
+        if (alwaysAllow) {
           try {
             await callRemoteTool(remoteClient, "set_tool_approval", {
               server_id: serverId,
               tool_name: toolName,
               value: "ALWAYS_ALLOWED"
             });
+            sessionApproved.add(approvalKey(serverId, toolName));
           } catch (err) {
             const detail = err instanceof Error ? err.message : String(err);
             console.error(

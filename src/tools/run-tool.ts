@@ -11,15 +11,12 @@ import { resolveSessionId } from "../session-id.js";
 
 const DEFAULT_FILE_ARG_MAX_BYTES = 1 * 1024 * 1024;
 
-// Fast path until find_skills reflects the persisted grant.
+// Avoid prompting again before the next discovery refresh.
 const sessionApproved = new Set<string>();
 function approvalKey(serverId: string, toolName: string): string {
   return JSON.stringify([serverId, toolName]);
 }
 
-// How long a user has to respond to an approval prompt. The MCP SDK's own
-// request timeout is 60s and, on expiry, elicitInput REJECTS — so unless we
-// pass an explicit (longer) value the prompt errors out from under the user.
 const defaultHitlTimeoutMs = 300_000;
 
 export class FileArgsError extends Error {
@@ -29,8 +26,6 @@ export class FileArgsError extends Error {
   }
 }
 
-// A downstream tool parameter's JSON Schema, narrowed to the bits we use.
-// `type` may be a single string or an array (e.g. ["object", "null"]).
 interface ParamSchema {
   type?: string | string[];
 }
@@ -38,9 +33,6 @@ interface ToolInputSchema {
   properties?: Record<string, ParamSchema>;
 }
 
-// The set of JSON Schema types declared for a top-level parameter. file_args
-// keys always map to top-level argument names, so a direct properties lookup
-// is sufficient — no need to walk nested schemas.
 function declaredParamTypes(
   inputSchema: ToolInputSchema | undefined,
   argName: string,
@@ -69,16 +61,6 @@ function hitlTimeoutMs(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : defaultHitlTimeoutMs;
 }
 
-/**
- * Reads each `file_args` entry from disk and merges its content into
- * `baseArgs` under the given key. The downstream tool's `inputSchema` decides
- * how the content is injected: a parameter typed `object`/`array` is JSON-
- * parsed into structured data (a raw string would fail the downstream schema
- * with "Expected object, given string"), while everything else — the common
- * case of long-form text bodies — is injected verbatim as a UTF-8 string.
- * Throws FileArgsError on any validation failure so the caller can surface the
- * message verbatim to the model.
- */
 export async function resolveFileArgs(
   fileArgs: unknown,
   baseArgs: Record<string, unknown>,
@@ -143,9 +125,7 @@ export async function resolveFileArgs(
       try {
         merged[argName] = JSON.parse(content);
       } catch (err) {
-        // A union like ["string", "object"] can legitimately take raw text, so
-        // keep the string. A pure object/array param cannot — fail with a clear
-        // message before the opaque downstream "Expected object, given string".
+        // Preserve raw text for unions; parse only object/array parameters.
         if (types.has("string")) {
           merged[argName] = content;
         } else {
@@ -188,23 +168,18 @@ async function findToolJson(
       }
     }
   } catch {
-    // Skills dir doesn't exist or can't be read
   }
   return null;
 }
 
-// A stdio server's only client signal is clientInfo.name. Cursor reports
-// "cursor-vscode" and already renders the tool name + arguments in its own
-// expandable UI, so its approval prompt only needs a one-line review ask.
+// Cursor renders tool details itself, so use a one-line approval message.
 function isCursorClient(mcpServer: Server): boolean {
   return (mcpServer.getClientVersion()?.name ?? "")
     .toLowerCase()
     .startsWith("cursor");
 }
 
-// Plain text, NOT Markdown: Claude Code does not reliably render Markdown in
-// elicitation prompts. Kept short (a few lines) so the Accept/Decline buttons
-// stay in view; full argument detail spills to a file when it can't fit.
+// Keep approval prompts compact; spill large arguments to a file.
 async function buildApprovalMessage(
   mcpServer: Server,
   toolName: string,
@@ -215,18 +190,12 @@ async function buildApprovalMessage(
   }
 
   const { lines, needsFile } = buildCompactArgs(args);
-  // Indent argument lines under "Arguments:" so the structural labels stay
-  // distinct from values; keys are uppercased (in compactArgLine) so a key
-  // reads distinctly from its value — plain-text cues that cost no vertical
-  // space.
   const message = [
     `Action: ${toolName}`,
     "Arguments:",
     ...lines.map((line) => `  ${line}`),
   ];
   if (needsFile) {
-    // Best-effort: a failed spill (e.g. a sandbox blocking writes outside the
-    // project dir) must never break the approval gate, so fall back to a note.
     try {
       const filePath = await writeApprovalArgsFile(toolName, args);
       message.push(`  Full arguments: ${filePath}`);
@@ -237,51 +206,39 @@ async function buildApprovalMessage(
   return message.join("\n");
 }
 
-export type ApprovalScope = "task" | "always";
+// Future-call persistence is separate from this call's approval.
+const alwaysAllowFollowUpTimeoutMs = 5_000;
 
-// Boolean fields render inline in Claude Code; enum fields collapse.
-export function approvalRequestedSchema(): Record<string, unknown> {
-  return {
-    type: "object",
-    properties: {
-      always: {
-        type: "boolean",
-        title: "Always allow this tool",
-        default: false,
+async function requestAlwaysAllowFollowUp(
+  mcpServer: Server,
+  toolName: string,
+): Promise<boolean> {
+  // Avoid request id 0, which some MCP clients cannot cancel correctly.
+  primeElicitationCancellation(mcpServer);
+
+  try {
+    const result = await mcpServer.elicitInput(
+      {
+        message: `Always allow ${toolName} for future calls?`,
+        // Empty form preserves the host-native Yes/No actions.
+        requestedSchema: { type: "object", properties: {} } as any,
       },
-    },
-  };
-}
-
-// Missing or invalid content defaults to one-time approval.
-export function readApprovalScope(content: unknown): ApprovalScope {
-  if (
-    content &&
-    typeof content === "object" &&
-    (content as Record<string, unknown>).always === true
-  ) {
-    return "always";
+      { timeout: alwaysAllowFollowUpTimeoutMs },
+    );
+    return result.action === "accept";
+  } catch {
+    return false;
   }
-  return "task";
 }
 
-// A WeakSet so a short-lived server in tests doesn't leak,
-// and so the burn happens exactly once per server instance.
 const elicitationIdPrimed = new WeakSet<object>();
 function primeElicitationCancellation(mcpServer: Server): void {
   if (elicitationIdPrimed.has(mcpServer)) return;
   elicitationIdPrimed.add(mcpServer);
-  void mcpServer.request({ method: "ping" }, EmptyResultSchema).catch(() => {
-    // Ping rejection is fine: request id 0 is already consumed by this call
-  });
+  void mcpServer.request({ method: "ping" }, EmptyResultSchema).catch(() => {});
 }
 
-// Path to the per-session permission-mode marker the PreToolUse hook writes
-// immediately before each run_tool call (see hooks/auto-approve-run-tool.mjs).
-// This resolution MUST match the hook's exactly. The hook cannot see the
-// server-only PLUGIN_DATA_DIR that start.sh derives, so both sides key off
-// CLAUDE_PLUGIN_DATA (falling back to ~/.glean) — the one anchor available to
-// both processes. Under start.sh, PLUGIN_DATA_DIR resolves to this same path.
+// Must match the hook's shared CLAUDE_PLUGIN_DATA marker.
 function permissionModeMarkerPath(): string {
   const base =
     process.env.CLAUDE_PLUGIN_DATA || path.join(os.homedir(), ".glean");
@@ -291,18 +248,7 @@ function permissionModeMarkerPath(): string {
   return path.join(base, "glean-hitl-mode", `${sessionId}.json`);
 }
 
-// Claude Code's live permission mode for THIS session, as captured by the hook
-// on the current call. Returns null when the marker is missing, unreadable, or
-// malformed — the caller treats null as "unknown" and keeps the approval gate,
-// so any failure fails toward prompting, never toward a silent bypass.
-//
-// Resume safety: the PreToolUse hook rewrites this marker with the CURRENT mode
-// on every run_tool call (see hooks/auto-approve-run-tool.mjs), and PreToolUse
-// always runs before the tool executes, so the value read here is the one
-// written for this exact call. A session first launched with
-// --dangerously-skip-permissions and later resumed WITHOUT it (same session id)
-// therefore has its stale bypass marker overwritten with the resumed mode on
-// the resumed session's first run_tool call, re-engaging the gate.
+// Invalid or missing markers keep the gate active; the hook refreshes them per call.
 async function currentPermissionMode(): Promise<string | null> {
   try {
     const raw = await fs.readFile(permissionModeMarkerPath(), "utf-8");
@@ -333,14 +279,8 @@ export async function handleRunTool(
     };
   }
 
-  // Load the downstream tool's metadata once, up front: its inputSchema drives
-  // file_args JSON-parsing (object/array params) and its requires_approval
-  // drives the HITL gate. Both paths must see it regardless of ENABLE_HITL.
   const toolMeta = await findToolJson(skillsBaseDir, toolName);
 
-  // Resolve file_args up front so the approval prompt shows the COMPLETE input
-  // (file-sourced values included, not just the inline `arguments`), and so an
-  // unreadable file_args path fails before we prompt the user.
   const baseArgs =
     args.arguments != null && typeof args.arguments === "object"
       ? (args.arguments as Record<string, unknown>)
@@ -368,15 +308,9 @@ export async function handleRunTool(
     toolMeta?.requires_approval &&
     mcpServer.getClientCapabilities()?.elicitation
   ) {
-    // In bypassPermissions mode (`claude --dangerously-skip-permissions`) the
-    // user has opted out of every approval prompt for the session, so our own
-    // elicitation gate is just a redundant popup — skip it and execute
-    // directly. The mode comes from the PreToolUse hook, which writes it keyed
-    // by session id immediately before this call, so it reflects the current
-    // call and never leaks across sessions. Any other or unknown mode keeps the
-    // gate. Only bypassPermissions is skipped (deliberately narrow).
+    // Only bypassPermissions disables this gate; unknown modes remain gated.
     const bypass = (await currentPermissionMode()) === "bypassPermissions";
-    // Skip grants made earlier in this process.
+    // Covers the interval before discovery reflects server-side grants.
     const preApproved = sessionApproved.has(approvalKey(serverId, toolName));
     if (!bypass && !preApproved) {
       const message = await buildApprovalMessage(
@@ -386,14 +320,13 @@ export async function handleRunTool(
       );
       const timeout = hitlTimeoutMs();
 
-      // Make a dummy empty request to burn JSON-RPC request id 0
       primeElicitationCancellation(mcpServer);
 
       try {
         const result = await mcpServer.elicitInput(
           {
             message,
-            requestedSchema: approvalRequestedSchema() as any,
+            requestedSchema: { type: "object", properties: {} } as any,
           },
           { timeout },
         );
@@ -409,15 +342,18 @@ export async function handleRunTool(
           };
         }
 
-        // Persist only explicit "always"; a failure must not block execution.
-        if (readApprovalScope(result.content) === "always") {
-          sessionApproved.add(approvalKey(serverId, toolName));
+        const alwaysAllow = await requestAlwaysAllowFollowUp(
+          mcpServer,
+          toolName,
+        );
+        if (alwaysAllow) {
           try {
             await callRemoteTool(remoteClient, "set_tool_approval", {
               server_id: serverId,
               tool_name: toolName,
               value: "ALWAYS_ALLOWED",
             });
+            sessionApproved.add(approvalKey(serverId, toolName));
           } catch (err) {
             const detail = err instanceof Error ? err.message : String(err);
             console.error(
@@ -426,9 +362,7 @@ export async function handleRunTool(
           }
         }
       } catch (err) {
-        // Fail CLOSED. An approval gate that executes the action when the
-        // prompt times out or errors defeats its own purpose — and the SDK
-        // rejects elicitInput precisely on request timeout.
+        // Initial elicitation errors are fail-closed.
         const detail = err instanceof Error ? err.message : String(err);
         return {
           content: [
@@ -450,14 +384,6 @@ export async function handleRunTool(
   );
 }
 
-/**
- * Assemble the payload for the backend `run_tool` meta-tool. `arguments` is
- * ALWAYS included, even when empty: the downstream MCP `tools/call` validates
- * `params.arguments` as an object, and an absent field serializes to `null`,
- * which strict downstream servers reject ("Expected: object, given: null").
- * Sending an explicit `{}` for no-argument tools matches what the MCP SDK
- * does for direct tool calls.
- */
 export function buildRemoteArgs(
   serverId: string,
   toolName: string,
@@ -470,13 +396,6 @@ export function buildRemoteArgs(
   };
 }
 
-/**
- * Annotations for the `run_tool` meta-tool. When HITL is active for an
- * elicitation-capable client, our own approval prompt is the gate, so we mark
- * the tool `readOnlyHint` to suppress the client's native run-tool confirmation
- * and avoid a double prompt. Without HITL there is no gate of our own, so we
- * leave annotations unset and let the client decide.
- */
 export function runToolAnnotations(
   enableHitl: boolean,
   clientSupportsElicitation: boolean,
