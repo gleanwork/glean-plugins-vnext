@@ -959,6 +959,42 @@ describe("handleRunTool (HITL)", () => {
     });
   });
 
+  it("reports when the always-allow follow-up times out", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    const elicit = vi
+      .fn()
+      .mockResolvedValueOnce({ action: "accept" })
+      .mockRejectedValueOnce(new Error("Request timed out"));
+    const server = makeServer({ elicitation: true, elicit });
+    await writeToolJson(tmpDir, "timeout_tool", { requires_approval: true });
+    const now = vi
+      .spyOn(Date, "now")
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(5_000);
+
+    const result = await handleRunTool(
+      remote,
+      server,
+      tmpDir,
+      { ...baseArgs, tool_name: "timeout_tool" },
+      ALL_ON,
+    );
+    now.mockRestore();
+
+    expect(result.isError).not.toBe(true);
+    expect((result.content[0] as { text: string }).text).toContain(
+      "timed out after 5 seconds",
+    );
+    expect((result.content[0] as { text: string }).text).toContain(
+      "future calls; they will ask for approval again",
+    );
+    expect(remote.callTool.mock.calls.map((c: any) => c[0].name)).toEqual([
+      "get_tool_approval",
+      "run_tool",
+    ]);
+  });
+
   it("fails closed when the remote approval lookup is malformed", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote({

@@ -26703,6 +26703,7 @@ async function buildApprovalMessage(toolName, args) {
 }
 var alwaysAllowFollowUpTimeoutMs = 5e3;
 async function requestAlwaysAllowFollowUp(mcpServer2, toolName) {
+  const startedAt = Date.now();
   try {
     const result = await mcpServer2.elicitInput(
       {
@@ -26712,10 +26713,16 @@ async function requestAlwaysAllowFollowUp(mcpServer2, toolName) {
       },
       { timeout: alwaysAllowFollowUpTimeoutMs }
     );
-    return result.action === "accept";
+    return { accepted: result.action === "accept", timedOut: false };
   } catch {
-    return false;
+    return {
+      accepted: false,
+      timedOut: Date.now() - startedAt >= alwaysAllowFollowUpTimeoutMs * 0.9
+    };
   }
+}
+function alwaysAllowFollowUpTimeoutMessage(toolName) {
+  return `The Always Allow prompt for ${toolName} timed out after 5 seconds (auto-declined). The current action was approved, but it was not saved for future calls; they will ask for approval again.`;
 }
 var elicitationIdPrimed = /* @__PURE__ */ new WeakSet();
 function primeElicitationCancellation(mcpServer2) {
@@ -26881,7 +26888,7 @@ async function handleRunTool(remoteClient, mcpServer2, skillsBaseDir, args, poli
           mcpServer2,
           toolName
         );
-        if (alwaysAllow) {
+        if (alwaysAllow.accepted) {
           try {
             await callRemoteTool(remoteClient, "set_tool_approval", {
               server_id: serverId,
@@ -26894,6 +26901,23 @@ async function handleRunTool(remoteClient, mcpServer2, skillsBaseDir, args, poli
               `[set_tool_approval] failed to persist "${toolName}" to Glean: ${detail}`
             );
           }
+        }
+        if (alwaysAllow.timedOut) {
+          const downstreamResult = await callRemoteTool(
+            remoteClient,
+            "run_tool",
+            buildRemoteArgs(serverId, toolName, resolvedArgs)
+          );
+          return {
+            ...downstreamResult,
+            content: [
+              {
+                type: "text",
+                text: alwaysAllowFollowUpTimeoutMessage(toolName)
+              },
+              ...downstreamResult.content
+            ]
+          };
         }
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);

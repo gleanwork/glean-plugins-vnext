@@ -239,10 +239,16 @@ async function buildApprovalMessage(
 // This follow-up only controls approval for future calls.
 const alwaysAllowFollowUpTimeoutMs = 5_000;
 
+interface AlwaysAllowFollowUpResult {
+  accepted: boolean;
+  timedOut: boolean;
+}
+
 async function requestAlwaysAllowFollowUp(
   mcpServer: Server,
   toolName: string,
-): Promise<boolean> {
+): Promise<AlwaysAllowFollowUpResult> {
+  const startedAt = Date.now();
   try {
     const result = await mcpServer.elicitInput(
       {
@@ -252,10 +258,22 @@ async function requestAlwaysAllowFollowUp(
       },
       { timeout: alwaysAllowFollowUpTimeoutMs },
     );
-    return result.action === "accept";
+    return { accepted: result.action === "accept", timedOut: false };
   } catch {
-    return false;
+    return {
+      accepted: false,
+      timedOut:
+        Date.now() - startedAt >= alwaysAllowFollowUpTimeoutMs * 0.9,
+    };
   }
+}
+
+function alwaysAllowFollowUpTimeoutMessage(toolName: string): string {
+  return (
+    `The Always Allow prompt for ${toolName} timed out after 5 seconds ` +
+    `(auto-declined). The current action was approved, but it was not saved ` +
+    `for future calls; they will ask for approval again.`
+  );
 }
 
 // A WeakSet so a short-lived server in tests doesn't leak,
@@ -577,7 +595,7 @@ export async function handleRunTool(
           mcpServer,
           toolName,
         );
-        if (alwaysAllow) {
+        if (alwaysAllow.accepted) {
           try {
             await callRemoteTool(remoteClient, "set_tool_approval", {
               server_id: serverId,
@@ -590,6 +608,24 @@ export async function handleRunTool(
               `[set_tool_approval] failed to persist "${toolName}" to Glean: ${detail}`,
             );
           }
+        }
+
+        if (alwaysAllow.timedOut) {
+          const downstreamResult = await callRemoteTool(
+            remoteClient,
+            "run_tool",
+            buildRemoteArgs(serverId, toolName, resolvedArgs),
+          );
+          return {
+            ...downstreamResult,
+            content: [
+              {
+                type: "text",
+                text: alwaysAllowFollowUpTimeoutMessage(toolName),
+              },
+              ...downstreamResult.content,
+            ],
+          };
         }
       } catch (err) {
         // Fail CLOSED. An approval gate that executes the action when the
