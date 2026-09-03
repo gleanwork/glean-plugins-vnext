@@ -1,15 +1,20 @@
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import type {
-  OAuthClientInformationMixed,
+  OAuthClientProvider,
   OAuthClientMetadata,
-  OAuthTokens,
-} from "@modelcontextprotocol/sdk/shared/auth.js";
+  StoredOAuthClientInformation,
+  StoredOAuthTokens,
+} from "@modelcontextprotocol/client";
 import { execFile, spawn } from "node:child_process";
 import { platform } from "node:os";
 import { getCallbackUrl, setExpectedState } from "./auth-callback-server.js";
 import { clearCredentials, loadCredentials, saveCredentials } from "./token-store.js";
 
-export type InvalidationScope = "all" | "client" | "tokens" | "verifier";
+export type InvalidationScope =
+  | "all"
+  | "client"
+  | "tokens"
+  | "verifier"
+  | "discovery";
 
 /**
  * Open `url` in the user's default browser. Used for the self-open sign-in
@@ -39,8 +44,8 @@ export function openBrowser(url: string): void {
 }
 
 export class GleanOAuthClientProvider implements OAuthClientProvider {
-  private _clientInfo: OAuthClientInformationMixed | undefined;
-  private _tokens: OAuthTokens | undefined;
+  private _clientInfo: StoredOAuthClientInformation | undefined;
+  private _tokens: StoredOAuthTokens | undefined;
   private _codeVerifier = "";
   private _pendingAuthCode: string | undefined;
   // True between issuing an authorize URL and either receiving tokens or
@@ -56,13 +61,15 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
    * refresh failure). Used by the plugin to push a tools/list_changed
    * notification so the host re-fetches the dynamic tool surface.
    */
-  onTokensChanged?: (tokens: OAuthTokens | undefined) => void;
+  onTokensChanged?: (tokens: StoredOAuthTokens | undefined) => void;
 
   constructor() {
     const stored = loadCredentials();
     if (stored) {
-      this._tokens = stored.tokens as OAuthTokens | undefined;
-      this._clientInfo = stored.clientInfo as OAuthClientInformationMixed | undefined;
+      this._tokens = stored.tokens as StoredOAuthTokens | undefined;
+      this._clientInfo = stored.clientInfo as
+        | StoredOAuthClientInformation
+        | undefined;
     }
   }
 
@@ -77,20 +84,20 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
     };
   }
 
-  clientInformation(): OAuthClientInformationMixed | undefined {
+  clientInformation(): StoredOAuthClientInformation | undefined {
     return this._clientInfo;
   }
 
-  saveClientInformation(info: OAuthClientInformationMixed): void {
+  saveClientInformation(info: StoredOAuthClientInformation): void {
     this._clientInfo = info;
     saveCredentials(this._tokens, this._clientInfo);
   }
 
-  tokens(): OAuthTokens | undefined {
+  tokens(): StoredOAuthTokens | undefined {
     return this._tokens;
   }
 
-  saveTokens(tokens: OAuthTokens): void {
+  saveTokens(tokens: StoredOAuthTokens): void {
     this._tokens = tokens;
     this._authUrlPending = false;
     saveCredentials(this._tokens, this._clientInfo);
@@ -118,6 +125,9 @@ export class GleanOAuthClientProvider implements OAuthClientProvider {
         break;
       case "verifier":
         this._codeVerifier = "";
+        break;
+      case "discovery":
+        // This provider does not persist discovery metadata.
         break;
     }
     if (

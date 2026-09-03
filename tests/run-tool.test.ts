@@ -253,6 +253,7 @@ function makeRemote() {
     callTool: vi.fn().mockResolvedValue({
       content: [{ type: "text", text: "ok" }],
     }),
+    getProtocolEra: vi.fn().mockReturnValue("legacy"),
     close: vi.fn(),
   } as any;
 }
@@ -327,6 +328,19 @@ describe("handleRunTool (HITL)", () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
     const server = makeServer({ elicitation: false });
+    await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
+
+    await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
+
+    expect(server.elicitInput).not.toHaveBeenCalled();
+    expect(remote.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run the plugin-owned gate for a modern remote server", async () => {
+    vi.stubEnv("ENABLE_HITL", "true");
+    const remote = makeRemote();
+    remote.getProtocolEra = vi.fn().mockReturnValue("modern");
+    const server = makeServer({ elicitation: true });
     await writeToolJson(tmpDir, "jirasearch", { requires_approval: true });
 
     await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);

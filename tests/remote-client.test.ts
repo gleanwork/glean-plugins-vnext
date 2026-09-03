@@ -1,8 +1,18 @@
-import { describe, it, expect, afterEach } from "vitest";
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { describe, it, expect, afterEach, vi } from "vitest";
+import type { Client } from "@modelcontextprotocol/client";
+import {
+  acceptedContent,
+  createMcpHandler,
+  inputRequired,
+  McpServer,
+  type CallToolResult as ModernCallToolResult,
+  type InputRequiredResult,
+} from "@modelcontextprotocol/server";
+import * as z from "zod/v4";
 import {
   buildGatewayMetadataHeader,
   callRemoteTool,
+  createRemoteClient,
   remoteToolTimeoutMs,
 } from "../src/remote-client.js";
 
@@ -102,11 +112,11 @@ describe("callRemoteTool", () => {
   });
 
   it("passes the configured timeout to client.callTool", async () => {
-    const calls: Array<{ params: unknown; schema: unknown; options: unknown }> =
+    const calls: Array<{ params: unknown; options: unknown }> =
       [];
     const fakeClient = {
-      callTool: async (params: unknown, schema: unknown, options: unknown) => {
-        calls.push({ params, schema, options });
+      callTool: async (params: unknown, options: unknown) => {
+        calls.push({ params, options });
         return { content: [{ type: "text", text: "ok" }] };
       },
     } as unknown as Client;
@@ -136,5 +146,72 @@ describe("callRemoteTool", () => {
 
     const result = await callRemoteTool(fakeClient, "some_tool", {});
     expect(result).toEqual({ content: [] });
+  });
+});
+
+describe("remote elicitation bridge", () => {
+  it("forwards input_required to the local host and resumes with requestState", async () => {
+    let invocations = 0;
+    const requestStates: Array<string | undefined> = [];
+    const handler = createMcpHandler(() => {
+      const server = new McpServer({ name: "test", version: "1.0.0" });
+      server.registerTool(
+        "approve",
+        { inputSchema: z.object({}) },
+        async (_args, ctx): Promise<ModernCallToolResult | InputRequiredResult> => {
+          invocations += 1;
+          requestStates.push(ctx.mcpReq.requestState<string>());
+          const answer = acceptedContent<{ approved: boolean }>(
+            ctx.mcpReq.inputResponses,
+            "approval",
+          );
+          if (!answer?.approved) {
+            return inputRequired({
+              inputRequests: {
+                approval: inputRequired.elicit({
+                  message: "Approve this action?",
+                  requestedSchema: {
+                    type: "object",
+                    properties: { approved: { type: "boolean" } },
+                    required: ["approved"],
+                  },
+                }),
+              },
+              requestState: "opaque-state",
+            });
+          }
+          return { content: [{ type: "text", text: "executed" }] };
+        },
+      );
+      return server;
+    });
+    const elicitInput = vi.fn().mockResolvedValue({
+      action: "accept",
+      content: { approved: true },
+    });
+    const client = await createRemoteClient("http://test.local/mcp", {
+      fetch: (url, init) => handler.fetch(new Request(url, init)),
+      elicitInput,
+    });
+
+    try {
+      expect(client.getProtocolEra()).toBe("modern");
+      const result = await callRemoteTool(client, "approve", {});
+
+      expect(result.content).toEqual([{ type: "text", text: "executed" }]);
+      expect(elicitInput).toHaveBeenCalledTimes(1);
+      expect(elicitInput.mock.calls[0][0]).toMatchObject({
+        message: "Approve this action?",
+        requestedSchema: {
+          type: "object",
+          properties: { approved: { type: "boolean" } },
+        },
+      });
+      expect(invocations).toBe(2);
+      expect(requestStates).toEqual([undefined, "opaque-state"]);
+    } finally {
+      await client.close();
+      await handler.close();
+    }
   });
 });

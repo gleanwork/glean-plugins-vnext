@@ -1,4 +1,4 @@
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import type { Client } from "@modelcontextprotocol/client";
 import { callRemoteTool } from "../remote-client.js";
 import { writeSkillsToDisk, formatAvailableSkillsPrompt } from "../skill-writer.js";
 import type { SkillsMap } from "../types.js";

@@ -1,4 +1,4 @@
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import type { Client } from "@modelcontextprotocol/client";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { EmptyResultSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -427,7 +427,12 @@ export async function handleRunTool(
   if (
     hitlEnabled &&
     toolMeta?.requires_approval &&
-    mcpServer.getClientCapabilities()?.elicitation
+    mcpServer.getClientCapabilities()?.elicitation &&
+    // Modern Glean servers own the approval and return input_required. The
+    // remote v2 client forwards that request to this same local host, so
+    // prompting here as well would ask the user twice. Keep this gate only as
+    // a fallback for legacy remote servers.
+    remoteClient.getProtocolEra() !== "modern"
   ) {
     // In bypassPermissions mode (`claude --dangerously-skip-permissions`) the
     // user has opted out of every approval prompt for the session, so our own
