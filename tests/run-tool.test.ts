@@ -965,7 +965,7 @@ describe("handleRunTool (HITL)", () => {
     const elicit = vi
       .fn()
       .mockResolvedValueOnce({ action: "accept" })
-      .mockRejectedValueOnce(new Error("Request timed out"));
+      .mockResolvedValueOnce({ action: "decline" });
     const server = makeServer({ elicitation: true, elicit });
     await writeToolJson(tmpDir, "timeout_tool", { requires_approval: true });
     const now = vi

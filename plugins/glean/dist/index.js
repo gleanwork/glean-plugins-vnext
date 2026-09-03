@@ -26713,7 +26713,11 @@ async function requestAlwaysAllowFollowUp(mcpServer2, toolName) {
       },
       { timeout: alwaysAllowFollowUpTimeoutMs }
     );
-    return { accepted: result.action === "accept", timedOut: false };
+    const elapsedMs = Date.now() - startedAt;
+    return {
+      accepted: result.action === "accept",
+      timedOut: result.action !== "accept" && elapsedMs >= alwaysAllowFollowUpTimeoutMs * 0.9
+    };
   } catch {
     return {
       accepted: false,
