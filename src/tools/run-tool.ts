@@ -252,7 +252,9 @@ async function requestAlwaysAllowFollowUp(
   try {
     const result = await mcpServer.elicitInput(
       {
-        message: `Always allow ${toolName} for future calls?`,
+        message:
+          `Always allow ${toolName} for future calls?\n\n` +
+          `(Auto-declines in 5 seconds)`,
         // Empty form preserves the host-native Yes/No actions.
         requestedSchema: { type: "object", properties: {} } as any,
       },

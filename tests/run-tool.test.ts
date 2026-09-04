@@ -923,6 +923,10 @@ describe("handleRunTool (HITL)", () => {
     );
 
     expect(elicit).toHaveBeenCalledTimes(2);
+    expect(elicit.mock.calls[1][0].message).toBe(
+      "Always allow remote_required_tool for future calls?\n\n" +
+        "(Auto-declines in 5 seconds)",
+    );
     expect(remote.callTool.mock.calls.map((c: any) => c[0].name)).toEqual([
       "get_tool_approval",
       "run_tool",
