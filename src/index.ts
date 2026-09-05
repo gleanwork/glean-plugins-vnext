@@ -178,7 +178,22 @@ function getOAuthProvider(): GleanOAuthClientProvider {
 }
 
 function getRemoteClientOpts(): RemoteClientOptions {
-  return { authProvider: getOAuthProvider() };
+  const supportsElicitation = !!server.getClientCapabilities()?.elicitation;
+  return {
+    authProvider: getOAuthProvider(),
+    ...(supportsElicitation
+      ? {
+          elicitInput: (params, options) =>
+            server.elicitInput(
+              {
+                message: params.message,
+                requestedSchema: params.requestedSchema,
+              },
+              options,
+            ),
+        }
+      : {}),
+  };
 }
 
 const FIND_SKILLS_TOOL: Tool = {

@@ -1,6 +1,10 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
+import {
+  Client,
+  StreamableHTTPClientTransport,
+  UnauthorizedError,
+  type ElicitRequest,
+  type ElicitResult,
+} from "@modelcontextprotocol/client";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { GleanOAuthClientProvider } from "./auth-provider.js";
 import { pluginVersionString } from "./version.js";
@@ -104,6 +108,11 @@ function loggingFetch(
 
 export interface RemoteClientOptions {
   authProvider?: GleanOAuthClientProvider;
+  fetch?: typeof fetch;
+  elicitInput?: (
+    params: Exclude<ElicitRequest["params"], { mode: "url" }>,
+    options: { timeout: number },
+  ) => Promise<ElicitResult>;
 }
 
 export class AuthRequiredError extends Error {
@@ -132,7 +141,7 @@ function buildTransport(
 
   const transportOpts: ConstructorParameters<typeof StreamableHTTPClientTransport>[1] = {
     requestInit: { headers },
-    fetch: loggingFetch,
+    fetch: opts.fetch ?? loggingFetch,
   };
 
   if (opts.authProvider) {
@@ -188,8 +197,29 @@ export async function createRemoteClient(
 
   const client = new Client(
     { name: "glean", version: pluginVersionString() },
-    { capabilities: {} },
+    {
+      // The remote may return an input_required result only when the client
+      // declares the matching capability. Mirror the local host's form
+      // elicitation support instead of claiming a UI the plugin does not own.
+      capabilities: opts.elicitInput ? { elicitation: {} } : {},
+      // Probe for the 2026-07-28 protocol, while retaining the legacy
+      // initialize fallback for older Glean deployments.
+      versionNegotiation: { mode: "auto" },
+    },
   );
+
+  if (opts.elicitInput) {
+    client.setRequestHandler("elicitation/create", async (request) => {
+      // We advertise form mode only, so the SDK rejects URL-mode requests
+      // before dispatching them here.
+      if (request.params.mode === "url") {
+        throw new Error("URL-mode elicitation is not supported by the local host");
+      }
+      return opts.elicitInput!(request.params, {
+        timeout: remoteToolTimeoutMs(),
+      });
+    });
+  }
 
   const transport = buildTransport(serverUrl, opts, chatSessionId);
 
@@ -217,7 +247,6 @@ export async function callRemoteTool(
   // here rather than at each call site means a new caller cannot forget to.
   const result = await client.callTool(
     { name, arguments: args, ...negotiationMeta() },
-    undefined,
     { timeout: remoteToolTimeoutMs() },
   );
   recordPolicyFromResult(result, `tools/call(${name})`);

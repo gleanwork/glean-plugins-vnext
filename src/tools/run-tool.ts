@@ -1,4 +1,4 @@
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import type { Client } from "@modelcontextprotocol/client";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { EmptyResultSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -429,6 +429,10 @@ export async function handleRunTool(
     toolMeta?.requires_approval &&
     mcpServer.getClientCapabilities()?.elicitation
   ) {
+    // The Glean plugin owns write approval for run_tool on both legacy and
+    // modern gateway paths. Remote elicitation is forwarded separately for
+    // downstream tools that need additional user input; it does not replace
+    // this pre-execution approval gate.
     // In bypassPermissions mode (`claude --dangerously-skip-permissions`) the
     // user has opted out of every approval prompt for the session, so our own
     // elicitation gate is just a redundant popup — skip it and execute

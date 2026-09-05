@@ -53,7 +53,6 @@ describe("handleFindSkills", () => {
         name: "find_skills",
         arguments: {},
       }),
-      undefined,
       expect.objectContaining({ timeout: expect.any(Number) }),
     );
 
@@ -79,7 +78,6 @@ describe("handleFindSkills", () => {
         name: "find_skills",
         arguments: { queries: ["create a calendar event"] },
       }),
-      undefined,
       expect.objectContaining({ timeout: expect.any(Number) }),
     );
   });
@@ -96,7 +94,6 @@ describe("handleFindSkills", () => {
         name: "find_skills",
         arguments: { queries: ["search emails", "create calendar event"] },
       }),
-      undefined,
       expect.objectContaining({ timeout: expect.any(Number) }),
     );
   });

@@ -15,15 +15,18 @@
     "prepare": "git config core.hooksPath .githooks"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "yaml": "^2.7.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
     "@types/node": "^22.0.0",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "zod": "^4.5.4"
   },
   "//overrides": "Pin hono>=4.12.25 (CVE-2026-54290, transitive from @modelcontextprotocol/sdk); pin esbuild/vite to clear CVE blocks that prevented install",
   "overrides": {
