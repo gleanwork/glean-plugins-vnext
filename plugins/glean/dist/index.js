@@ -42461,11 +42461,7 @@ async function handleRunTool(remoteClient, mcpServer2, skillsBaseDir, args, poli
     throw err;
   }
   const hitlEnabled = process.env.ENABLE_HITL === "true";
-  if (hitlEnabled && toolMeta?.requires_approval && mcpServer2.getClientCapabilities()?.elicitation && // Modern Glean servers own the approval and return input_required. The
-  // remote v2 client forwards that request to this same local host, so
-  // prompting here as well would ask the user twice. Keep this gate only as
-  // a fallback for legacy remote servers.
-  remoteClient.getProtocolEra() !== "modern") {
+  if (hitlEnabled && toolMeta?.requires_approval && mcpServer2.getClientCapabilities()?.elicitation) {
     const bypass = await currentPermissionMode() === "bypassPermissions";
     if (!bypass) {
       const message = await buildApprovalMessage(toolName, resolvedArgs);

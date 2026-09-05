@@ -427,13 +427,12 @@ export async function handleRunTool(
   if (
     hitlEnabled &&
     toolMeta?.requires_approval &&
-    mcpServer.getClientCapabilities()?.elicitation &&
-    // Modern Glean servers own the approval and return input_required. The
-    // remote v2 client forwards that request to this same local host, so
-    // prompting here as well would ask the user twice. Keep this gate only as
-    // a fallback for legacy remote servers.
-    remoteClient.getProtocolEra() !== "modern"
+    mcpServer.getClientCapabilities()?.elicitation
   ) {
+    // The Glean plugin owns write approval for run_tool on both legacy and
+    // modern gateway paths. Remote elicitation is forwarded separately for
+    // downstream tools that need additional user input; it does not replace
+    // this pre-execution approval gate.
     // In bypassPermissions mode (`claude --dangerously-skip-permissions`) the
     // user has opted out of every approval prompt for the session, so our own
     // elicitation gate is just a redundant popup — skip it and execute

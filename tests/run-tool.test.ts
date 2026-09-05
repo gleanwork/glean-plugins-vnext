@@ -336,7 +336,7 @@ describe("handleRunTool (HITL)", () => {
     expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
 
-  it("does not run the plugin-owned gate for a modern remote server", async () => {
+  it("runs the plugin-owned gate for a modern remote server", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
     remote.getProtocolEra = vi.fn().mockReturnValue("modern");
@@ -345,7 +345,7 @@ describe("handleRunTool (HITL)", () => {
 
     await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
-    expect(server.elicitInput).not.toHaveBeenCalled();
+    expect(server.elicitInput).toHaveBeenCalledTimes(1);
     expect(remote.callTool).toHaveBeenCalledTimes(1);
   });
 
