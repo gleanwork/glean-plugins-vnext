@@ -293,7 +293,7 @@ function expectedApprovalMessage(toolName: string): string {
     `Allow running the write tool ${toolName}?\n\n` +
     `Always Allow is selected by default. Accepting with this selection ` +
     `saves approval for future calls to this tool. To change it, select a ` +
-    `different Persistent approval option below.`
+    `different Approval option below.`
   );
 }
 
@@ -461,12 +461,10 @@ describe("handleRunTool (HITL)", () => {
 
     const params = elicit.mock.calls[0][0];
     expect(params.message).toBe(expectedApprovalMessage("jirasearch"));
-    expect(params.requestedSchema.properties.approval.title).toBe(
-      "Persistent approval",
-    );
+    expect(params.requestedSchema.properties.approval.title).toBe("Approval");
   });
 
-  it("offers a required Persistent approval choice with Always allow selected by default", async () => {
+  it("offers a required Approval enum with Always Allow selected by default", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
     const elicit = allowOnce();
@@ -485,13 +483,9 @@ describe("handleRunTool (HITL)", () => {
         properties: {
           approval: {
             type: "string",
-            title: "Persistent approval",
+            title: "Approval",
             description: "Whether to run jirasearch.",
-            oneOf: [
-              { const: "Always Allow", title: "Always allow" },
-              { const: "Allow", title: "Allow once" },
-              { const: "Deny", title: "Deny" },
-            ],
+            enum: ["Always Allow", "Allow", "Deny"],
             default: "Always Allow",
           },
         },
@@ -926,10 +920,10 @@ describe("handleRunTool (HITL)", () => {
     );
 
     expect(elicit).toHaveBeenCalledTimes(1);
-    expect(elicit.mock.calls[0][0].requestedSchema.properties.approval.oneOf).toEqual([
-      { const: "Always Allow", title: "Always allow" },
-      { const: "Allow", title: "Allow once" },
-      { const: "Deny", title: "Deny" },
+    expect(elicit.mock.calls[0][0].requestedSchema.properties.approval.enum).toEqual([
+      "Always Allow",
+      "Allow",
+      "Deny",
     ]);
     expect(remote.callTool.mock.calls.map((c: any) => c[0].name)).toEqual([
       "get_tool_approval",
