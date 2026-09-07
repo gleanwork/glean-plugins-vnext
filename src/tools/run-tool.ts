@@ -214,7 +214,11 @@ type ApprovalDecision = ApprovalChoice | typeof approvalCancel;
 function runToolApprovalForm(toolName: string) {
   return {
     mode: "form" as const,
-    message: `Allow running the write tool ${toolName}?`,
+    message:
+      `Allow running the write tool ${toolName}?\n\n` +
+      `Always Allow is selected by default. Accepting with this selection ` +
+      `saves approval for future calls to this tool. To change it, select a ` +
+      `different Approval option below.`,
     requestedSchema: {
       type: "object",
       required: [approvalField],

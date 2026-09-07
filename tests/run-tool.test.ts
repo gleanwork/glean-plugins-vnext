@@ -288,6 +288,15 @@ function allowOnce() {
   return vi.fn().mockResolvedValue(approvalResult("Allow"));
 }
 
+function expectedApprovalMessage(toolName: string): string {
+  return (
+    `Allow running the write tool ${toolName}?\n\n` +
+    `Always Allow is selected by default. Accepting with this selection ` +
+    `saves approval for future calls to this tool. To change it, select a ` +
+    `different Approval option below.`
+  );
+}
+
 function makeServer(opts: {
   elicitation?: boolean;
   clientName?: string;
@@ -413,7 +422,7 @@ describe("handleRunTool (HITL)", () => {
     );
 
     const params = elicit.mock.calls[0][0];
-    expect(params.message).toBe("Allow running the write tool jirasearch?");
+    expect(params.message).toBe(expectedApprovalMessage("jirasearch"));
     expect(JSON.stringify(params.requestedSchema)).not.toContain(
       "note\\nAPPROVAL",
     );
@@ -451,7 +460,7 @@ describe("handleRunTool (HITL)", () => {
     await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     const params = elicit.mock.calls[0][0];
-    expect(params.message).toBe("Allow running the write tool jirasearch?");
+    expect(params.message).toBe(expectedApprovalMessage("jirasearch"));
     expect(params.requestedSchema.properties.approval.title).toBe("Approval");
   });
 
@@ -467,7 +476,7 @@ describe("handleRunTool (HITL)", () => {
     expect(elicit).toHaveBeenCalledTimes(1);
     expect(elicit.mock.calls[0][0]).toEqual({
       mode: "form",
-      message: "Allow running the write tool jirasearch?",
+      message: expectedApprovalMessage("jirasearch"),
       requestedSchema: {
         type: "object",
         required: ["approval"],
@@ -682,7 +691,7 @@ describe("handleRunTool (HITL)", () => {
     await handleRunTool(remote, server, tmpDir, baseArgs, ALL_ON);
 
     const [params, options] = elicit.mock.calls[0];
-    expect(params.message).toBe("Allow running the write tool jirasearch?");
+    expect(params.message).toBe(expectedApprovalMessage("jirasearch"));
     expect(options.timeout).toBe(300_000);
     expect(remote.callTool.mock.calls.map((c: any) => c[0].name)).toEqual([
       "get_tool_approval",
@@ -796,7 +805,7 @@ describe("handleRunTool (HITL)", () => {
     }, ALL_ON);
 
     const params = elicit.mock.calls[0][0];
-    expect(params.message).toBe("Allow running the write tool create_doc?");
+    expect(params.message).toBe(expectedApprovalMessage("create_doc"));
     expect(JSON.stringify(params.requestedSchema)).not.toContain(bigBody);
     expect(remote.downstreamCall).toHaveBeenCalledTimes(1);
   });
@@ -818,7 +827,7 @@ describe("handleRunTool (HITL)", () => {
     }, ALL_ON);
 
     expect(elicit.mock.calls[0][0].message).toBe(
-      "Allow running the write tool create_doc?",
+      expectedApprovalMessage("create_doc"),
     );
     expect(remote.downstreamCall.mock.calls[0][0].arguments.arguments).toEqual({
       title: "Doc",

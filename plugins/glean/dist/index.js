@@ -26606,7 +26606,9 @@ var approvalChoices = [
 function runToolApprovalForm(toolName) {
   return {
     mode: "form",
-    message: `Allow running the write tool ${toolName}?`,
+    message: `Allow running the write tool ${toolName}?
+
+Always Allow is selected by default. Accepting with this selection saves approval for future calls to this tool. To change it, select a different Approval option below.`,
     requestedSchema: {
       type: "object",
       required: [approvalField],
