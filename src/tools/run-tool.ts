@@ -7,7 +7,6 @@ import os from "node:os";
 import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
 import { FILE_ARGS_DISABLED_TEXT } from "../policy/enforce.js";
-import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
 import { resolveSessionId } from "../session-id.js";
 import { hostSharedDataDir } from "../data-dir.js";
 
@@ -197,91 +196,57 @@ export function isCursorClient(mcpServer: Server): boolean {
     .startsWith("cursor");
 }
 
-// Plain text, NOT Markdown: Claude Code does not reliably render Markdown in
-// elicitation prompts. Kept short (a few lines) so the Accept/Decline buttons
-// stay in view; full argument detail spills to a file when it can't fit.
-//
-// Every host gets the same text, Cursor included. Cursor was an exception for good
-// reason until recently: it rendered the tool and its arguments itself, directly above
-// the prompt, so its message was only a review ask — "Review the tool and arguments
-// shown above". As of August 2026 Cursor no longer renders them (confirmed by
-// screenshot), which left that message pointing at nothing on screen. The shared text
-// names the action and arguments itself, so it cannot go stale that way. Re-introducing
-// a host-specific short form means first confirming that host still displays the
-// arguments somewhere.
-async function buildApprovalMessage(
-  toolName: string,
-  args: unknown,
-): Promise<string> {
-  const { lines, needsFile } = buildCompactArgs(args);
-  // Indent argument lines under "Arguments:" so the structural labels stay
-  // distinct from values; keys are uppercased (in compactArgLine) so a key
-  // reads distinctly from its value — plain-text cues that cost no vertical
-  // space.
-  const message = [
-    `Action: ${toolName}`,
-    "Arguments:",
-    ...lines.map((line) => `  ${line}`),
-  ];
-  if (needsFile) {
-    // Best-effort: a failed spill (e.g. a sandbox blocking writes outside the
-    // project dir) must never break the approval gate, so fall back to a note.
-    try {
-      const filePath = await writeApprovalArgsFile(toolName, args);
-      message.push(`  Full arguments: ${filePath}`);
-    } catch {
-      message.push("  (some arguments truncated; full-args file unavailable)");
-    }
-  }
-  return message.join("\n");
-}
+// Keep this form aligned with Scio's run_tool approval UX: one required enum,
+// with Always Allow first and selected by default.
+const approvalField = "approval";
+const approvalAlwaysAllow = "Always Allow";
+const approvalAllow = "Allow";
+const approvalDeny = "Deny";
+const approvalCancel = "cancel";
+const approvalChoices = [
+  approvalAlwaysAllow,
+  approvalAllow,
+  approvalDeny,
+] as const;
+type ApprovalChoice = (typeof approvalChoices)[number];
+type ApprovalDecision = ApprovalChoice | typeof approvalCancel;
 
-// This follow-up only controls approval for future calls.
-const alwaysAllowFollowUpTimeoutMs = 5_000;
-
-interface AlwaysAllowFollowUpResult {
-  accepted: boolean;
-  timedOut: boolean;
-}
-
-async function requestAlwaysAllowFollowUp(
-  mcpServer: Server,
-  toolName: string,
-): Promise<AlwaysAllowFollowUpResult> {
-  const startedAt = Date.now();
-  try {
-    const result = await mcpServer.elicitInput(
-      {
-        message:
-          `Always allow ${toolName} for future calls?\n\n` +
-          `(Auto-declines in 5 seconds)`,
-        // Empty form preserves the host-native Yes/No actions.
-        requestedSchema: { type: "object", properties: {} } as any,
+function runToolApprovalForm(toolName: string) {
+  return {
+    mode: "form" as const,
+    message: `Allow running the write tool ${toolName}?`,
+    requestedSchema: {
+      type: "object",
+      required: [approvalField],
+      properties: {
+        [approvalField]: {
+          type: "string",
+          title: "Approval",
+          description: `Whether to run ${toolName}.`,
+          enum: [...approvalChoices],
+          default: approvalChoices[0],
+        },
       },
-      { timeout: alwaysAllowFollowUpTimeoutMs },
-    );
-    const elapsedMs = Date.now() - startedAt;
-    return {
-      accepted: result.action === "accept",
-      timedOut:
-        result.action !== "accept" &&
-        elapsedMs >= alwaysAllowFollowUpTimeoutMs * 0.9,
-    };
-  } catch {
-    return {
-      accepted: false,
-      timedOut:
-        Date.now() - startedAt >= alwaysAllowFollowUpTimeoutMs * 0.9,
-    };
-  }
+    } as any,
+  };
 }
 
-function alwaysAllowFollowUpTimeoutMessage(toolName: string): string {
-  return (
-    `The Always Allow prompt for ${toolName} timed out after 5 seconds ` +
-    `(auto-declined). The current action was approved, but it was not saved ` +
-    `for future calls; they will ask for approval again.`
-  );
+function approvalDecision(result: {
+  action: string;
+  content?: unknown;
+}): ApprovalDecision | null {
+  if (result.action === "decline") return approvalDeny;
+  if (result.action === "cancel") return approvalCancel;
+  if (result.action !== "accept") return null;
+  if (
+    typeof result.content !== "object" ||
+    result.content === null ||
+    Array.isArray(result.content)
+  ) {
+    return null;
+  }
+  const choice = (result.content as Record<string, unknown>)[approvalField];
+  return approvalChoices.find((candidate) => candidate === choice) ?? null;
 }
 
 // A WeakSet so a short-lived server in tests doesn't leak,
@@ -515,9 +480,8 @@ export async function handleRunTool(
     };
   }
 
-  // Resolve file_args up front so the approval prompt shows the COMPLETE input
-  // (file-sourced values included, not just the inline `arguments`), and so an
-  // unreadable file_args path fails before we prompt the user.
+  // Resolve file_args before approval so the approved call uses the complete
+  // input and an unreadable model-supplied path fails before we prompt the user.
   const baseArgs =
     args.arguments != null && typeof args.arguments === "object"
       ? (args.arguments as Record<string, unknown>)
@@ -572,7 +536,6 @@ export async function handleRunTool(
     // gate. Only bypassPermissions is skipped (deliberately narrow).
     const bypass = (await currentPermissionMode()) === "bypassPermissions";
     if (!bypass) {
-      const message = await buildApprovalMessage(toolName, resolvedArgs);
       const timeout = hitlTimeoutMs();
 
       // Make a dummy empty request to burn JSON-RPC request id 0
@@ -581,29 +544,36 @@ export async function handleRunTool(
       const startedAt = Date.now();
       try {
         const result = await mcpServer.elicitInput(
-          {
-            message,
-            requestedSchema: { type: "object", properties: {} } as any,
-          },
+          runToolApprovalForm(toolName),
           { timeout },
         );
+        const decision = approvalDecision(result);
 
-        if (result.action !== "accept") {
+        if (decision === approvalDeny || decision === approvalCancel) {
           return {
             content: [
               {
                 type: "text",
-                text: `Action ${toolName} was ${result.action === "decline" ? "declined" : "cancelled"} by the user.`,
+                text: `Action ${toolName} was ${decision === approvalDeny ? "declined" : "cancelled"} by the user.`,
               },
             ],
           };
         }
+        if (decision === null) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `Action ${toolName} was not approved — the approval form ` +
+                  `response was invalid. The action was NOT executed.`,
+              },
+            ],
+            isError: true,
+          };
+        }
 
-        const alwaysAllow = await requestAlwaysAllowFollowUp(
-          mcpServer,
-          toolName,
-        );
-        if (alwaysAllow.accepted) {
+        if (decision === approvalAlwaysAllow) {
           try {
             await callRemoteTool(remoteClient, "set_tool_approval", {
               server_id: serverId,
@@ -616,24 +586,6 @@ export async function handleRunTool(
               `[set_tool_approval] failed to persist "${toolName}" to Glean: ${detail}`,
             );
           }
-        }
-
-        if (alwaysAllow.timedOut) {
-          const downstreamResult = await callRemoteTool(
-            remoteClient,
-            "run_tool",
-            buildRemoteArgs(serverId, toolName, resolvedArgs),
-          );
-          return {
-            ...downstreamResult,
-            content: [
-              {
-                type: "text",
-                text: alwaysAllowFollowUpTimeoutMessage(toolName),
-              },
-              ...downstreamResult.content,
-            ],
-          };
         }
       } catch (err) {
         // Fail CLOSED. An approval gate that executes the action when the
