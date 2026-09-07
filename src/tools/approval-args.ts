@@ -59,7 +59,10 @@ function compactArgLine(
     rendered = String(value);
   }
 
-  return { line: `${key.toUpperCase()}: ${rendered}`, truncated };
+  // Collapse whitespace in keys so model-supplied argument names cannot forge
+  // additional structural lines in the approval prompt.
+  const safeKey = key.replace(/\s+/g, " ").trim().toUpperCase();
+  return { line: `${safeKey}: ${rendered}`, truncated };
 }
 
 // Build the compact, viewport-friendly argument lines for the approval prompt.

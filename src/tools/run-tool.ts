@@ -7,7 +7,6 @@ import os from "node:os";
 import path from "node:path";
 import { callRemoteTool } from "../remote-client.js";
 import { FILE_ARGS_DISABLED_TEXT } from "../policy/enforce.js";
-import { buildCompactArgs, writeApprovalArgsFile } from "./approval-args.js";
 import { resolveSessionId } from "../session-id.js";
 import { hostSharedDataDir } from "../data-dir.js";
 
@@ -160,7 +159,6 @@ export async function resolveFileArgs(
 }
 
 interface ToolMetadata {
-  requires_approval?: boolean;
   name?: string;
   description?: string;
   server_id?: string;
@@ -198,43 +196,61 @@ export function isCursorClient(mcpServer: Server): boolean {
     .startsWith("cursor");
 }
 
-// Plain text, NOT Markdown: Claude Code does not reliably render Markdown in
-// elicitation prompts. Kept short (a few lines) so the Accept/Decline buttons
-// stay in view; full argument detail spills to a file when it can't fit.
-//
-// Every host gets the same text, Cursor included. Cursor was an exception for good
-// reason until recently: it rendered the tool and its arguments itself, directly above
-// the prompt, so its message was only a review ask — "Review the tool and arguments
-// shown above". As of August 2026 Cursor no longer renders them (confirmed by
-// screenshot), which left that message pointing at nothing on screen. The shared text
-// names the action and arguments itself, so it cannot go stale that way. Re-introducing
-// a host-specific short form means first confirming that host still displays the
-// arguments somewhere.
-async function buildApprovalMessage(
-  toolName: string,
-  args: unknown,
-): Promise<string> {
-  const { lines, needsFile } = buildCompactArgs(args);
-  // Indent argument lines under "Arguments:" so the structural labels stay
-  // distinct from values; keys are uppercased (in compactArgLine) so a key
-  // reads distinctly from its value — plain-text cues that cost no vertical
-  // space.
-  const message = [
-    `Action: ${toolName}`,
-    "Arguments:",
-    ...lines.map((line) => `  ${line}`),
-  ];
-  if (needsFile) {
-    // Best-effort: a failed spill (e.g. a sandbox blocking writes outside the
-    // project dir) must never break the approval gate, so fall back to a note.
-    try {
-      const filePath = await writeApprovalArgsFile(toolName, args);
-      message.push(`  Full arguments: ${filePath}`);
-    } catch {
-      message.push("  (some arguments truncated; full-args file unavailable)");
-    }
+// Keep this form aligned with Scio's run_tool approval UX: one required enum,
+// with Always Allow first and selected by default.
+const approvalField = "approval";
+const approvalAlwaysAllow = "Always Allow";
+const approvalAllow = "Allow";
+const approvalDeny = "Deny";
+const approvalCancel = "cancel";
+const approvalChoices = [
+  approvalAlwaysAllow,
+  approvalAllow,
+  approvalDeny,
+] as const;
+type ApprovalChoice = (typeof approvalChoices)[number];
+type ApprovalDecision = ApprovalChoice | typeof approvalCancel;
+
+function runToolApprovalForm(toolName: string) {
+  return {
+    mode: "form" as const,
+    message:
+      `Allow running the write tool ${toolName}?\n\n` +
+      `Always Allow is selected by default. Accepting with this selection ` +
+      `saves approval for future calls to this tool. To change it, select a ` +
+      `different Approval option below.`,
+    requestedSchema: {
+      type: "object",
+      required: [approvalField],
+      properties: {
+        [approvalField]: {
+          type: "string",
+          title: "Approval",
+          description: `Whether to run ${toolName}.`,
+          enum: [...approvalChoices],
+          default: approvalChoices[0],
+        },
+      },
+    } as any,
+  };
+}
+
+function approvalDecision(result: {
+  action: string;
+  content?: unknown;
+}): ApprovalDecision | null {
+  if (result.action === "decline") return approvalDeny;
+  if (result.action === "cancel") return approvalCancel;
+  if (result.action !== "accept") return null;
+  if (
+    typeof result.content !== "object" ||
+    result.content === null ||
+    Array.isArray(result.content)
+  ) {
+    return null;
   }
-  return message.join("\n");
+  const choice = (result.content as Record<string, unknown>)[approvalField];
+  return approvalChoices.find((candidate) => candidate === choice) ?? null;
 }
 
 // A WeakSet so a short-lived server in tests doesn't leak,
@@ -349,6 +365,87 @@ export interface RunToolPolicy {
   fileArgs: boolean;
 }
 
+class ToolApprovalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ToolApprovalError";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function approvalResponsePayload(result: CallToolResult): unknown {
+  const structured = (result as CallToolResult & {
+    structuredContent?: unknown;
+  }).structuredContent;
+  if (structured !== undefined) return structured;
+
+  const text = result.content.find((item) => item.type === "text");
+  if (!text || text.type !== "text") return undefined;
+  try {
+    return JSON.parse(text.text);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Ask the remote control plane whether this downstream tool requires approval.
+ * The remote response is the only approval source used by the execution gate.
+ */
+export async function getToolApproval(
+  remoteClient: Client,
+  serverId: string,
+  toolName: string,
+): Promise<boolean> {
+  let result: CallToolResult;
+  try {
+    result = await callRemoteTool(remoteClient, "get_tool_approval", {
+      server_id: serverId,
+      tool_name: toolName,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new ToolApprovalError(`remote lookup failed: ${detail}`);
+  }
+
+  if (result.isError) {
+    const text = result.content.find((item) => item.type === "text");
+    const detail = text?.type === "text" ? text.text : "remote lookup returned an error";
+    throw new ToolApprovalError(detail);
+  }
+
+  const payload = approvalResponsePayload(result);
+  if (!isRecord(payload) || typeof payload.requires_approval !== "boolean") {
+    throw new ToolApprovalError(
+      "remote response did not contain boolean requires_approval",
+    );
+  }
+  return payload.requires_approval;
+}
+
+function approvalLookupFailure(
+  toolName: string,
+  error: unknown,
+): CallToolResult {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error(`[get_tool_approval] ${toolName}: ${detail}`);
+  return {
+    content: [
+      {
+        type: "text",
+        text:
+          `Could not determine whether ${toolName} requires approval from the ` +
+          `remote settings. The action was NOT executed. Retry when the approval ` +
+          `settings are available.`,
+      },
+    ],
+    isError: true,
+  };
+}
+
 export async function handleRunTool(
   remoteClient: Client,
   mcpServer: Server,
@@ -368,9 +465,8 @@ export async function handleRunTool(
     };
   }
 
-  // Load the downstream tool's metadata once, up front: its inputSchema drives
-  // file_args JSON-parsing (object/array params) and its requires_approval
-  // drives the HITL gate. Both paths must see it regardless of ENABLE_HITL.
+  // Load the downstream tool's metadata only for inputSchema. Approval is fetched
+  // from the remote control plane below for every attempted downstream call.
   const toolMeta = await findToolJson(skillsBaseDir, toolName);
 
   // Refuse before resolveFileArgs, not alongside it. That function reads model-supplied
@@ -388,9 +484,8 @@ export async function handleRunTool(
     };
   }
 
-  // Resolve file_args up front so the approval prompt shows the COMPLETE input
-  // (file-sourced values included, not just the inline `arguments`), and so an
-  // unreadable file_args path fails before we prompt the user.
+  // Resolve file_args before approval so the approved call uses the complete
+  // input and an unreadable model-supplied path fails before we prompt the user.
   const baseArgs =
     args.arguments != null && typeof args.arguments === "object"
       ? (args.arguments as Record<string, unknown>)
@@ -412,6 +507,13 @@ export async function handleRunTool(
     throw err;
   }
 
+  let requiresApproval: boolean;
+  try {
+    requiresApproval = await getToolApproval(remoteClient, serverId, toolName);
+  } catch (err) {
+    return approvalLookupFailure(toolName, err);
+  }
+
   const hitlEnabled = process.env.ENABLE_HITL === "true";
   // Cursor is deliberately NOT excepted here any more. It used to be: we omitted
   // run_tool's readOnlyHint so Cursor showed its own native prompt, and skipped our
@@ -426,7 +528,7 @@ export async function handleRunTool(
   // possible cause — see elicitationFailureText.
   if (
     hitlEnabled &&
-    toolMeta?.requires_approval &&
+    requiresApproval &&
     mcpServer.getClientCapabilities()?.elicitation
   ) {
     // In bypassPermissions mode (`claude --dangerously-skip-permissions`) the
@@ -438,7 +540,6 @@ export async function handleRunTool(
     // gate. Only bypassPermissions is skipped (deliberately narrow).
     const bypass = (await currentPermissionMode()) === "bypassPermissions";
     if (!bypass) {
-      const message = await buildApprovalMessage(toolName, resolvedArgs);
       const timeout = hitlTimeoutMs();
 
       // Make a dummy empty request to burn JSON-RPC request id 0
@@ -447,22 +548,48 @@ export async function handleRunTool(
       const startedAt = Date.now();
       try {
         const result = await mcpServer.elicitInput(
-          {
-            message,
-            requestedSchema: { type: "object", properties: {} } as any,
-          },
+          runToolApprovalForm(toolName),
           { timeout },
         );
+        const decision = approvalDecision(result);
 
-        if (result.action !== "accept") {
+        if (decision === approvalDeny || decision === approvalCancel) {
           return {
             content: [
               {
                 type: "text",
-                text: `Action ${toolName} was ${result.action === "decline" ? "declined" : "cancelled"} by the user.`,
+                text: `Action ${toolName} was ${decision === approvalDeny ? "declined" : "cancelled"} by the user.`,
               },
             ],
           };
+        }
+        if (decision === null) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `Action ${toolName} was not approved — the approval form ` +
+                  `response was invalid. The action was NOT executed.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        if (decision === approvalAlwaysAllow) {
+          try {
+            await callRemoteTool(remoteClient, "set_tool_approval", {
+              server_id: serverId,
+              tool_name: toolName,
+              value: "ALWAYS_ALLOWED",
+            });
+          } catch (err) {
+            const detail = err instanceof Error ? err.message : String(err);
+            console.error(
+              `[set_tool_approval] failed to persist "${toolName}" to Glean: ${detail}`,
+            );
+          }
         }
       } catch (err) {
         // Fail CLOSED. An approval gate that executes the action when the
