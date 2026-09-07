@@ -218,19 +218,19 @@ function runToolApprovalForm(toolName: string) {
       `Allow running the write tool ${toolName}?\n\n` +
       `Always Allow is selected by default. Accepting with this selection ` +
       `saves approval for future calls to this tool. To change it, select a ` +
-      `different Approval option below.`,
+      `different Persistent approval option below.`,
     requestedSchema: {
       type: "object",
       required: [approvalField],
       properties: {
         [approvalField]: {
           type: "string",
-          title: "Approval",
+          title: "Persistent approval",
           description: `Whether to run ${toolName}.`,
           oneOf: [
-            { const: approvalAlwaysAllow, title: "🟢 Always Allow" },
-            { const: approvalAllow, title: "⚪ Allow" },
-            { const: approvalDeny, title: "🔴 Deny" },
+            { const: approvalAlwaysAllow, title: "Always allow" },
+            { const: approvalAllow, title: "Allow once" },
+            { const: approvalDeny, title: "Deny" },
           ],
           default: approvalChoices[0],
         },

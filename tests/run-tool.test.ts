@@ -293,7 +293,7 @@ function expectedApprovalMessage(toolName: string): string {
     `Allow running the write tool ${toolName}?\n\n` +
     `Always Allow is selected by default. Accepting with this selection ` +
     `saves approval for future calls to this tool. To change it, select a ` +
-    `different Approval option below.`
+    `different Persistent approval option below.`
   );
 }
 
@@ -461,10 +461,12 @@ describe("handleRunTool (HITL)", () => {
 
     const params = elicit.mock.calls[0][0];
     expect(params.message).toBe(expectedApprovalMessage("jirasearch"));
-    expect(params.requestedSchema.properties.approval.title).toBe("Approval");
+    expect(params.requestedSchema.properties.approval.title).toBe(
+      "Persistent approval",
+    );
   });
 
-  it("offers a required Approval enum with Always Allow selected by default", async () => {
+  it("offers a required Persistent approval choice with Always allow selected by default", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
     const elicit = allowOnce();
@@ -483,12 +485,12 @@ describe("handleRunTool (HITL)", () => {
         properties: {
           approval: {
             type: "string",
-            title: "Approval",
+            title: "Persistent approval",
             description: "Whether to run jirasearch.",
             oneOf: [
-              { const: "Always Allow", title: "🟢 Always Allow" },
-              { const: "Allow", title: "⚪ Allow" },
-              { const: "Deny", title: "🔴 Deny" },
+              { const: "Always Allow", title: "Always allow" },
+              { const: "Allow", title: "Allow once" },
+              { const: "Deny", title: "Deny" },
             ],
             default: "Always Allow",
           },
@@ -925,9 +927,9 @@ describe("handleRunTool (HITL)", () => {
 
     expect(elicit).toHaveBeenCalledTimes(1);
     expect(elicit.mock.calls[0][0].requestedSchema.properties.approval.oneOf).toEqual([
-      { const: "Always Allow", title: "🟢 Always Allow" },
-      { const: "Allow", title: "⚪ Allow" },
-      { const: "Deny", title: "🔴 Deny" },
+      { const: "Always Allow", title: "Always allow" },
+      { const: "Allow", title: "Allow once" },
+      { const: "Deny", title: "Deny" },
     ]);
     expect(remote.callTool.mock.calls.map((c: any) => c[0].name)).toEqual([
       "get_tool_approval",
@@ -985,7 +987,7 @@ describe("handleRunTool (HITL)", () => {
     ]);
   });
 
-  it("fails closed when an accepted form response is missing Approval", async () => {
+  it("fails closed when an accepted form response is missing its approval choice", async () => {
     vi.stubEnv("ENABLE_HITL", "true");
     const remote = makeRemote();
     const elicit = vi.fn().mockResolvedValue({ action: "accept", content: {} });
