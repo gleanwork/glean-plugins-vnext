@@ -227,7 +227,11 @@ function runToolApprovalForm(toolName: string) {
           type: "string",
           title: "Approval",
           description: `Whether to run ${toolName}.`,
-          enum: [...approvalChoices],
+          oneOf: [
+            { const: approvalAlwaysAllow, title: "🟢 Always Allow" },
+            { const: approvalAllow, title: "⚪ Allow" },
+            { const: approvalDeny, title: "🔴 Deny" },
+          ],
           default: approvalChoices[0],
         },
       },

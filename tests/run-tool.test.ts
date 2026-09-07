@@ -485,7 +485,11 @@ describe("handleRunTool (HITL)", () => {
             type: "string",
             title: "Approval",
             description: "Whether to run jirasearch.",
-            enum: ["Always Allow", "Allow", "Deny"],
+            oneOf: [
+              { const: "Always Allow", title: "🟢 Always Allow" },
+              { const: "Allow", title: "⚪ Allow" },
+              { const: "Deny", title: "🔴 Deny" },
+            ],
             default: "Always Allow",
           },
         },
@@ -920,10 +924,10 @@ describe("handleRunTool (HITL)", () => {
     );
 
     expect(elicit).toHaveBeenCalledTimes(1);
-    expect(elicit.mock.calls[0][0].requestedSchema.properties.approval.enum).toEqual([
-      "Always Allow",
-      "Allow",
-      "Deny",
+    expect(elicit.mock.calls[0][0].requestedSchema.properties.approval.oneOf).toEqual([
+      { const: "Always Allow", title: "🟢 Always Allow" },
+      { const: "Allow", title: "⚪ Allow" },
+      { const: "Deny", title: "🔴 Deny" },
     ]);
     expect(remote.callTool.mock.calls.map((c: any) => c[0].name)).toEqual([
       "get_tool_approval",

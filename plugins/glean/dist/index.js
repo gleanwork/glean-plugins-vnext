@@ -26617,7 +26617,11 @@ Always Allow is selected by default. Accepting with this selection saves approva
           type: "string",
           title: "Approval",
           description: `Whether to run ${toolName}.`,
-          enum: [...approvalChoices],
+          oneOf: [
+            { const: approvalAlwaysAllow, title: "\u{1F7E2} Always Allow" },
+            { const: approvalAllow, title: "\u26AA Allow" },
+            { const: approvalDeny, title: "\u{1F534} Deny" }
+          ],
           default: approvalChoices[0]
         }
       }
